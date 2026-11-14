@@ -32,8 +32,14 @@
 
 有线 USB iAP2 Worker 同样检查线程启动结果，失败时回滚 Session 和 MFi Provider。run/running 标志使用原子类型。调度前收到停止请求时，跳过链路建立发送；最终停止日志和 Provider 清理先于静止标志发布。独立 Worker 回归提取这些实际函数和真实链路类型，链接真实 SDK iAP2 Session 代码，仅模拟线程调度与 Provider 释放。
 
+无线 iAP2 服务通过原子生命周期 Gate 串行化 start/stop，争用和等待自身返回 `RTCP_ESTATE`。run 标志、Worker 句柄、运行状态及跨 Owner 的进度／计数器均使用原子类型。Bootstrap 和 AirPlay Tunnel 重置时逐字段存储诊断值，不以 `memset` 清零正在被读取的原子存储。状态读取不解引用 Session，只复制观察字段；这些字段可能反映相邻 Owner 步骤，并非事务性的一次 Session 状态转换。
+
+无线异步停止只发布请求代次和停止标志。请求代次避免蓝牙占用或状态重置期间到达的停止请求被后续启动覆盖。RFCOMM Owner 在现有有界 500 ms accept／100 ms receive 等待或正在执行的平台启动调用结束后观察停止，并自行断开 Transport。首次调度前收到停止请求时完全跳过 MFi 探测和蓝牙启用。在 MFi 探测、蓝牙启动、Session 创建或 accept 成功期间停止，均不能继续进入后续协议链路建立。同步停止最多等待三秒，超时后保留 Worker 资源所有权，并拒绝重启直到最终清理。只释放成功安装的 MFi Provider，避免安装失败时减少其他服务的 Provider 引用。Session 销毁、Provider 释放、蓝牙占用释放及最终日志全部先于静止状态发布。
+
 ## 已执行回归与剩余审查
 
 `make -C application/rt-thread/rtcarplay -j8 check` 使用真实 Linux 协议、熵源和模拟的 RT-Thread 调度、设备接口执行实际组合源码，覆盖有线、无线、显示元数据复制，IPv6 就绪状态，源数据清空后的快照保留，并发读取，写入方等待真实 pthread 读取者退出，拆除期间拒绝查询，以及已有的 32 轮生命周期测试。实际 iAP2 Provider 回归验证返回指针归属、源数据结束以及刷新失败时已保留字符串仍有效。组合回归还使用真实 Browser 解析实际 DNS SRV 响应，检查请求排队与应用状态、Browser 销毁后端点副本有效，以及销毁期间拒绝命令。两者均在 Host CI Job 中通过 ASan/UBSan 执行。
 
-这些测试不代表实机配对、重连或播放通过。剩余审查包括无线 iAP2 状态发布、USB 命令串行化和其他设备 Worker 生命周期。完整 V2.1 验收与后续 Launcher V2 工作仍未完成。
+`check-wireless-iap2-worker` 编译实际无线状态、回调、Owner、Tunnel 和 start/stop 函数，链接真实 SDK iAP2 Session，仅模拟蓝牙／调度／MFi 探测边界。覆盖创建／启动失败、生命周期争用、占用期间和调度前停止、probe/enable/Session 创建／accept 期间停止、Provider 安装失败时的所有权、等待自身、有界超时保留，以及带并发状态读取者的 32 轮重启／Tunnel 重置。ASan/UBSan 检查内存及未定义行为；这不是 ThreadSanitizer 结果，也不是线上 MFi 握手测试。
+
+这些测试不代表实机配对、重连或播放通过。剩余审查包括 USB 命令串行化和其他设备 Worker 生命周期。完整 V2.1 验收与后续 Launcher V2 工作仍未完成。
