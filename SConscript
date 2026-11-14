@@ -23,7 +23,8 @@ repo = os.path.normpath(repo)
 src = Glob('main.c')
 if GetDepend('RTCARPLAY_DEMO_LAUNCHER'):
     src += Glob('ui/*.c')
-group = DefineGroup('Applications', src, depend=[''], CPPPATH=[cwd],
+    src += Glob('app/*.c')
+group = DefineGroup('Applications', src, depend=[''], CPPPATH=[cwd, cwd + '/app'],
                       CPPDEFINES=['MBEDTLS_CHACHA20_C', 'MBEDTLS_CHACHAPOLY_C',
                                   'MBEDTLS_HKDF_C'])
 

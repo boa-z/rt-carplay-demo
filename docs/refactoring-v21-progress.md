@@ -4,7 +4,7 @@ This is an intermediate implementation record, not a final acceptance report. Th
 
 ## Starting revisions
 
-The clean SDK submodule started at `ae3716513bd79d335250e7c51ee9897c37703453`; cherryusb-ipheth started at `f4716f1457145ba2d4aab755193645e1e1aed11d`. Development uses rt-carplay main, cherryusb-ipheth main and this host's original poc/carplay-oss branch. Temporary branches created during this task have been removed locally and remotely. No pre-existing tracked edits were present. Original SDK sources were archived from Git into `/home/boa/carplay-v21-baseline/rt-carplay` for the pre-refactor Linux regression.
+The clean SDK submodule started at `ae3716513bd79d335250e7c51ee9897c37703453`; cherryusb-ipheth started at `f4716f1457145ba2d4aab755193645e1e1aed11d`. Current development uses rt-carplay main, cherryusb-ipheth main and the independent `boa-z/luban-lite-carplay` host's carplay-oss branch. No new development branch or PR is authorized. Original SDK sources were archived from Git into `/home/boa/carplay-v21-baseline/rt-carplay` for the pre-refactor Linux regression.
 
 The first SDK implementation is committed as `ab7e72e29a14943a76b7d9af8603a5e1a2eee387` on main, with author and committer boa-z <boa-z@outlook.com>. This supersedes its earlier commit with incorrect identity. IPHETH documentation is committed as `2c87b69fda0d2dbeeb9df5180dd10157791d7371` on main with the same identity. The parent gitlinks are updated after verifying the remote branches resolve to these SHAs. Existing PRs were manually closed by the user; no further PR is authorized. The user subsequently authorized timely pushes of verified changes on the existing development branches.
 
@@ -47,13 +47,15 @@ IPHETH now has ten complete English/Chinese document pairs, including both READM
 
 ## Remaining required work
 
+The application Connection Manager has now been extracted into `app/connection_manager.c`, with LVGL using request and snapshot APIs. Its actual-source regression and two compilation checks without LVGL headers pass. See [Application connection manager](connection-manager.md) for contracts and evidence. Simultaneous USB/wireless standby and Launcher V2 remain subsequent work. The RT-Thread wrapper now checks scheduling failure, serializes lifecycle/input entry and publishes completion after teardown; both SDK Host suites pass 58 tests. These updates do not complete the remaining ownership audit or physical validation.
+
 - Replace the low-level `airplay_rtsp_server_config_t` migration bridge with the final public host/media configuration and consolidate `include/rtcp/media.h` without dropping encoded-audio metadata.
-- Extract Connection Manager and pairing/file orchestration from the moved launcher; retain its tested mode switching, first-frame gating, diagnostics and local audio controls.
+- Validate the extracted Connection Manager in exact-revision GUI and Headless integration builds, retaining its tested mode switching, first-frame gating, diagnostics and local audio controls.
 - Complete RT-Thread legacy singleton/worker lifetime hardening; its old cross-thread diagnostic APIs are not covered by the portable Receiver owner-thread guarantee.
 - Move final board/backend ownership into Luban-Lite, register replaceable media/input/platform backends and move UI-layer policy out of the video sink. The transitional board code currently remains inside the SDK port.
 - Consolidate Kconfig symbol ownership and add the standalone generic RT-Thread Headless example. The D213 Headless profile is an integration build, not proof that every SDK adapter is generic RT-Thread.
 - Complete every maintained English/Chinese SDK document pair, reflow existing Markdown and add document/relative-link/language-pair checks to CI. The independent IPHETH documentation stage is complete locally; preserve research, performance, historical validation and licensing facts in subsequent changes.
-- Finish source review, reproducible reports and committed/fetchable cross-repository references. Do not create a PR or update a parent gitlink to an unpublished commit. The requested rt-carplay repository recreation still requires delete_repo scope on the boa-z GitHub credential; complete remote/local backups are preserved. Final history cleanup is authorized only after complete refactoring and validation.
+- Finish source review, reproducible reports and committed/fetchable cross-repository references. Do not create a PR or update a parent gitlink to an unpublished commit. Repository recreation to remove old closed PR records has not been performed; the earlier credential-scope limitation no longer applies. Refresh and verify backups before any authorized destructive operation. Final history cleanup is deferred until complete refactoring and validation.
 - Execute or explicitly retain NOT_RUN for physical USB/radio reconnect, pair persistence, failure rollback, first displayed frame/HMI restoration, device open/close, microphone, touch ownership and USB/IPHETH hardware lifecycle.
 
 The audio routing symptom, zero Audio SETUP streams and Direct/Mixer/negotiation investigations remain a separate follow-up task. This stage adds no Android Auto, CarLife or CarLink logic and changes no audio negotiation, decoder, jitter, mixer, resampling, microphone encryption or AEC policy.
