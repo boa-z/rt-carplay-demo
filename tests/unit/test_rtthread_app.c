@@ -70,6 +70,8 @@ static void check_queries_rejected(void)
     carplay_app_debug_counters(&frames, &sent, &failed);
     assert(!frames && !sent && !failed);
     assert(cmd_carplay_status(0, NULL) == RTCP_ESTATE);
+    char *ctrl[] = {"carplay_ctrl", "status"};
+    assert(cmd_carplay_ctrl(2, ctrl) == RTCP_ESTATE);
 }
 
 
@@ -98,6 +100,8 @@ int rt_mutex_take(rt_mutex_t mutex, int timeout)
         assert(carplay_app_request_siri() == RTCP_ESTATE);
         char *args[] = {"carplay_ab", "single"};
         assert(cmd_carplay_ab(2, args) == RTCP_ESTATE);
+        char *ctrl[] = {"carplay_ctrl", "off"};
+        assert(cmd_carplay_ctrl(2, ctrl) == RTCP_ESTATE);
     }
     mutex->locked = 1; return RT_EOK;
 }
@@ -182,6 +186,68 @@ static void *claim_bt(void *context)
     return NULL;
 }
 
+/* Actual DNS SRV packet, using the sender address fallback. This exercises
+ * the real Browser parser and copied endpoint lifetime, not a success stub. */
+static void test_control_commands(void)
+{
+    static const uint8_t reply[] = {
+        0,0,0x84,0, 0,0,0,1, 0,0,0,0,
+        5,'p','h','o','n','e', 13,'_','c','a','r','p','l','a','y','-','c','t','r','l',
+        4,'_','t','c','p', 5,'l','o','c','a','l',0,
+        0,33,0,1, 0,0,0,120, 0,20,
+        0,0,0,0, 0xc8,0x22, 6,'i','p','h','o','n','e',5,'l','o','c','a','l',0
+    };
+    const uint8_t peer[] = {192,168,43,2};
+    uint32_t now = (uint32_t)s_app.os.now_ms();
+    assert(s_app.browser == NULL); /* Wired configuration. */
+    char *on[] = {"carplay_ctrl", "on"};
+    char *off[] = {"carplay_ctrl", "off"};
+    char *connect[] = {"carplay_ctrl", "connect"};
+    char *status_args[] = {"carplay_ctrl", "status"};
+    char *invalid[] = {"carplay_ctrl", "invalid"};
+    assert(cmd_carplay_ctrl(2, status_args) == RTCP_OK);
+    assert(cmd_carplay_ctrl(2, on) == RTCP_ESTATE);
+    assert(cmd_carplay_ctrl(2, invalid) == RTCP_EINVAL);
+    assert(cmd_carplay_ctrl(3, status_args) == RTCP_EINVAL);
+    s_app.browser = mdns_browser_create(CARPLAY_CTRL_SERVICE);
+    assert(s_app.browser);
+    assert(mdns_browser_handle_packet(s_app.browser, reply, sizeof(reply), peer, now) > 0);
+    publish_control_status(&s_app, now);
+    assert(s_app.ctrl_status.available && s_app.ctrl_status.has_endpoint);
+    assert(!strcmp(s_app.ctrl_status.endpoint.instance, "phone._carplay-ctrl._tcp.local"));
+    assert(s_app.ctrl_status.endpoint.port == 51234);
+    assert(cmd_carplay_ctrl(2, on) == RTCP_OK);
+    assert(!s_app.ctrl_enabled && s_app.ctrl_enable_pending); /* Queue only. */
+    drain_receiver_commands(&s_app);
+    assert(s_app.ctrl_enabled && !s_app.ctrl_enable_pending);
+    publish_control_status(&s_app, now);
+    assert(s_app.ctrl_status.enabled);
+    assert(cmd_carplay_ctrl(2, off) == RTCP_OK);
+    assert(s_app.ctrl_enabled); /* Still applied, with a pending off request. */
+    assert(cmd_carplay_ctrl(2, status_args) == RTCP_OK);
+    assert(s_app.ctrl_enable_pending && !s_app.ctrl_requested_enabled);
+    drain_receiver_commands(&s_app);
+    assert(!s_app.ctrl_enabled);
+    s_app.ctrl_last_attempt_ms = now;
+    assert(cmd_carplay_ctrl(2, connect) == RTCP_OK);
+    assert(s_app.ctrl_last_attempt_ms == now && s_app.ctrl_connect_pending);
+    uint32_t before = (uint32_t)s_app.os.now_ms();
+    drain_receiver_commands(&s_app);
+    uint32_t after = (uint32_t)s_app.os.now_ms();
+    assert(!s_app.ctrl_connect_pending);
+    uint32_t requested_at = s_app.ctrl_last_attempt_ms + CARPLAY_CTRL_RETRY_MS;
+    assert((uint32_t)(requested_at - before) <= (uint32_t)(after - before));
+    assert(!s_app.ctrl_enabled); /* Connect does not implicitly enable. */
+    control_status_t copy = s_app.ctrl_status;
+    mdns_browser_destroy(s_app.browser);
+    s_app.browser = NULL;
+    assert(cmd_carplay_ctrl(2, status_args) == RTCP_OK); /* Copied, no Browser dereference. */
+    assert(!memcmp(&copy, &s_app.ctrl_status, sizeof(copy)));
+    publish_control_status(&s_app, now);
+    assert(!s_app.ctrl_status.available && !s_app.ctrl_status.has_endpoint);
+    assert(copy.has_endpoint && copy.endpoint.ipv4[3] == 2);
+}
+
 int main(void)
 {
     char directory[] = "/tmp/rtcp-rtthread-lifecycle-XXXXXX";
@@ -228,6 +294,7 @@ int main(void)
         assert(!strcmp(wireless.ssid, s_app.ssid) && wireless.ssid != s_app.ssid);
         assert(!strcmp(wireless.public_key_hex, wired.public_key_hex));
         s_app.wired = true;
+        if (cycle == 0) test_control_commands();
         check_input_reentry = true;
         assert(carplay_app_touch(RTCP_TOUCH_DOWN, 0, 10, 20) == RTCP_OK);
         assert(carplay_app_request_siri() == RTCP_OK);

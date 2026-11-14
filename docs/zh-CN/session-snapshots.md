@@ -14,6 +14,12 @@
 
 调试计数查询在访问会话互斥锁期间持有读取引用；HID 计数及加密事件就绪状态使用原子变量。Shell 状态命令共用已有生命周期保护，并在队列锁下复制队列计数。配对持久化通过独立于会话重置的原子变量发布实际写入结果，不会将查询竞争报告成配对存储失败。
 
+## CarPlay Control 命令
+
+轮询 Worker 拥有 mDNS Browser、端点选择和 Control 连接计数器。`carplay_ctrl on|off|connect` 只在会话互斥锁和生命周期门控保护下排队请求，Worker 在下一次 Control tick 之前应用请求。`connect` 保持既有重试间隔计算，不会隐式启用已禁用的 Browser。多个待处理的开关请求合并为最新期望值；重复连接请求合并为一次重试请求。
+
+`carplay_ctrl status` 打印由所有者发布的复制快照，包含端点字符串，并分别报告待处理请求与已应用状态。Shell 不调用 Browser API。互斥锁忙时发布可能延迟一个轮询周期；网络 I/O 不持有该互斥锁。Receiver 未运行或正在退出，或没有可用 Browser 时执行 Control 控制命令，返回 `RTCP_ESTATE`；互斥锁争用返回 `RTCP_ETIMEDOUT`；无效参数返回 `RTCP_EINVAL`。运行中的有线 Receiver 可以通过 `status` 报告 Control 不可用。
+
 ## iAP2 回调缓冲区
 
 无线与 USB iAP2 链路各自保存端点结构。Wi-Fi、AirPlay Provider 回调返回指向链路持久存储的指针，不返回临时栈快照中的指针。查询成功时更新链路副本；查询失败时保留上次有效副本，包括会话身份配置仍持有的指针。链路 Owner 在重置链路存储前仍须结束对应 iAP2 会话。
@@ -22,6 +28,6 @@
 
 ## 已执行回归与剩余审查
 
-`make -C application/rt-thread/rtcarplay -j8 check` 使用真实 Linux 协议、熵源和模拟的 RT-Thread 调度、设备接口执行实际组合源码，覆盖有线、无线、显示元数据复制，IPv6 就绪状态，源数据清空后的快照保留，并发读取，写入方等待真实 pthread 读取者退出，拆除期间拒绝查询，以及已有的 32 轮生命周期测试。实际 iAP2 Provider 回归验证返回指针归属、源数据结束以及刷新失败时已保留字符串仍有效。两者均在 Host CI Job 中通过 ASan/UBSan 执行。
+`make -C application/rt-thread/rtcarplay -j8 check` 使用真实 Linux 协议、熵源和模拟的 RT-Thread 调度、设备接口执行实际组合源码，覆盖有线、无线、显示元数据复制，IPv6 就绪状态，源数据清空后的快照保留，并发读取，写入方等待真实 pthread 读取者退出，拆除期间拒绝查询，以及已有的 32 轮生命周期测试。实际 iAP2 Provider 回归验证返回指针归属、源数据结束以及刷新失败时已保留字符串仍有效。组合回归还使用真实 Browser 解析实际 DNS SRV 响应，检查请求排队与应用状态、Browser 销毁后端点副本有效，以及销毁期间拒绝命令。两者均在 Host CI Job 中通过 ASan/UBSan 执行。
 
-这些测试不代表实机配对、重连或播放通过。剩余审查包括旧 CarPlay Control Shell 与 Browser 的所有权，以及蓝牙、iAP2、设备 Worker 生命周期。完整 V2.1 验收与后续 Launcher V2 工作仍未完成。
+这些测试不代表实机配对、重连或播放通过。剩余审查包括蓝牙、iAP2、设备 Worker 生命周期。完整 V2.1 验收与后续 Launcher V2 工作仍未完成。

@@ -157,6 +157,17 @@ typedef struct {
     uint16_t y;
 } touch_event_t;
 
+/* Published by the poll owner; no Browser-owned pointers cross threads. */
+typedef struct {
+    bool available, enabled, has_endpoint, peer_valid;
+    uint64_t device_id;
+    unsigned endpoints, attempts, responses;
+    int last_status;
+    unsigned queries, tx_errors, packets, updates;
+    uint8_t peer_ipv4[4];
+    mdns_browser_endpoint_t endpoint;
+} control_status_t;
+
 typedef struct {
     struct rtcp_os os;
     airplay_ed25519_keypair_t keypair;
@@ -204,7 +215,7 @@ typedef struct {
     atomic_bool airplay_connected;
 
     /* CarPlay Control browse/connect state (owned by the poll thread). */
-    volatile bool ctrl_enabled;
+    bool ctrl_enabled;
     uint64_t ctrl_device_id;
     uint32_t ctrl_last_attempt_ms;
     unsigned ctrl_attempts;
@@ -219,6 +230,9 @@ typedef struct {
     unsigned browse_packets;
     unsigned browse_updates;
     char ctrl_last_endpoint[MDNS_MAX_NAME];
+    /* Requests and copied status are protected by lock. */
+    bool ctrl_enable_pending, ctrl_requested_enabled, ctrl_connect_pending;
+    control_status_t ctrl_status;
 
     carplay_app_screen_cb_t on_screen;
     void *screen_context;
@@ -842,12 +856,50 @@ static void carplay_ctrl_tick(app_state_t *app, uint32_t now_ms)
     }
 }
 
+/* Browser queries and endpoint selection stay on the poll owner. A busy
+ * reader delays publication until the next tick; network I/O never holds lock. */
+static void publish_control_status(app_state_t *app, uint32_t now_ms)
+{
+    control_status_t status = {0};
+    status.available = app->browser != NULL;
+    status.enabled = app->ctrl_enabled;
+    status.device_id = app->ctrl_device_id;
+    status.endpoints = (unsigned)mdns_browser_endpoint_count(app->browser);
+    status.attempts = app->ctrl_attempts;
+    status.responses = app->ctrl_responses;
+    status.last_status = app->ctrl_last_status;
+    status.queries = app->browse_queries;
+    status.tx_errors = app->browse_tx_errors;
+    status.packets = app->browse_packets;
+    status.updates = app->browse_updates;
+    status.peer_valid = app->ctrl_peer_valid;
+    memcpy(status.peer_ipv4, app->ctrl_peer_ipv4, sizeof(status.peer_ipv4));
+    const mdns_browser_endpoint_t *endpoint = app->browser != NULL
+        ? mdns_browser_best(app->browser, now_ms) : NULL;
+    if (endpoint != NULL) {
+        status.endpoint = *endpoint;
+        status.has_endpoint = true;
+    }
+    if (rt_mutex_take(app->lock, RT_WAITING_NO) == RT_EOK) {
+        app->ctrl_status = status;
+        (void)rt_mutex_release(app->lock);
+    }
+}
+
 /* Only the poll owner touches the Receiver. The shell publishes requests
  * while holding the lifecycle gate and this mutex; no server pointer escapes. */
 static void drain_receiver_commands(app_state_t *app)
 {
     bool siri = false;
     if (rt_mutex_take(app->lock, RT_WAITING_NO) == RT_EOK) {
+        if (app->ctrl_enable_pending) {
+            app->ctrl_enabled = app->browser != NULL && app->ctrl_requested_enabled;
+            app->ctrl_enable_pending = false;
+        }
+        if (app->ctrl_connect_pending) {
+            app->ctrl_last_attempt_ms = (uint32_t)app->os.now_ms() - CARPLAY_CTRL_RETRY_MS;
+            app->ctrl_connect_pending = false;
+        }
         siri = app->siri_pending;
         app->siri_pending = false;
         if (app->cipher_pending &&
@@ -877,8 +929,9 @@ static void poll_thread(void *argument)
                 APP_LOG("mDNS poll failed rc=%d", mdns_result);
             }
         }
-        carplay_ctrl_tick(app, (uint32_t)app->os.now_ms());
         drain_receiver_commands(app);
+        carplay_ctrl_tick(app, (uint32_t)app->os.now_ms());
+        publish_control_status(app, (uint32_t)app->os.now_ms());
         /* In wired mode wait for socket readiness, not a fixed sleep before
          * each recv. Screen headers and bodies need separate readable polls;
          * pacing every fragment by 10 ms caps throughput and builds latency. */
@@ -1418,6 +1471,7 @@ static int carplay_app_start_owned(const carplay_app_config_t *config)
         return RTCP_ENOMEM;
     }
 
+    publish_control_status(app, (uint32_t)app->os.now_ms());
     s_receiver_stop = false;
     s_receiver_running = true;
     app->thread = rt_thread_create("carplay", poll_thread, app,
@@ -2021,63 +2075,80 @@ static int cmd_carplay_bt(int argc, char **argv)
 }
 #endif /* RTCARPLAY_BT */
 
+/* Caller holds lifecycle gate; the poll owner alone accesses live state. */
+static int control_request_owned(const char *sub, control_status_t *status,
+                                  bool *enable_pending, bool *connect_pending,
+                                  bool *requested_enabled)
+{
+    if (!s_receiver_running || s_receiver_shutting_down || s_app.lock == NULL)
+        return RTCP_ESTATE;
+    if (rt_mutex_take(s_app.lock, RT_WAITING_NO) != RT_EOK)
+        return RTCP_ETIMEDOUT;
+    int result = RTCP_OK;
+    if (strcmp(sub, "status") != 0) {
+        if (!s_app.ctrl_status.available) {
+            result = RTCP_ESTATE;
+        } else if (strcmp(sub, "connect") == 0) {
+            s_app.ctrl_connect_pending = true;
+        } else {
+            s_app.ctrl_requested_enabled = strcmp(sub, "on") == 0;
+            s_app.ctrl_enable_pending = true;
+        }
+    }
+    *status = s_app.ctrl_status;
+    *enable_pending = s_app.ctrl_enable_pending;
+    *connect_pending = s_app.ctrl_connect_pending;
+    *requested_enabled = s_app.ctrl_requested_enabled;
+    (void)rt_mutex_release(s_app.lock);
+    return result;
+}
+
 static int cmd_carplay_ctrl(int argc, char **argv)
 {
     const char *sub = argc >= 2 ? argv[1] : "status";
-    uint32_t now_ms = s_app.os.now_ms != NULL
-                          ? (uint32_t)s_app.os.now_ms()
-                          : 0U;
-    if (strcmp(sub, "on") == 0) {
-        s_app.ctrl_enabled = s_app.browser != NULL;
-        rt_kprintf("carplay_ctrl: %s\n",
-                   s_app.ctrl_enabled ? "enabled"
-                                      : "unavailable (receiver not running)");
-        return 0;
+    if (argc < 1 || argc > 2 ||
+        (strcmp(sub, "on") != 0 && strcmp(sub, "off") != 0 &&
+         strcmp(sub, "connect") != 0 && strcmp(sub, "status") != 0)) {
+        rt_kprintf("usage: carplay_ctrl on|off|connect|status\n");
+        return RTCP_EINVAL;
     }
-    if (strcmp(sub, "off") == 0) {
-        s_app.ctrl_enabled = false;
-        rt_kprintf("carplay_ctrl: disabled\n");
-        return 0;
+    if (atomic_flag_test_and_set_explicit(&s_lifecycle_call, memory_order_acquire))
+        return RTCP_ESTATE;
+    control_status_t status;
+    bool enable_pending, connect_pending, requested_enabled;
+    int result = control_request_owned(sub, &status, &enable_pending,
+                                        &connect_pending, &requested_enabled);
+    atomic_flag_clear_explicit(&s_lifecycle_call, memory_order_release);
+    if (result != RTCP_OK) {
+        rt_kprintf("carplay_ctrl: unavailable rc=%d\n", result);
+        return result;
     }
-    if (strcmp(sub, "connect") == 0) {
-        /* Force the next poll-thread tick to attempt the connect-out. */
-        s_app.ctrl_last_attempt_ms = now_ms - CARPLAY_CTRL_RETRY_MS;
-        rt_kprintf("carplay_ctrl: connect requested\n");
-        return 0;
+    if (strcmp(sub, "status") != 0) {
+        rt_kprintf("carplay_ctrl: %s requested (queued)\n", sub);
+        return RTCP_OK;
     }
-    if (strcmp(sub, "status") == 0) {
-        const mdns_browser_endpoint_t *endpoint =
-            s_app.browser != NULL
-                ? mdns_browser_best(s_app.browser, now_ms)
-                : NULL;
-        rt_kprintf("carplay_ctrl: %s, %u endpoint(s), id %llu, attempts %u, "
-                   "responses %u, last status %d\n",
-                   s_app.ctrl_enabled ? "enabled" : "disabled",
-                   (unsigned)mdns_browser_endpoint_count(s_app.browser),
-                   (unsigned long long)s_app.ctrl_device_id,
-                   s_app.ctrl_attempts, s_app.ctrl_responses,
-                   s_app.ctrl_last_status);
-        rt_kprintf("  browse: queries %u, tx errors %u, packets %u, "
-                   "updates %u\n",
-                   s_app.browse_queries, s_app.browse_tx_errors,
-                   s_app.browse_packets, s_app.browse_updates);
-        if (s_app.ctrl_peer_valid) {
-            rt_kprintf("  unicast peer %u.%u.%u.%u\n",
-                       s_app.ctrl_peer_ipv4[0], s_app.ctrl_peer_ipv4[1],
-                       s_app.ctrl_peer_ipv4[2], s_app.ctrl_peer_ipv4[3]);
-        } else {
-            rt_kprintf("  unicast peer: none\n");
-        }
-        if (endpoint != NULL) {
-            rt_kprintf("  endpoint %u.%u.%u.%u:%u instance=%s\n",
-                       endpoint->ipv4[0], endpoint->ipv4[1],
-                       endpoint->ipv4[2], endpoint->ipv4[3],
-                       (unsigned)endpoint->port, endpoint->instance);
-        }
-        return 0;
+    rt_kprintf("carplay_ctrl: %s, %u endpoint(s), id %llu, attempts %u, "
+               "responses %u, last status %d\n",
+               !status.available ? "unavailable" : status.enabled ? "enabled" : "disabled",
+               status.endpoints, (unsigned long long)status.device_id,
+               status.attempts, status.responses, status.last_status);
+    rt_kprintf("  pending: enable=%u requested=%u connect=%u\n",
+               (unsigned)enable_pending, (unsigned)requested_enabled, (unsigned)connect_pending);
+    rt_kprintf("  browse: queries %u, tx errors %u, packets %u, updates %u\n",
+               status.queries, status.tx_errors, status.packets, status.updates);
+    if (status.peer_valid) {
+        rt_kprintf("  unicast peer %u.%u.%u.%u\n", status.peer_ipv4[0],
+                   status.peer_ipv4[1], status.peer_ipv4[2], status.peer_ipv4[3]);
+    } else {
+        rt_kprintf("  unicast peer: none\n");
     }
-    rt_kprintf("usage: carplay_ctrl on|off|connect|status\n");
-    return 0;
+    if (status.has_endpoint) {
+        const mdns_browser_endpoint_t *endpoint = &status.endpoint;
+        rt_kprintf("  endpoint %u.%u.%u.%u:%u instance=%s\n", endpoint->ipv4[0],
+                   endpoint->ipv4[1], endpoint->ipv4[2], endpoint->ipv4[3],
+                   (unsigned)endpoint->port, endpoint->instance);
+    }
+    return RTCP_OK;
 }
 
 /* Wireless A/B knob for the auth-setup close: Apple's transport chunks a

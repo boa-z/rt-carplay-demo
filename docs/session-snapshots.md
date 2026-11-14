@@ -14,6 +14,12 @@ Readers enter a shared atomic count outside the resettable session. They can coe
 
 Debug counter queries hold a reader reference while accessing the session mutex; HID counters and encrypted-event readiness use atomics. The shell status command shares the existing lifecycle gate and copies queue counters under the queue mutex. Pairing persistence publishes its actual write result in a separate atomic that survives session reset. Query contention is never reported as a pairing-storage failure.
 
+## CarPlay Control commands
+
+The poll worker owns the mDNS Browser, endpoint selection and Control connection counters. `carplay_ctrl on|off|connect` only queues requests under the session mutex and lifecycle gate. The worker applies them before its next Control tick. `connect` preserves the existing retry interval calculation and does not implicitly enable a disabled browser. Multiple pending enable requests coalesce to the latest desired value; repeated connect requests coalesce to one retry request.
+
+`carplay_ctrl status` prints a copied owner-published snapshot, including the endpoint strings, and reports pending requests separately from the applied state. It never calls Browser APIs from the shell. Publication may lag one poll tick when the mutex is busy; network I/O does not hold that mutex. An inactive/retiring receiver or a Control command without an available browser returns `RTCP_ESTATE`; mutex contention returns `RTCP_ETIMEDOUT`, and invalid arguments return `RTCP_EINVAL`. A running wired receiver can report Control as unavailable through `status`.
+
 ## iAP2 callback buffers
 
 Wireless and USB iAP2 links keep their own endpoint structure. Wi-Fi and AirPlay provider callbacks return pointers into that persistent link storage, not a temporary stack snapshot. A successful query updates the link copy. A failed query leaves the last valid copy intact, including pointers retained by the session identity configuration. The link owner must still retire its iAP2 session before resetting that link storage.
@@ -22,6 +28,6 @@ This changes ownership only. Capability advertisement, Pair-Setup/Pair-Verify, i
 
 ## Executed regressions and remaining audit
 
-`make -C application/rt-thread/rtcarplay -j8 check` runs the actual composition against real Linux protocol/entropy ports and modeled RT-Thread scheduling/device APIs. It checks copied wired/wireless/display metadata, IPv6 readiness, retained snapshots after source clearing, concurrent readers, writer waiting for a real pthread reader, rejection during teardown and the existing 32 lifecycle cycles. The actual iAP2 provider regression verifies returned pointer ownership, source retirement and failed refresh without invalidating retained strings. Both run under ASan/UBSan in the host CI job.
+`make -C application/rt-thread/rtcarplay -j8 check` runs the actual composition against real Linux protocol/entropy ports and modeled RT-Thread scheduling/device APIs. It checks copied wired/wireless/display metadata, IPv6 readiness, retained snapshots after source clearing, concurrent readers, writer waiting for a real pthread reader, rejection during teardown and the existing 32 lifecycle cycles. The actual iAP2 provider regression verifies returned pointer ownership, source retirement and failed refresh without invalidating retained strings. The composition regression also parses an actual DNS SRV response with the real Browser, checks queued versus applied Control commands, copies endpoint data across Browser destruction, and verifies command rejection during teardown. Both run under ASan/UBSan in the host CI job.
 
-These tests do not establish physical pairing, reconnect or playback. The remaining audit includes the legacy CarPlay Control shell/browser ownership and Bluetooth/iAP2/device worker lifetimes. Complete V2.1 acceptance and subsequent Launcher V2 work remain open.
+These tests do not establish physical pairing, reconnect or playback. The remaining audit includes Bluetooth/iAP2/device worker lifetimes. Complete V2.1 acceptance and subsequent Launcher V2 work remain open.
