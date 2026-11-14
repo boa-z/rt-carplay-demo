@@ -7,15 +7,34 @@
 #include <string.h>
 #include "rtcp_linux.h"
 #include "mbedtls/chachapoly.h"
+#include "airplay_audio_sender.h"
+static int test_sender_create(const airplay_audio_sender_config_t *, airplay_audio_sender_t **);
+#define airplay_audio_sender_create test_sender_create
 #include "../../platform/audio_input_lubanlite.c"
+#undef airplay_audio_sender_create
 extern int host_rtthread_fail_start;
+extern atomic_bool host_rtthread_hold_entry;
 void host_rtthread_join(void);
 struct rtcp_audio_capture { unsigned phase; };
 static struct host_audio_device mic_device;
 static atomic_uint source_opens,source_closes;
+static bool stop_during_probe;
+static atomic_bool hold_capture, capture_entered, stop_on_open, self_stop;
+static atomic_int self_result;
+static int test_sender_create(const airplay_audio_sender_config_t *config, airplay_audio_sender_t **out) {
+ int result=airplay_audio_sender_create(config,out);
+ if(stop_during_probe) {stop_during_probe=false;carplay_audio_input_request_stop();}
+ return result;
+}
 rt_device_t rt_device_find(const char *name) { assert(!strcmp(name,"dmic0"));return &mic_device; }
-int rtcp_audio_capture_open(rtcp_audio_capture_t **out) { *out=calloc(1,sizeof(**out));++source_opens;return 0; }
+int rtcp_audio_capture_open(rtcp_audio_capture_t **out) {
+ *out=calloc(1,sizeof(**out));++source_opens;
+ if(atomic_exchange(&self_stop,false))self_result=carplay_audio_input_stop();
+ if(atomic_exchange(&stop_on_open,false))carplay_audio_input_request_stop();
+ return 0;
+}
 int rtcp_audio_capture_read(rtcp_audio_capture_t *c,int16_t *pcm,size_t frames) {
+ if(atomic_load(&hold_capture)) {capture_entered=true;while(atomic_load(&hold_capture))rt_thread_mdelay(1);}
  assert(frames==480);for(unsigned i=0;i<480;++i) {int16_t s=(int16_t)((c->phase++%48)*100-2400);pcm[2*i]=pcm[2*i+1]=s;}
  rt_thread_mdelay(10);return 480;
 }
@@ -40,16 +59,63 @@ static void run_input(uint64_t bits)
   if(bits==0x4000)assert(n==996); /* 10 ms at 48k mono */
  }
  carplay_audio_input_mute(true);carplay_audio_input_request_stop();
- carplay_audio_input_stop();host_rtthread_join();
+ assert(carplay_audio_input_stop()==RTCP_OK);host_rtthread_join();
  assert(!atomic_load(&input.alive));
  mbedtls_chachapoly_free(&cipher);rtcp_net_linux.close(fd);
 }
 int main(void)
 {
+ self_stop=true;self_result=RTCP_OK;
  run_input(0x4000);
+ assert(self_result==RTCP_ESTATE);
 #ifdef RTCP_AUDIO_CODECS
  run_input(0x20000000);
 #endif
+ airplay_audio_input_config_t config={.net=&rtcp_net_linux};
+ int fd=rtcp_net_linux.udp_open(RTCP_AF_INET,0,false);assert(fd>=0);
+ config.peer=(rtcp_addr_t){.family=RTCP_AF_INET,.addr={127,0,0,1},.port=rtcp_net_linux.local_port(fd)};
+ assert(rtcp_audio_format_parse(0x4000,&config.sender.format));
+ memset(config.sender.input_key,0x55,32);
+ host_rtthread_fail_start=1;
+ assert(!carplay_audio_input_start(&config));
+ assert(!input.alive && !input.config.net);host_rtthread_fail_start=0;
+ assert(!atomic_flag_test_and_set(&input_lifecycle));
+ assert(!carplay_audio_input_start(&config));
+ assert(carplay_audio_input_stop()==RTCP_ESTATE);
+ atomic_flag_clear(&input_lifecycle);
+ unsigned before=source_opens;
+ stop_during_probe=true;
+ assert(carplay_audio_input_start(&config));
+ assert(atomic_load(&input.stop));
+ for(unsigned i=0;i<3000 && input.alive;++i)rt_thread_mdelay(1);
+ assert(!input.alive);
+ assert(carplay_audio_input_stop()==RTCP_OK);host_rtthread_join();
+ assert(source_opens==before); /* request during validation survives reset */
+ stop_on_open=true;
+ assert(carplay_audio_input_start(&config));
+ for(unsigned i=0;i<3000 && input.alive;++i)rt_thread_mdelay(1);
+ assert(!input.alive);host_rtthread_join();
+ assert(source_opens==before+1 && source_opens==source_closes);
+ assert(carplay_audio_input_stop()==RTCP_OK);
+
+ hold_capture=true;capture_entered=false;
+ assert(carplay_audio_input_start(&config));
+ for(unsigned i=0;i<3000 && !capture_entered;++i)rt_thread_mdelay(1);
+ assert(capture_entered);
+ assert(carplay_audio_input_stop()==RTCP_ETIMEDOUT);
+ assert(input.alive && input.config.net==config.net && source_opens==source_closes+1);
+ assert(!carplay_audio_input_start(&config));
+ hold_capture=false;host_rtthread_join();
+ assert(carplay_audio_input_stop()==RTCP_OK && !input.config.net);
+ for(unsigned cycle=0;cycle<32;++cycle) {
+  before=source_opens;host_rtthread_hold_entry=true;
+  assert(carplay_audio_input_start(&config));
+  carplay_audio_input_request_stop();host_rtthread_hold_entry=false;
+  assert(carplay_audio_input_stop()==RTCP_OK);host_rtthread_join();
+  assert(source_opens==before && !input.alive && !input.config.net);
+ }
+ rtcp_net_linux.close(fd);
  assert(source_opens==source_closes);
  puts("actual microphone worker: virtual capture -> voice DSP -> PCM/Opus -> authenticated UDP, stop/restart passed");
+ puts("microphone lifecycle: rollback, contention, self-join, startup cancellation, timeout ownership and 32 pre-scheduling stops passed");
 }

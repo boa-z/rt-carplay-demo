@@ -687,7 +687,7 @@ static void shutdown_stack(app_state_t *app)
     /* After the server: no PCM callback can run once it is stopped. */
     if (app->audio_started) {
 #if defined(RTCARPLAY_MICROPHONE)
-        carplay_audio_input_stop();
+        while (carplay_audio_input_stop() != RTCP_OK) rt_thread_mdelay(10);
 #endif
         while (carplay_audio_sink_stop() != RTCP_OK) rt_thread_mdelay(10);
         app->audio_started = false;

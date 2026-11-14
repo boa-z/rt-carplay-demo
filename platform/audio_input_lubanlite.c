@@ -17,6 +17,8 @@ typedef struct {
     rt_thread_t thread;
 } input_t;
 static input_t input;
+static atomic_flag input_lifecycle = ATOMIC_FLAG_INIT;
+static atomic_uint input_stop_generation;
 bool carplay_audio_input_available(void)
 {
     rt_device_t d=rt_device_find("dmic0");
@@ -59,12 +61,17 @@ static void input_thread(void *arg)
     airplay_audio_sender_t *sender=NULL;
     rtcp_audio_voice_t *voice=NULL;
     int fd=-1;
-    int rc=rtcp_audio_capture_open(&capture);
+    int rc=RTCP_OK;
+    if(atomic_load(&in->stop))goto done;
+    rc=rtcp_audio_capture_open(&capture);
     if(rc!=RTCP_OK)goto done;
+    if(atomic_load(&in->stop))goto done;
     rc=airplay_audio_sender_create(&in->config.sender,&sender);
     if(rc!=RTCP_OK)goto done;
+    if(atomic_load(&in->stop))goto done;
     fd=in->config.net->udp_open(in->config.peer.family,0,false);
     if(fd<0) {rc=RTCP_EIO;goto done;}
+    if(atomic_load(&in->stop))goto done;
 #if defined(RTCP_AUDIO_CODECS) || defined(LPKG_RT_CARPLAY_AUDIO_CODECS)
     voice=rtcp_audio_voice_create(true,true,
 #if defined(RTCARPLAY_MIC_AEC)
@@ -130,12 +137,13 @@ done:
     mbedtls_platform_zeroize(&in->config,sizeof(in->config));
     atomic_store(&in->alive,false);
 }
-bool carplay_audio_input_start(const airplay_audio_input_config_t *config)
+static bool input_start_owned(const airplay_audio_input_config_t *config,
+                              unsigned stop_generation)
 {
     if(!config || !config->net || !config->net->udp_open || !config->net->udp_sendto || !config->net->close) return false;
     /* Busy replacement is rejected without interrupting an existing call. */
     if (atomic_load(&input.alive)) return false;
-    if(atomic_load(&input.alive) || !carplay_audio_input_available())return false;
+    if(!carplay_audio_input_available())return false;
     /* Validate packet size/codec before accepting a SETUP; the worker owns its
      * own encoder and device after startup. */
     airplay_audio_sender_t *probe=NULL;
@@ -150,6 +158,8 @@ bool carplay_audio_input_start(const airplay_audio_input_config_t *config)
 #endif
     input.config=*config;
     atomic_store(&input.stop,false);atomic_store(&input.alive,true);
+    if(stop_generation!=atomic_load(&input_stop_generation))
+        atomic_store(&input.stop,true);
     atomic_store(&input.packets,0);atomic_store(&input.errors,0);atomic_store(&input.samples,0);
     input.thread=rt_thread_create("carplay-mic",input_thread,&input,64*1024,17,10);
     if(!input.thread || rt_thread_startup(input.thread)!=RT_EOK) {
@@ -159,12 +169,29 @@ bool carplay_audio_input_start(const airplay_audio_input_config_t *config)
     }
     return true;
 }
-void carplay_audio_input_request_stop(void) { atomic_store(&input.stop,true); }
-void carplay_audio_input_stop(void)
+bool carplay_audio_input_start(const airplay_audio_input_config_t *config)
 {
+    if(atomic_flag_test_and_set(&input_lifecycle))return false;
+    unsigned generation=atomic_load(&input_stop_generation);
+    bool result=input_start_owned(config,generation);
+    atomic_flag_clear(&input_lifecycle);return result;
+}
+void carplay_audio_input_request_stop(void)
+{
+    atomic_fetch_add(&input_stop_generation,1U);
     atomic_store(&input.stop,true);
+}
+int carplay_audio_input_stop(void)
+{
+    if(atomic_flag_test_and_set(&input_lifecycle))return RTCP_ESTATE;
+    if(atomic_load(&input.alive) && input.thread==rt_thread_self()) {
+        atomic_flag_clear(&input_lifecycle);return RTCP_ESTATE;
+    }
+    carplay_audio_input_request_stop();
     for(unsigned wait=0;atomic_load(&input.alive) && wait<500;++wait)rt_thread_mdelay(10);
-    if(atomic_load(&input.alive))rt_kprintf("[carplay-mic] worker busy; resources quarantined\n");
+    int result=atomic_load(&input.alive)?RTCP_ETIMEDOUT:RTCP_OK;
+    if(result!=RTCP_OK)rt_kprintf("[carplay-mic] worker busy; ownership retained\n");
+    atomic_flag_clear(&input_lifecycle);return result;
 }
 void carplay_audio_input_mute(bool mute){atomic_store(&input.mute,mute);}
 void carplay_audio_input_status(void)
