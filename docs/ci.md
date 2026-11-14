@@ -26,7 +26,7 @@ bash .ci/build-firmware.sh gui
 bash .ci/build-firmware.sh headless
 ```
 
-Install `build-essential`, `patch`, `dosfstools`, `mtools`, `device-tree-compiler` and `u-boot-tools` on Ubuntu. The build script first compiles `d21x_demo128-nand-carplay_baremetal_bootloader_defconfig` from this repository. It verifies that the packaged Bootloader is byte-identical to the newly built binary. It then applies the selected RT-Thread defconfig and produces the complete ArtInChip `.img` container. It does not rely on a prebuilt Bootloader or a second SDK checkout.
+Install `build-essential`, `patch`, `dosfstools`, `mtools`, `device-tree-compiler` and `u-boot-tools` on Ubuntu. The build script first compiles `d21x_demo128-nand-carplay_baremetal_bootloader_defconfig` from this repository. It verifies that the packaged Bootloader is byte-identical to the newly built binary. It then applies the selected RT-Thread defconfig and produces the complete ArtInChip `.img` container. It does not rely on a prebuilt Bootloader or a second SDK checkout. Before upload, `.ci/verify-image.py` checks the container bounds, all nine component CRC32 values and the mandatory DDR updater, Bootloader and OS records.
 
 Artifacts contain `d213-carplay-gui.img` or `d213-carplay-headless.img`, the matching Bootloader, firmware configuration, resolved image layout, source/submodule identities and `SHA256SUMS`. Download and unpack the corresponding workflow artifact, then run `sha256sum -c SHA256SUMS` before flashing with the board's ArtInChip tool. These are D213 `demo128-nand-carplay` images for the existing 128 MiB SPI NAND board and panel configuration; select the correct variant and board.
 

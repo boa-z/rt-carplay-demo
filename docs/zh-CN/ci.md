@@ -26,7 +26,7 @@ bash .ci/build-firmware.sh gui
 bash .ci/build-firmware.sh headless
 ```
 
-Ubuntu 需要安装 `build-essential`、`patch`、`dosfstools`、`mtools`、`device-tree-compiler` 和 `u-boot-tools`。构建脚本首先从本仓库编译 `d21x_demo128-nand-carplay_baremetal_bootloader_defconfig`，并逐字节核对打包使用的 Bootloader 与新构建二进制一致，再应用所选 RT-Thread defconfig，生成完整 ArtInChip `.img` 容器。此流程不依赖预编译 Bootloader 或另一个 SDK 检出。
+Ubuntu 需要安装 `build-essential`、`patch`、`dosfstools`、`mtools`、`device-tree-compiler` 和 `u-boot-tools`。构建脚本首先从本仓库编译 `d21x_demo128-nand-carplay_baremetal_bootloader_defconfig`，并逐字节核对打包使用的 Bootloader 与新构建二进制一致，再应用所选 RT-Thread defconfig，生成完整 ArtInChip `.img` 容器。此流程不依赖预编译 Bootloader 或另一个 SDK 检出。上传前，`.ci/verify-image.py` 会核对容器边界、全部九个组件的 CRC32，以及必需的 DDR 升级器、Bootloader 和 OS 记录。
 
 产物包含 `d213-carplay-gui.img` 或 `d213-carplay-headless.img`、匹配的 Bootloader、固件配置、解析后的镜像布局、源码与子模块版本，以及 `SHA256SUMS`。下载并解压对应工作流产物，在使用开发板的 ArtInChip 工具烧录前执行 `sha256sum -c SHA256SUMS`。这些镜像对应 D213 `demo128-nand-carplay` 及现有 128 MiB SPI NAND 板卡与面板配置，使用时应选择正确变体和板卡。
 
