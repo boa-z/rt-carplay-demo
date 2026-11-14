@@ -47,3 +47,7 @@ bash packages/third-party/cherryusb-luban/tests/run_control_probe.sh
 ```
 
 The tests compile actual adapter sources with ASan/UBSan. They verify software contracts and do not simulate successful board enumeration or flashing.
+
+## Video display regression
+
+CI also runs `make -C packages/third-party/rt-carplay check-lubanlite-video SDK_ROOT="$PWD"`. This covers the actual MPP sink and host UI policy, including the SDK framebuffer command ABI. See the [video handoff fix](video-handoff-fix.md) for the confirmed command mismatch and the required board acceptance, and the [migration verification report](repository-migration-verification.md) for firmware identities and corrected user feedback.

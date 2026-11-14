@@ -27,13 +27,13 @@ int rt_device_control(rt_device_t device, int command, void *argument)
     assert(device != NULL);
     struct aicfb_alpha_config *alpha = argument;
     assert(alpha->layer_id == AICFB_LAYER_TYPE_UI);
-    if ((unsigned)command == AICFB_GET_ALPHA_CONFIG) {
+    if ((unsigned)command == 0x4626U) {
         ++reads;
         if (fail_read) return -1;
         *alpha = current;
         return 0;
     }
-    assert((unsigned)command == AICFB_UPDATE_ALPHA_CONFIG);
+    assert((unsigned)command == 0x4627U);
     ++writes;
     if (fail_write) return -1;
     current = *alpha;
@@ -42,6 +42,10 @@ int rt_device_control(rt_device_t device, int command, void *argument)
 
 int main(void)
 {
+    /* Independent of the caller's macros: these are the commands accepted
+     * by drv_fb.c after aic_core.h supplies the SDK ioctl encoding. */
+    assert((unsigned)AICFB_GET_ALPHA_CONFIG == 0x4626U);
+    assert((unsigned)AICFB_UPDATE_ALPHA_CONFIG == 0x4627U);
     current.layer_id = AICFB_LAYER_TYPE_UI;
     current.enable = 1;
     current.mode = AICFB_GLOBAL_ALPHA_MODE;

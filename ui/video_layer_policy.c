@@ -1,9 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "video_layer_policy.h"
+/* Match drv_fb.c's ioctl ABI before any libc header can define _IOWR/_IOW.
+ * sys/ioctl.h uses size/direction bits that the SDK driver does not accept. */
+#include <aic_common.h>
 #include <rtthread.h>
 #include <rtdevice.h>
 #include <string.h>
-#include <sys/ioctl.h>
 #include "artinchip_fb.h"
 
 /* The reference application owns the entire launcher UI layer. A host with
@@ -38,8 +40,11 @@ void carplay_launcher_video_event(bool active, void *context)
     memset(&saved_alpha, 0, sizeof(saved_alpha));
     saved_alpha.layer_id = AICFB_LAYER_TYPE_UI;
     if (rt_device_control(framebuffer, AICFB_GET_ALPHA_CONFIG,
-                          &saved_alpha) < 0)
+                          &saved_alpha) < 0) {
+        rt_kprintf("[carplay-ui] UI alpha query failed, cmd=%#x\n",
+                   (unsigned)AICFB_GET_ALPHA_CONFIG);
         return; /* Never hide HMI without a restorable configuration. */
+    }
     struct aicfb_alpha_config transparent = {0};
     transparent.layer_id = AICFB_LAYER_TYPE_UI;
     transparent.enable = 1;
@@ -48,6 +53,8 @@ void carplay_launcher_video_event(bool active, void *context)
     if (rt_device_control(framebuffer, AICFB_UPDATE_ALPHA_CONFIG,
                           &transparent) < 0)
         rt_kprintf("[carplay-ui] UI alpha handoff failed\n");
-    else
+    else {
         handed_off = true;
+        rt_kprintf("[carplay-ui] video visible, UI alpha=0\n");
+    }
 }
