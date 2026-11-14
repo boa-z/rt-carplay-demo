@@ -26,7 +26,7 @@ $(BOARD_BINS): | sdk-libraries $(BUILD)
 $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS): sdk-libraries
 check: $(BOARD_BINS)
 	@set -e; for t in $(BOARD_BINS); do ./$$t; done
-	$(MAKE) check-lubanlite-video check-lubanlite-touch check-lubanlite-demo check-lubanlite-bonds check-lubanlite-usb check-lubanlite-handoff check-lubanlite-reconnect check-lubanlite-capabilities
+	$(MAKE) check-lubanlite-video check-lubanlite-touch check-lubanlite-demo check-lubanlite-bonds check-lubanlite-usb check-lubanlite-handoff check-lubanlite-reconnect check-lubanlite-capabilities check-iap2-endpoints
 $(BUILD)/test_pairing_files: tests/unit/test_pairing_files.c app/pairing_files.c app/pairing_manager.c app/usb_pair_cache.c $(LIB) $(MBEDTLS_LIB)
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) $(CPPFLAGS) $< $(LIB) $(MBEDTLS_LIB) $(LDLIBS) -o $@
@@ -133,6 +133,10 @@ check-lubanlite-reconnect:
 .PHONY: check-lubanlite-capabilities
 check-lubanlite-capabilities:
 	python3 tests/run_lubanlite_capabilities.py $(SDK_ROOT)
+
+.PHONY: check-iap2-endpoints
+check-iap2-endpoints:
+	python3 tests/run_iap2_endpoint_ownership.py
 
 # Offline speaker/microphone test worker against virtual devices.
 $(BUILD)/test_audio_diagnostics: tests/unit/test_audio_diagnostics.c platform/audio_test_lubanlite.c platform/audio_test_fixture.h $(LIB) $(MBEDTLS_LIB)

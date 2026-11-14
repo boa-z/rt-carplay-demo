@@ -5,7 +5,7 @@
  * This is the application-side pump: one thread accepts a phone on the iAP2
  * SDP service, feeds its bytes to iap2_session, sends the session's iAP2
  * link frames back, and runs the session timers on a 100 ms tick.  The
- * receiver (carplay_app) must be running; the session borrows its SSID,
+ * receiver (carplay_app) must be running; the session copies its SSID,
  * AirPlay endpoint and Ed25519 identity.
  *
  * With RTCARPLAY_MFI the session also gets the 2.0C coprocessor on the I2C
@@ -79,6 +79,7 @@ typedef struct {
     iap2_session_t *session;
     int fd;
     char ip_address[16];
+    carplay_app_iap2_info_t endpoint;
 
     bool link_up;
     bool airplay_connected;
@@ -117,38 +118,42 @@ static bool link_tx(const uint8_t *bytes, size_t len, void *context)
 
 static bool link_get_wifi(iap2_session_wifi_t *out, void *context)
 {
-    (void)context;
-    carplay_app_iap2_info_t info;
-    if (carplay_app_iap2_info(&info) != RTCP_OK) return false;
+    iap2_link_t *link = context;
+    carplay_app_iap2_info_t snapshot;
+    if (carplay_app_iap2_info(&snapshot) != RTCP_OK) return false;
+    link->endpoint = snapshot;
+    const carplay_app_iap2_info_t *info = &link->endpoint;
 
     memset(out, 0, sizeof(*out));
-    out->ssid = info.ssid;
-    out->passphrase = info.passphrase;
-    out->channel = info.channel;
-    out->security_type = info.security_type;
-    if (info.bssid_valid) memcpy(out->bssid, info.bssid, sizeof(out->bssid));
+    out->ssid = info->ssid;
+    out->passphrase = info->passphrase;
+    out->channel = info->channel;
+    out->security_type = info->security_type;
+    if (info->bssid_valid) memcpy(out->bssid, info->bssid, sizeof(out->bssid));
     return true;
 }
 
 static bool link_get_airplay(iap2_session_airplay_t *out, void *context)
 {
     iap2_link_t *link = context;
-    carplay_app_iap2_info_t info;
-    if (carplay_app_iap2_info(&info) != RTCP_OK) return false;
+    carplay_app_iap2_info_t snapshot;
+    if (carplay_app_iap2_info(&snapshot) != RTCP_OK) return false;
+    link->endpoint = snapshot;
+    const carplay_app_iap2_info_t *info = &link->endpoint;
 
     int written = rt_snprintf(link->ip_address, sizeof(link->ip_address),
-                              "%u.%u.%u.%u", info.ipv4[0], info.ipv4[1],
-                              info.ipv4[2], info.ipv4[3]);
+                              "%u.%u.%u.%u", info->ipv4[0], info->ipv4[1],
+                              info->ipv4[2], info->ipv4[3]);
     if (written <= 0 || (size_t)written >= sizeof(link->ip_address)) return false;
 
     memset(out, 0, sizeof(*out));
-    out->airplay_port = info.airplay_port;
+    out->airplay_port = info->airplay_port;
     out->ip_address = link->ip_address;
-    out->device_identifier = info.device_id;
-    out->public_key = info.public_key_hex;
-    out->source_version = info.source_version;
-    out->mdns_ready = info.mdns_ready;
-    out->event_connected = info.airplay_connected;
+    out->device_identifier = info->device_id;
+    out->public_key = info->public_key_hex;
+    out->source_version = info->source_version;
+    out->mdns_ready = info->mdns_ready;
+    out->event_connected = info->airplay_connected;
     return true;
 }
 
@@ -273,9 +278,11 @@ static const struct rtcp_mfi *link_mfi(void)
 
 static int link_session_create(iap2_link_t *link, const struct rtcp_mfi *mfi)
 {
-    carplay_app_iap2_info_t info;
-    int result = carplay_app_iap2_info(&info);
+    carplay_app_iap2_info_t snapshot;
+    int result = carplay_app_iap2_info(&snapshot);
     if (result != RTCP_OK) return result;
+    link->endpoint = snapshot;
+    const carplay_app_iap2_info_t *info = &link->endpoint;
 
     uint8_t bdaddr[6];
     result = rtcp_bt_lubanlite_local_bdaddr(bdaddr);
@@ -288,14 +295,14 @@ static int link_session_create(iap2_link_t *link, const struct rtcp_mfi *mfi)
 
     iap2_identity_config_t identity;
     memset(&identity, 0, sizeof(identity));
-    identity.name = info.name;
+    identity.name = info->name;
     identity.model_identifier = RTCARPLAY_IAP2_MODEL;
     identity.manufacturer = IAP2_LINK_MANUFACTURER;
-    identity.serial_number = info.device_id;
+    identity.serial_number = info->device_id;
     identity.firmware_version = RTCARPLAY_IAP2_FIRMWARE_VERSION;
     identity.hardware_version = RTCARPLAY_IAP2_HARDWARE_VERSION;
     identity.language = IAP2_LINK_LANGUAGE;
-    identity.wifi_ssid = info.ssid;
+    identity.wifi_ssid = info->ssid;
     memcpy(identity.bluetooth_address, bdaddr,
            sizeof(identity.bluetooth_address));
 

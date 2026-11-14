@@ -5,9 +5,12 @@
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <time.h>
 
 /* Compile the real composition. Linux ports supply actual entropy, sockets
  * and protocol dependencies; only RT-Thread scheduling/locks are modeled. */
+#define LPKG_RT_CARPLAY_LUBANLITE_USB 1
+#define RT_USING_LWIP 1
 #include "../../app/carplay_app.c"
 #include "../../app/pairing_files.c"
 
@@ -18,6 +21,57 @@ static struct test_thread *current;
 static unsigned live_mutexes, thread_deletes, delays;
 static bool fail_create, fail_startup;
 static bool check_input_reentry;
+static bool ipv6_valid = true;
+static unsigned ipv6_queries;
+static pthread_barrier_t snapshot_barrier;
+static atomic_bool release_snapshot = ATOMIC_VAR_INIT(false);
+static unsigned snapshot_waits;
+
+static void *hold_snapshot(void *unused)
+{
+    (void)unused;
+    assert(snapshot_enter());
+    carplay_app_display_info_t display;
+    assert(carplay_app_display_info(&display) == RTCP_OK); /* Concurrent reader. */
+    unsigned width = s_app.width;
+    (void)pthread_barrier_wait(&snapshot_barrier);
+    while (!atomic_load(&release_snapshot)) {
+        struct timespec pause = {0, 1000000};
+        (void)nanosleep(&pause, NULL);
+    }
+    assert(s_app.width == width); /* Writer has not reset state before retirement. */
+    assert(carplay_app_display_info(&display) == RTCP_ESTATE);
+    snapshot_leave();
+    return NULL;
+}
+
+bool rtcp_lubanlite_wired_ipv6(char *address, size_t capacity, bool *valid)
+{
+    ++ipv6_queries;
+    snprintf(address, capacity, "fe80::1234");
+    *valid = ipv6_valid;
+    return true;
+}
+
+static void check_queries_rejected(void)
+{
+    carplay_app_iap2_info_t wireless;
+    carplay_app_wired_info_t wired;
+    carplay_app_display_info_t display;
+    memset(&wireless, 0xa5, sizeof(wireless));
+    memset(&wired, 0xa5, sizeof(wired));
+    memset(&display, 0xa5, sizeof(display));
+    unsigned before = ipv6_queries;
+    assert(carplay_app_iap2_info(&wireless) == RTCP_ESTATE && !wireless.ssid[0]);
+    assert(carplay_app_wired_info(&wired) == RTCP_ESTATE && !wired.device_id[0]);
+    assert(ipv6_queries == before); /* No platform access while tearing down. */
+    assert(carplay_app_display_info(&display) == RTCP_ESTATE && display.width == 0);
+    unsigned frames = 42, sent = 42, failed = 42;
+    carplay_app_debug_counters(&frames, &sent, &failed);
+    assert(!frames && !sent && !failed);
+    assert(cmd_carplay_status(0, NULL) == RTCP_ESTATE);
+}
+
 
 bool rtcp_lubanlite_random(uint8_t *data, size_t length)
 {
@@ -36,6 +90,9 @@ int rt_mutex_take(rt_mutex_t mutex, int timeout)
 {
     (void)timeout; assert(mutex && !mutex->locked);
     if (check_input_reentry) {
+        carplay_app_display_info_t display;
+        assert(carplay_app_display_info(&display) == RTCP_OK);
+        assert(carplay_app_pairing_storage_error() == RTCP_OK);
         assert(carplay_app_stop() == RTCP_ESTATE);
         assert(carplay_app_touch(RTCP_TOUCH_DOWN, 0, 10, 20) == RTCP_ESTATE);
         assert(carplay_app_request_siri() == RTCP_ESTATE);
@@ -51,6 +108,7 @@ int rt_mutex_release(rt_mutex_t mutex)
 int rt_mutex_delete(rt_mutex_t mutex)
 {
     assert(mutex && !mutex->locked && live_mutexes);
+    check_queries_rejected();
     if (current) assert(s_receiver_running && s_receiver_worker_live);
     assert(carplay_app_stop() == RTCP_ESTATE); /* Teardown reentry. */
     assert(carplay_app_touch(RTCP_TOUCH_DOWN, 0, 10, 20) == RTCP_ESTATE);
@@ -83,6 +141,14 @@ int rt_thread_delete(rt_thread_t thread)
 rt_thread_t rt_thread_self(void) { return current; }
 void rt_thread_mdelay(int milliseconds)
 {
+    if (milliseconds == 1) {
+        assert(atomic_load(&s_snapshot_readers) & SNAPSHOT_WRITER);
+        ++snapshot_waits;
+        atomic_store(&release_snapshot, true);
+        struct timespec pause = {0, 1000000};
+        (void)nanosleep(&pause, NULL);
+        return;
+    }
     assert(milliseconds > 0 && ++delays < 100);
     /* Stop before first scheduling: execute the real worker, which must
      * still own all its state/resources until its last access. */
@@ -143,6 +209,25 @@ int main(void)
         assert(carplay_app_start(&config) == RTCP_OK);
         assert(carplay_app_is_running() && pending && live_mutexes == 1);
         assert(carplay_app_start(&config) == RTCP_ESTATE);
+        carplay_app_display_info_t display;
+        assert(carplay_app_display_info(&display) == RTCP_OK);
+        assert(display.width == 1024 && display.height == 600);
+        assert(!strcmp(display.pairing_code, "3939"));
+        carplay_app_wired_info_t wired;
+        ipv6_valid = false;
+        assert(carplay_app_wired_info(&wired) == RTCP_ENOENT);
+        ipv6_valid = true;
+        assert(carplay_app_wired_info(&wired) == RTCP_OK);
+        assert(!strcmp(wired.ipv6, "fe80::1234"));
+        assert(!strcmp(wired.device_id, s_app.device_id));
+        assert(wired.device_id != s_app.device_id);
+        /* Exercise wireless snapshot ownership without claiming radio behavior. */
+        s_app.wired = false;
+        carplay_app_iap2_info_t wireless;
+        assert(carplay_app_iap2_info(&wireless) == RTCP_OK);
+        assert(!strcmp(wireless.ssid, s_app.ssid) && wireless.ssid != s_app.ssid);
+        assert(!strcmp(wireless.public_key_hex, wired.public_key_hex));
+        s_app.wired = true;
         check_input_reentry = true;
         assert(carplay_app_touch(RTCP_TOUCH_DOWN, 0, 10, 20) == RTCP_OK);
         assert(carplay_app_request_siri() == RTCP_OK);
@@ -164,10 +249,26 @@ int main(void)
         current = pending;
         assert(carplay_app_stop() == RTCP_ESTATE); /* Cannot join self. */
         current = NULL;
+        pthread_t reader;
+        if (cycle == 0) {
+            assert(pthread_barrier_init(&snapshot_barrier, NULL, 2) == 0);
+            assert(pthread_create(&reader, NULL, hold_snapshot, NULL) == 0);
+            (void)pthread_barrier_wait(&snapshot_barrier);
+        }
         assert(carplay_app_stop() == RTCP_OK);
+        if (cycle == 0) {
+            assert(pthread_join(reader, NULL) == 0);
+            assert(snapshot_waits > 0);
+            assert(pthread_barrier_destroy(&snapshot_barrier) == 0);
+        }
         assert(!carplay_app_is_running() && !pending && live_mutexes == 0);
         assert(s_app.thread == NULL);
         assert(cmd_carplay_ab(2, single) == RTCP_ESTATE);
+        memset(s_app.device_id, 0, sizeof(s_app.device_id));
+        memset(s_app.ssid, 0, sizeof(s_app.ssid));
+        memset(s_app.pairing_code, 0, sizeof(s_app.pairing_code));
+        assert(wired.device_id[0] && wireless.device_id[0] && wireless.ssid[0]);
+        assert(!strcmp(display.pairing_code, "3939"));
         assert(carplay_app_touch(RTCP_TOUCH_UP, 0, 10, 20) == RTCP_ESTATE);
         assert(carplay_app_request_siri() == RTCP_ESTATE);
         assert(carplay_app_stop() == RTCP_OK);

@@ -296,8 +296,10 @@ static void demo_worker(void *argument)
             while (!mode_changed() && !idle_actions()) rt_thread_mdelay(200);
             continue;
         }
+        carplay_app_display_info_t display_info;
+        (void)carplay_app_display_info(&display_info);
         (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
-        snprintf(status.pin, sizeof(status.pin), "%s", carplay_app_pairing_code());
+        snprintf(status.pin, sizeof(status.pin), "%s", display_info.pairing_code);
         (void)rt_mutex_release(status_lock);
 #if DEMO_HAS_WIRELESS
         if (status.wireless) {

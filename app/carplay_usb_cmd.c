@@ -603,6 +603,7 @@ typedef struct {
     unsigned events;
     bool airplay_unavailable_logged;
     char ip_address[64];
+    carplay_app_wired_info_t endpoint;
     const struct rtcp_mfi *mfi; /* installed AirPlay /auth-setup provider */
 } iap2_usb_link_t;
 
@@ -635,9 +636,9 @@ static bool iap2_usb_tx(const uint8_t *bytes, size_t length, void *context)
 static bool iap2_usb_get_airplay(iap2_session_airplay_t *out, void *context)
 {
     iap2_usb_link_t *link = context;
-    carplay_app_wired_info_t info;
+    carplay_app_wired_info_t snapshot;
 
-    if (carplay_app_wired_info(&info) != RTCP_OK) {
+    if (carplay_app_wired_info(&snapshot) != RTCP_OK) {
         if (!link->airplay_unavailable_logged) {
             link->airplay_unavailable_logged = true;
             rt_kprintf("[carplay_usb] iap2: no wired AirPlay endpoint yet; "
@@ -647,23 +648,25 @@ static bool iap2_usb_get_airplay(iap2_session_airplay_t *out, void *context)
         return false;
     }
 
+    link->endpoint = snapshot;
+    const carplay_app_wired_info_t *info = &link->endpoint;
     int written = rt_snprintf(link->ip_address, sizeof(link->ip_address),
-                              "%s", info.ipv6);
+                              "%s", info->ipv6);
     if (written <= 0 || (size_t)written >= sizeof(link->ip_address)) {
         return false;
     }
 
     memset(out, 0, sizeof(*out));
-    out->airplay_port = info.airplay_port;
+    out->airplay_port = info->airplay_port;
     out->ip_address = link->ip_address;
-    out->device_identifier = info.device_id;
-    out->public_key = info.public_key_hex;
-    out->source_version = info.source_version;
+    out->device_identifier = info->device_id;
+    out->public_key = info->public_key_hex;
+    out->source_version = info->source_version;
     /* Wired sessions ignore mdns_ready; keep the field meaningful anyway. */
     out->mdns_ready = true;
-    out->event_connected = info.airplay_connected;
+    out->event_connected = info->airplay_connected;
     rt_kprintf("[carplay_usb] iap2: wired AirPlay endpoint [%s]:%u\n",
-               link->ip_address, (unsigned)info.airplay_port);
+               link->ip_address, (unsigned)info->airplay_port);
     return true;
 }
 

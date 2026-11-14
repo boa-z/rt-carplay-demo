@@ -93,7 +93,7 @@ void carplay_iap2_get_status(carplay_iap2_status_t *out) {
     }
 }
 int carplay_app_iap2_info(carplay_app_iap2_info_t *out) {
-    memset(out, 0, sizeof(*out)); out->ssid = "test-carplay";
+    memset(out, 0, sizeof(*out)); strcpy(out->ssid, "test-carplay");
     out->ipv4[0] = 192; out->ipv4[1] = 168; out->ipv4[2] = 169; out->ipv4[3] = 1;
     out->airplay_connected = radio_mode == 2 && now_ms >= 800 && now_ms < 1400;
     return receiver_running ? RTCP_OK : RTCP_ESTATE;
@@ -101,7 +101,9 @@ int carplay_app_iap2_info(carplay_app_iap2_info_t *out) {
 void rtcp_bt_lubanlite_pairing_status(rtcp_bt_pairing_status_t *out) { memset(out, 0, sizeof(*out)); }
 int rtcp_bt_lubanlite_pairing_reply(uint32_t request, bool accept) { (void)request; (void)accept; return RTCP_OK; }
 int rtcp_bt_lubanlite_forget_bonds(void) { return RTCP_OK; }
-const char *carplay_app_pairing_code(void) { return "3939"; }
+int carplay_app_display_info(carplay_app_display_info_t *out) {
+    memset(out, 0, sizeof(*out)); strcpy(out->pairing_code, "3939"); return RTCP_OK;
+}
 int carplay_app_wired_info(carplay_app_wired_info_t *info) {
     (void)info;
     if (status.stage != DEMO_NETWORK) return RTCP_ENOENT;

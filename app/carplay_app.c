@@ -15,6 +15,7 @@
 
 #include <stdio.h>
 #include <stdatomic.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -200,8 +201,7 @@ typedef struct {
     rt_thread_t thread;
 
     uint16_t airplay_port;
-    volatile bool airplay_connected;
-    volatile int pairing_storage_error;
+    atomic_bool airplay_connected;
 
     /* CarPlay Control browse/connect state (owned by the poll thread). */
     volatile bool ctrl_enabled;
@@ -241,8 +241,8 @@ typedef struct {
     bool cipher_applied;
     unsigned touch_queued;
     unsigned touch_queue_full;
-    unsigned hid_reports_sent;
-    unsigned hid_reports_failed;
+    atomic_uint hid_reports_sent;
+    atomic_uint hid_reports_failed;
     touch_event_t touch[TOUCH_QUEUE_LENGTH];
     unsigned touch_head;
     unsigned touch_tail;
@@ -266,6 +266,41 @@ static app_state_t s_app;
 /* Publication flags must survive reset of the per-session data. Lifecycle
  * entry is nonblocking: concurrent/reentrant start/stop returns ESTATE. */
 static atomic_flag s_lifecycle_call = ATOMIC_FLAG_INIT;
+/* Readers may coexist with input and each other. A lifecycle writer blocks
+ * new readers and sleeps until existing copies/diagnostics have returned;
+ * no reader can retain the session mutex while it is reset or destroyed. */
+#define SNAPSHOT_WRITER (UINT_MAX / 2U + 1U)
+static atomic_uint s_snapshot_readers = ATOMIC_VAR_INIT(0);
+static atomic_int s_pairing_storage_result = ATOMIC_VAR_INIT(RTCP_OK);
+
+static bool snapshot_enter(void)
+{
+    unsigned readers = atomic_load_explicit(&s_snapshot_readers, memory_order_acquire);
+    do {
+        if (readers >= SNAPSHOT_WRITER - 1U) return false;
+    } while (!atomic_compare_exchange_weak_explicit(&s_snapshot_readers, &readers,
+                                                    readers + 1U, memory_order_acq_rel,
+                                                    memory_order_acquire));
+    return true;
+}
+
+static void snapshot_leave(void)
+{
+    (void)atomic_fetch_sub_explicit(&s_snapshot_readers, 1U, memory_order_release);
+}
+
+static void snapshots_retire(void)
+{
+    (void)atomic_fetch_or_explicit(&s_snapshot_readers, SNAPSHOT_WRITER,
+                                    memory_order_acq_rel);
+    while (atomic_load_explicit(&s_snapshot_readers, memory_order_acquire) != SNAPSHOT_WRITER)
+        rt_thread_mdelay(1);
+}
+
+static void snapshots_enable(void)
+{
+    atomic_store_explicit(&s_snapshot_readers, 0, memory_order_release);
+}
 static atomic_bool s_receiver_stop = ATOMIC_VAR_INIT(false);
 static atomic_bool s_receiver_worker_live = ATOMIC_VAR_INIT(false);
 static atomic_bool s_receiver_running = ATOMIC_VAR_INIT(false);
@@ -335,7 +370,7 @@ static int store_save(const uint8_t *blob, size_t len, void *context)
 {
     app_state_t *app = context;
     int ret = carplay_file_save(app->store_path, blob, len);
-    app->pairing_storage_error = ret;
+    s_pairing_storage_result = ret;
     return ret;
 }
 
@@ -353,10 +388,9 @@ static bool provider_random(uint8_t *output, size_t len, void *context)
 static bool provider_save_controller(const uint8_t *id, size_t length,
                                      const uint8_t public_key[32], void *context)
 {
-    app_state_t *app = context;
     bool ok = airplay_pairing_store_save_pairing(id, length, public_key, context);
-    if (!ok && app->pairing_storage_error == RTCP_OK) app->pairing_storage_error = RTCP_EIO;
-    APP_LOG("AirPlay pairing persistence=%s error=%d", ok ? "saved" : "failed", app->pairing_storage_error);
+    if (!ok && s_pairing_storage_result == RTCP_OK) s_pairing_storage_result = RTCP_EIO;
+    APP_LOG("AirPlay pairing persistence=%s error=%d", ok ? "saved" : "failed", s_pairing_storage_result);
     return ok;
 }
 
@@ -1177,6 +1211,10 @@ static int carplay_app_start_owned(const carplay_app_config_t *config)
 
     app_state_t *app = &s_app;
     memset(app, 0, sizeof(*app));
+    atomic_init(&app->airplay_connected, false);
+    atomic_store(&s_pairing_storage_result, RTCP_OK);
+    atomic_init(&app->hid_reports_sent, 0);
+    atomic_init(&app->hid_reports_failed, 0);
     s_receiver_shutting_down = false;
     s_receiver_stop = false;
     app->os = rtcp_os_rtthread;
@@ -1431,7 +1469,9 @@ int carplay_app_start(const carplay_app_config_t *config)
     if (atomic_flag_test_and_set_explicit(&s_lifecycle_call,
                                            memory_order_acquire))
         return RTCP_ESTATE;
+    snapshots_retire();
     int result = carplay_app_start_owned(config);
+    snapshots_enable();
     atomic_flag_clear_explicit(&s_lifecycle_call, memory_order_release);
     return result;
 }
@@ -1462,7 +1502,9 @@ int carplay_app_stop(void)
     if (atomic_flag_test_and_set_explicit(&s_lifecycle_call,
                                            memory_order_acquire))
         return RTCP_ESTATE;
+    snapshots_retire();
     int result = carplay_app_stop_owned();
+    snapshots_enable();
     atomic_flag_clear_explicit(&s_lifecycle_call, memory_order_release);
     return result;
 }
@@ -1472,10 +1514,25 @@ bool carplay_app_is_running(void)
     return s_receiver_running;
 }
 
+int carplay_app_display_info(carplay_app_display_info_t *info)
+{
+    if (info == NULL) return RTCP_EINVAL;
+    memset(info, 0, sizeof(*info));
+    if (!snapshot_enter())
+        return RTCP_ESTATE;
+    info->width = s_app.width;
+    info->height = s_app.height;
+    memcpy(info->pairing_code, s_app.pairing_code, sizeof(info->pairing_code));
+    snapshot_leave();
+    return RTCP_OK;
+}
+
 void carplay_app_display_size(uint16_t *width, uint16_t *height)
 {
-    if (width != NULL) *width = s_app.width;
-    if (height != NULL) *height = s_app.height;
+    carplay_app_display_info_t info;
+    (void)carplay_app_display_info(&info);
+    if (width != NULL) *width = info.width;
+    if (height != NULL) *height = info.height;
 }
 
 const char *carplay_app_pairing_code(void)
@@ -1483,17 +1540,15 @@ const char *carplay_app_pairing_code(void)
     return s_app.pairing_code;
 }
 
-int carplay_app_iap2_info(carplay_app_iap2_info_t *info)
+static int iap2_info_owned(carplay_app_iap2_info_t *info)
 {
-    if (info == NULL) return RTCP_EINVAL;
     app_state_t *app = &s_app;
     if (!s_receiver_running || s_receiver_stop || app->wired) return RTCP_ESTATE;
 
-    memset(info, 0, sizeof(*info));
-    info->name = app->name;
-    info->model = app->model;
-    info->ssid = app->ssid;
-    info->passphrase = app->passphrase;
+    memcpy(info->name, app->name, sizeof(info->name));
+    memcpy(info->model, app->model, sizeof(info->model));
+    memcpy(info->ssid, app->ssid, sizeof(info->ssid));
+    memcpy(info->passphrase, app->passphrase, sizeof(info->passphrase));
     info->channel = app->channel;
     info->security_type = app->passphrase[0] != '\0' ? 2U : 0U;
     info->airplay_port = app->airplay_port;
@@ -1502,23 +1557,22 @@ int carplay_app_iap2_info(carplay_app_iap2_info_t *info)
         memcpy(info->bssid, app->wifi_mac, sizeof(info->bssid));
         info->bssid_valid = true;
     }
-    info->device_id = app->device_id;
-    info->public_key_hex = app->public_key_hex;
+    memcpy(info->device_id, app->device_id, sizeof(info->device_id));
+    memcpy(info->public_key_hex, app->public_key_hex, sizeof(info->public_key_hex));
     info->source_version = AIRPLAY_INFO_DEFAULT_SOURCE_VERSION;
     info->mdns_ready = app->mdns != NULL;
     info->airplay_connected = app->airplay_connected;
     return RTCP_OK;
 }
 
-int carplay_app_wired_info(carplay_app_wired_info_t *info)
+static int wired_info_owned(carplay_app_wired_info_t *info)
 {
-    if (info == NULL) return RTCP_EINVAL;
     app_state_t *app = &s_app;
     if (!s_receiver_running || s_receiver_stop || !app->wired) return RTCP_ESTATE;
 #if !defined(LPKG_RT_CARPLAY_LUBANLITE_USB) || !defined(RT_USING_LWIP)
+    (void)info;
     return RTCP_ENOTSUP;
 #else
-    memset(info, 0, sizeof(*info));
     bool valid = false;
     if (!rtcp_lubanlite_wired_ipv6(info->ipv6, sizeof(info->ipv6), &valid) ||
         !valid) {
@@ -1526,13 +1580,35 @@ int carplay_app_wired_info(carplay_app_wired_info_t *info)
          * advertising one would race the phone's first connection. */
         return RTCP_ENOENT;
     }
-    info->device_id = app->device_id;
-    info->public_key_hex = app->public_key_hex;
+    memcpy(info->device_id, app->device_id, sizeof(info->device_id));
+    memcpy(info->public_key_hex, app->public_key_hex, sizeof(info->public_key_hex));
     info->source_version = AIRPLAY_INFO_DEFAULT_SOURCE_VERSION;
     info->airplay_port = app->airplay_port;
     info->airplay_connected = app->airplay_connected;
     return RTCP_OK;
 #endif
+}
+
+int carplay_app_iap2_info(carplay_app_iap2_info_t *info)
+{
+    if (info == NULL) return RTCP_EINVAL;
+    memset(info, 0, sizeof(*info));
+    if (!snapshot_enter())
+        return RTCP_ESTATE;
+    int result = iap2_info_owned(info);
+    snapshot_leave();
+    return result;
+}
+
+int carplay_app_wired_info(carplay_app_wired_info_t *info)
+{
+    if (info == NULL) return RTCP_EINVAL;
+    memset(info, 0, sizeof(*info));
+    if (!snapshot_enter())
+        return RTCP_ESTATE;
+    int result = wired_info_owned(info);
+    snapshot_leave();
+    return result;
 }
 
 /* The launcher, shell and serving workers can claim/release concurrently. */
@@ -1619,9 +1695,10 @@ static int cmd_carplay_start(int argc, char **argv)
         rt_kprintf("carplay start failed: %d\n", result);
         return 0;
     }
+    carplay_app_display_info_t display_info;
+    (void)carplay_app_display_info(&display_info);
     rt_kprintf("carplay started (%s), pairing PIN %s\n",
-               wired ? "wired IPv6" : "wireless",
-               carplay_app_pairing_code());
+               wired ? "wired IPv6" : "wireless", display_info.pairing_code);
     return 0;
 }
 
@@ -1638,13 +1715,14 @@ static int cmd_carplay_stop(int argc, char **argv)
     return 0;
 }
 
-static int cmd_carplay_status(int argc, char **argv)
+static int carplay_status_owned(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
     uint16_t width = 0U;
     uint16_t height = 0U;
-    carplay_app_display_size(&width, &height);
+    width = s_app.width;
+    height = s_app.height;
     rt_kprintf("carplay: %s, display %ux%u, PIN %s\n",
                carplay_app_is_running() ? "running" : "stopped",
                (unsigned)width, (unsigned)height,
@@ -1693,8 +1771,14 @@ static int cmd_carplay_status(int argc, char **argv)
                carplay_touch_panel_is_running() ? "running" : "stopped",
                (unsigned)points, reads, events);
 #endif
+    unsigned queued = 0, full = 0;
+    if (s_app.lock && rt_mutex_take(s_app.lock, RT_WAITING_FOREVER) == RT_EOK) {
+        queued = s_app.touch_queued;
+        full = s_app.touch_queue_full;
+        (void)rt_mutex_release(s_app.lock);
+    }
     rt_kprintf("carplay touch: queued=%u queue_full=%u HID_sent=%u HID_failed=%u\n",
-               s_app.touch_queued, s_app.touch_queue_full,
+               queued, full,
                s_app.hid_reports_sent, s_app.hid_reports_failed);
     rtcp_screen_stats_t screen = {0};
     if (s_app.lock != NULL && rt_mutex_take(s_app.lock, RT_WAITING_NO) == RT_EOK) {
@@ -1724,6 +1808,15 @@ static int cmd_carplay_status(int argc, char **argv)
     s_app.screen_report_ms = now;
     s_app.screen_report_frames = screen.frames;
     return 0;
+}
+
+static int cmd_carplay_status(int argc, char **argv)
+{
+    if (atomic_flag_test_and_set_explicit(&s_lifecycle_call, memory_order_acquire))
+        return RTCP_ESTATE;
+    int result = carplay_status_owned(argc, argv);
+    atomic_flag_clear_explicit(&s_lifecycle_call, memory_order_release);
+    return result;
 }
 
 static int cmd_carplay_touch(int argc, char **argv)
@@ -2075,19 +2168,25 @@ MSH_CMD_EXPORT_ALIAS(cmd_carplay_bt, carplay_bt,
                      Bluetooth RFCOMM bring-up: start|stop|status);
 #endif
 
-int carplay_app_pairing_storage_error(void) { return s_app.pairing_storage_error; }
+int carplay_app_pairing_storage_error(void)
+{
+    return atomic_load(&s_pairing_storage_result);
+}
 
 void carplay_app_debug_counters(unsigned *received, unsigned *hid_sent, unsigned *hid_failed)
 {
-    if (received) {
-        *received = 0;
-        if (s_app.lock && rt_mutex_take(s_app.lock, RT_WAITING_NO) == RT_EOK) {
-            *received = s_app.screen_stats.frames;
-            (void)rt_mutex_release(s_app.lock);
-        }
+    if (received) *received = 0;
+    if (hid_sent) *hid_sent = 0;
+    if (hid_failed) *hid_failed = 0;
+    if (!snapshot_enter())
+        return;
+    if (received && s_app.lock && rt_mutex_take(s_app.lock, RT_WAITING_NO) == RT_EOK) {
+        *received = s_app.screen_stats.frames;
+        (void)rt_mutex_release(s_app.lock);
     }
-    if (hid_sent) *hid_sent = s_app.hid_reports_sent;
-    if (hid_failed) *hid_failed = s_app.hid_reports_failed;
+    if (hid_sent) *hid_sent = atomic_load(&s_app.hid_reports_sent);
+    if (hid_failed) *hid_failed = atomic_load(&s_app.hid_reports_failed);
+    snapshot_leave();
 }
 
 /* Called by the low-priority demo owner, never from the network/decoder path.

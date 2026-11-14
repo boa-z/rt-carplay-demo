@@ -67,32 +67,41 @@ int carplay_app_stop(void);
 
 bool carplay_app_is_running(void);
 
-/* Current display geometry and the active pairing PIN ("" before start). */
+/* Copied display identity. Safe across stop/restart; returns ESTATE during
+ * lifecycle changes and clears the output on failure. */
+typedef struct {
+    uint16_t width, height;
+    char pairing_code[5];
+} carplay_app_display_info_t;
+int carplay_app_display_info(carplay_app_display_info_t *info);
+/* Compatibility geometry query returns zero during lifecycle contention. */
 void carplay_app_display_size(uint16_t *width, uint16_t *height);
+/* Legacy lifecycle-owner-only borrowed PIN; use display_info across threads. */
 const char *carplay_app_pairing_code(void);
 
 /*
  * Snapshot of the live wireless configuration for the iAP2 session.  The
- * strings are borrowed from the running receiver and stay valid until
- * carplay_app_stop() tears it down, so the caller must stop before that.
- * Returns RTCP_ESTATE when the receiver is not running (or is stopping).
+ * strings and scalar values are copied into caller-owned storage and stay
+ * valid after stop/restart. Returns RTCP_ESTATE when not running, stopping
+ * or a lifecycle change is retiring existing snapshots. Other queries and
+ * input operations do not exclude snapshots.
  * ipv4 is four bytes in network order; public_key_hex is the Ed25519 public
  * key exactly as announced in the mDNS TXT record.  airplay_connected is a
  * snapshot; poll it to pace CarPlay re-invites.
  */
 typedef struct {
-    const char *name;
-    const char *model;
-    const char *ssid;
-    const char *passphrase;
+    char name[33];
+    char model[33];
+    char ssid[33];
+    char passphrase[65];
     uint8_t channel;
     uint8_t security_type; /* 0 = open, 2 = WPA/WPA2 PSK */
     uint16_t airplay_port;
     uint8_t ipv4[4];
     uint8_t bssid[6];
     bool bssid_valid;
-    const char *device_id;
-    const char *public_key_hex;
+    char device_id[18];
+    char public_key_hex[65];
     const char *source_version;
     bool mdns_ready;
     bool airplay_connected;
@@ -109,11 +118,11 @@ int carplay_app_iap2_info(carplay_app_iap2_info_t *info);
  *
  * Returns RTCP_ESTATE when a wireless receiver is running (or none is),
  * RTCP_ENOENT when the wired receiver is up but the netif has no usable
- * address yet.  Strings are borrowed from the running receiver.
+ * address yet. Strings are copied; source_version is a static SDK constant.
  */
 typedef struct {
-    const char *device_id;
-    const char *public_key_hex;
+    char device_id[18];
+    char public_key_hex[65];
     const char *source_version;
     uint16_t airplay_port;
     char ipv6[64];
