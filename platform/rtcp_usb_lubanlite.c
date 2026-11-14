@@ -40,6 +40,7 @@
 #ifdef LPKG_RT_CARPLAY_LUBANLITE_USB
 
 #include <string.h>
+#include <stdatomic.h>
 
 #include <rtthread.h>
 
@@ -69,7 +70,7 @@ struct usb_bulk_state {
 };
 
 typedef struct {
-    volatile bool enabled;
+    atomic_bool enabled;
     volatile bool present;
     /* Seqlock: odd while the hub thread updates the snapshot. */
     volatile uint32_t sequence;
@@ -95,7 +96,14 @@ typedef struct {
     uint32_t detach_count;
 } carplay_usb_state_t;
 
-static carplay_usb_state_t s_usb;
+/* Arm configuration selection before CherryUSB ENV initialization. A phone
+ * already attached at boot must not enumerate before the GUI/worker starts.
+ * Class connect publishes its snapshot even before the owner subscribes. */
+static carplay_usb_state_t s_usb = {
+#if defined(RTCARPLAY_AUTO_CONNECT) || defined(RTCARPLAY_DEMO_LAUNCHER)
+    .enabled = true,
+#endif
+};
 
 static void reset_bulk_states(void)
 {

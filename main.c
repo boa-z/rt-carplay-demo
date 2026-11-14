@@ -10,6 +10,9 @@
 #include <rtthread.h>
 
 #include "carplay_app.h"
+#if defined(RTCARPLAY_AUTO_CONNECT)
+#include "connection_manager.h"
+#endif
 #include "rtcp/rtcp.h"
 
 #ifdef RTCARPLAY_AUTO_START
@@ -31,7 +34,10 @@ static void rtcarplay_autostart(void)
 int main(void)
 {
 #if defined(RTCARPLAY_DEMO_LAUNCHER)
-    rt_kprintf("rt-carplay: automatic wired demo; connect an unlocked iPhone\n");
+    rt_kprintf("rt-carplay: Launcher V2; automatic USB and wireless discovery\n");
+#elif defined(RTCARPLAY_AUTO_CONNECT)
+    int result = carplay_connection_manager_start();
+    rt_kprintf("rt-carplay: automatic Headless connections, manager=%d\n", result);
 #elif defined(RTCARPLAY_AUTO_START)
     rtcarplay_autostart();
 #else

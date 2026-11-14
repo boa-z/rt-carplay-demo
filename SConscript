@@ -22,16 +22,18 @@ repo = os.path.normpath(repo)
 
 src = Glob('main.c') + Glob('app/carplay_app.c')
 if GetDepend('RTCARPLAY_DEMO_LAUNCHER'):
-    src += Glob('ui/*.c') + Glob('app/connection_manager.c')
+    src += Glob('ui/*.c')
+if GetDepend('RTCARPLAY_AUTO_CONNECT'):
+    src += Glob('app/connection_manager.c')
 cpppath = [cwd, cwd + '/app', cwd + '/platform']
 src += Glob('app/pairing_files.c') + Glob('platform/carplay_mfi_provider.c')
-if GetDepend('RTCARPLAY_DEMO_LAUNCHER'):
+if GetDepend('RTCARPLAY_AUTO_CONNECT'):
     src += Glob('app/pairing_manager.c')
 if GetDepend('RTCARPLAY_VIDEO'):
     src += Glob('platform/video_sink_lubanlite.c')
 if GetDepend('RTCARPLAY_AUDIO'):
     src += Glob('platform/audio_sink_lubanlite.c')
-    if GetDepend('RTCARPLAY_DEMO_LAUNCHER'):
+    if GetDepend('RTCARPLAY_AUTO_CONNECT'):
         src += Glob('platform/audio_test_lubanlite.c')
 if GetDepend('RTCARPLAY_MICROPHONE'):
     src += Glob('platform/audio_input_lubanlite.c')

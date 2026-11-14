@@ -6,24 +6,34 @@ source "packages/third-party/rt-carplay/Kconfig"
 menu "rt-carplay application"
 
 config RTCARPLAY_DEMO_LAUNCHER
-    bool "LVGL USB/wireless demonstration launch page"
+    bool "LVGL 9 Launcher V2"
+    select RTCARPLAY_AUTO_CONNECT
+    select LV_FONT_MONTSERRAT_14
+    select LV_FONT_MONTSERRAT_16
+    select LV_FONT_MONTSERRAT_24
+    select LV_FONT_MONTSERRAT_32
     default n
     depends on LPKG_USING_LVGL && LVGL_V_9 && RTCARPLAY_USB_HOST && RTCARPLAY_VIDEO
     depends on !RT_USING_MODULE && !LPKG_USING_LVGL_SQUARELINE
     help
-      Display a USB/wireless selector with connection diagnostics and
-      pairing record management. USB starts automatically by default.
-      Wireless requires the Wi-Fi and Bluetooth iAP2 options; the UI starts
-      SoftAP/mDNS and RFCOMM and handles numeric pairing confirmation.
-      No console commands are needed. Phone consent remains required.
-      Mode switches quiesce the old session before restarting the receiver.
-      Requires the SDK lv_user_gui_init hook. LVGL never opens the panel;
-      CarPlay owns touch exclusively. Do not mix manual start/stop commands
-      with this automatic owner. Disable for manual bring-up.
+      Display the automatic USB/wireless connection dashboard, pairing,
+      devices, settings, audio tests and diagnostics. Application connection
+      ownership is independent of the GUI. Phone consent remains required.
+      Requires the SDK lv_user_gui_init hook. CarPlay owns panel input.
+
+config RTCARPLAY_AUTO_CONNECT
+    bool "Automatic USB/wireless connection manager"
+    default y if RTCARPLAY_DEMO_LAUNCHER
+    depends on RTCARPLAY_USB_HOST
+    help
+      Arm USB discovery and start wireless discovery together at boot.
+      A single application owner arbitrates sessions and performs bounded
+      retry/backoff and resource retirement. May run without LVGL.
+      Do not mix manual receiver/USB/iAP2 lifecycle commands with this owner.
 
 config RTCARPLAY_AUTO_START
     bool "Start the AirPlay receiver automatically after boot"
-    depends on !RTCARPLAY_DEMO_LAUNCHER
+    depends on !RTCARPLAY_DEMO_LAUNCHER && !RTCARPLAY_AUTO_CONNECT
     default n
     help
       Start the receiver from main() instead of waiting for the

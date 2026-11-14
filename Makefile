@@ -24,7 +24,7 @@ sdk-libraries:
 	$(MAKE) -C $(RTCP_ROOT) $(patsubst $(RTCP_ROOT)/%,%,$(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS))
 $(BOARD_BINS): | sdk-libraries $(BUILD)
 $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS): sdk-libraries
-check: $(BOARD_BINS)
+check: $(BOARD_BINS) check-auto-connections
 	@set -e; for t in $(BOARD_BINS); do ./$$t; done
 	$(MAKE) check-lubanlite-video check-lubanlite-touch check-lubanlite-demo check-lubanlite-bonds check-lubanlite-usb check-lubanlite-handoff check-lubanlite-reconnect check-lubanlite-capabilities check-iap2-endpoints check-usb-iap2-worker check-wireless-iap2-worker
 $(BUILD)/test_pairing_files: tests/unit/test_pairing_files.c app/pairing_files.c app/pairing_manager.c app/usb_pair_cache.c $(LIB) $(MBEDTLS_LIB)
@@ -45,6 +45,12 @@ check-lubanlite-usb:
 	  -I$(CHERRYUSB_ROOT)/class/hub -ffunction-sections -fdata-sections \
 	  tests/unit/test_lubanlite_usb_dma.c $(RTCP_ROOT)/core/usb/usb_device.c -Wl,--gc-sections -o $(BUILD)/test_lubanlite_usb_dma
 	$(BUILD)/test_lubanlite_usb_dma
+	$(CC) $(CFLAGS) $(CPPFLAGS) -DLPKG_RT_CARPLAY_LUBANLITE_USB -DRTCARPLAY_AUTO_CONNECT \
+	  -Itests/support/lubanlite_usb -Iplatform \
+	  -I$(CHERRYUSB_ROOT)/core -I$(CHERRYUSB_ROOT)/common \
+	  -I$(CHERRYUSB_ROOT)/class/hub -ffunction-sections -fdata-sections \
+	  tests/unit/test_lubanlite_usb_dma.c $(RTCP_ROOT)/core/usb/usb_device.c -Wl,--gc-sections -o $(BUILD)/test_lubanlite_usb_boot
+	$(BUILD)/test_lubanlite_usb_boot
 
 # Actual RT-Thread composition with Linux protocol ports and modeled scheduling.
 .PHONY: check-rtthread-app
@@ -95,6 +101,18 @@ check-lubanlite-touch:
 	$(BUILD)/test_lubanlite_touch
 
 # Dual-mode demo lifecycle with actual SDK LVGL public headers.
+.PHONY: check-auto-connections
+check-auto-connections:
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -DRTCARPLAY_IAP2 -DLPKG_RT_CARPLAY_LUBANLITE_WIFI \
+	  -Itests/support/lubanlite_demo -DRTCP_CONNECTION_SOURCE='"$(abspath app/connection_manager.c)"' \
+	  tests/unit/test_connection_auto.c app/pairing_manager.c -o $(BUILD)/test_connection_auto_headless
+	$(BUILD)/test_connection_auto_headless
+	$(CC) $(CFLAGS) $(CPPFLAGS) -DRTCARPLAY_VIDEO -DRTCARPLAY_IAP2 -DLPKG_RT_CARPLAY_LUBANLITE_WIFI \
+	  -Itests/support/lubanlite_demo -DRTCP_CONNECTION_SOURCE='"$(abspath app/connection_manager.c)"' \
+	  tests/unit/test_connection_auto.c app/pairing_manager.c -o $(BUILD)/test_connection_auto_gui
+	$(BUILD)/test_connection_auto_gui
+
 .PHONY: check-lubanlite-demo
 check-lubanlite-demo:
 	@test -n "$(SDK_ROOT)" || (echo 'set SDK_ROOT to Luban-Lite checkout'; exit 1)
@@ -104,7 +122,7 @@ check-lubanlite-demo:
 	$(CC) $(CFLAGS) $(CPPFLAGS) -DRTCARPLAY_AUDIO -DRTCARPLAY_IAP2 -DLPKG_RT_CARPLAY_LUBANLITE_WIFI \
 	  -Itests/support/lubanlite_demo -Iplatform \
 	  -MF $(BUILD)/connection-manager-full.d -fsyntax-only $(SDK_ROOT)/application/rt-thread/rtcarplay/app/connection_manager.c
-	$(CC) $(CFLAGS) $(CPPFLAGS) -DLV_CONF_SKIP -DRTCARPLAY_AUDIO -DRTCARPLAY_IAP2 -DLPKG_RT_CARPLAY_LUBANLITE_WIFI \
+	$(CC) $(CFLAGS) $(CPPFLAGS) -DLV_CONF_SKIP -DRTCARPLAY_VIDEO -DRTCARPLAY_AUDIO -DRTCARPLAY_IAP2 -DLPKG_RT_CARPLAY_LUBANLITE_WIFI \
 	  -Itests/support/lubanlite_demo -Iplatform \
 	  -I$(SDK_ROOT)/application/rt-thread/rtcarplay/app \
 	  -I$(SDK_ROOT)/packages/artinchip/lvgl-ui/lvgl_v9/lvgl \

@@ -370,6 +370,15 @@ int main(void)
         assert(carplay_app_display_info(&display) == RTCP_OK);
         assert(display.width == 1024 && display.height == 600);
         assert(!strcmp(display.pairing_code, "3939"));
+        rtcp_receiver_state_t published;
+        assert(carplay_app_session_state(NULL) == RTCP_EINVAL);
+        s_app.receiver_state = (rtcp_receiver_state_t){.running=true,
+            .transport_connected=true, .authenticated=true, .generation=cycle+1};
+        assert(carplay_app_session_state(&published) == RTCP_OK);
+        assert(published.running && published.authenticated && !published.session_established);
+        memset(&s_app.receiver_state, 0, sizeof(s_app.receiver_state));
+        assert(published.generation == cycle+1 && published.transport_connected);
+
         carplay_app_wired_info_t wired;
         ipv6_valid = false;
         assert(carplay_app_wired_info(&wired) == RTCP_ENOENT);
@@ -427,6 +436,10 @@ int main(void)
         memset(s_app.pairing_code, 0, sizeof(s_app.pairing_code));
         assert(wired.device_id[0] && wireless.device_id[0] && wireless.ssid[0]);
         assert(!strcmp(display.pairing_code, "3939"));
+        rtcp_receiver_state_t state = published;
+        assert(carplay_app_session_state(&state) == RTCP_ESTATE);
+        assert(!state.running && !state.transport_connected && !state.generation);
+
         assert(carplay_app_touch(RTCP_TOUCH_UP, 0, 10, 20) == RTCP_ESTATE);
         assert(carplay_app_request_siri() == RTCP_ESTATE);
         assert(carplay_app_stop() == RTCP_OK);

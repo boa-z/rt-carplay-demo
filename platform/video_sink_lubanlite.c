@@ -71,7 +71,7 @@ typedef struct {
 
     struct mpp_frame held;
     bool have_frame;
-    bool display_reported;
+    atomic_bool display_reported;
 
     atomic_bool stop;
     atomic_bool running;
@@ -832,6 +832,14 @@ bool carplay_video_sink_is_running(void)
 {
     if (!video_read_enter()) return false;
     bool result = video_is_running_owned();
+    video_read_leave();
+    return result;
+}
+
+bool carplay_video_sink_has_presented(void)
+{
+    if (!video_read_enter()) return false;
+    bool result = s_sink.running && s_sink.display_reported;
     video_read_leave();
     return result;
 }

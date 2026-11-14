@@ -101,6 +101,12 @@ int carplay_app_iap2_info(carplay_app_iap2_info_t *out) {
 void rtcp_bt_lubanlite_pairing_status(rtcp_bt_pairing_status_t *out) { memset(out, 0, sizeof(*out)); }
 int rtcp_bt_lubanlite_pairing_reply(uint32_t request, bool accept) { (void)request; (void)accept; return RTCP_OK; }
 int rtcp_bt_lubanlite_forget_bonds(void) { return RTCP_OK; }
+int carplay_app_session_state(rtcp_receiver_state_t *out) {
+    memset(out, 0, sizeof(*out));
+    out->running = receiver_running;
+    out->session_established = receiver_running;
+    return receiver_running ? RTCP_OK : RTCP_ESTATE;
+}
 int carplay_app_display_info(carplay_app_display_info_t *out) {
     memset(out, 0, sizeof(*out)); strcpy(out->pairing_code, "3939"); return RTCP_OK;
 }
@@ -128,6 +134,9 @@ void carplay_video_sink_stats(unsigned *n, unsigned *f, unsigned *d, unsigned *e
     if (d) *d = 0;
     if (e) *e = 0;
 }
+bool carplay_video_sink_has_presented(void) {
+    return status.wireless ? radio_mode == 2 && now_ms >= 1000 : pictures >= 2;
+}
 bool carplay_video_sink_is_running(void) { return receiver_running; }
 bool carplay_launcher_video_is_active(void) { return pictures >= 2 && !failed_handoff; }
 int carplay_app_touch(uint8_t phase, uint16_t id, uint16_t x, uint16_t y) {
@@ -143,6 +152,7 @@ int carplay_audio_test_stop(void) {++test_stops;return test_stop_error;}
 void carplay_audio_test_gain(unsigned v,bool m) {(void)v;(void)m;}
 void carplay_audio_test_status(audio_test_status_t *s) {memset(s,0,sizeof(*s));}
 int main(void) {
+    automatic = false; requested_wireless = false;
     demo_status_t snapshot;
     assert(!carplay_connection_status(&snapshot));
     fail_mutex = true;

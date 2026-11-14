@@ -1,6 +1,6 @@
 # rt-carplay 应用
 
-V2.1 的架构边界、生命周期修复、真实测试和独立实机限制见 [验证交接](docs/refactoring-v21-verification.md)。软件基线已验证，实机验收为 NOT_RUN。
+V2.1 的架构边界、生命周期修复和软件验证见 [验证交接](docs/refactoring-v21-verification.md)。后续自动连接、GUI/Headless 统一连接 Owner 与 1024×600 LVGL 9 界面见 [Launcher V2](docs/launcher-v2.md)；实机验收仍为 NOT_RUN。
 
 Luban-Lite 侧的 rt-carplay 集成入口。CarPlay 协议栈与公共 Receiver Runtime 位于 SDK 内置的[`rt-carplay`](../../../packages/third-party/rt-carplay) git submodule；本目录拥有应用组合、连接管理、板级适配、Kconfig、构建集成及 `ui/lvgl_launcher.c` 启动页。首次构建前需要初始化 submodule：
 
@@ -11,7 +11,7 @@ git submodule update --init packages/third-party/rt-carplay
 - 目标板：D213 `demo128-nand-carplay`，1024×600 面板
 - 内核：RT-Thread
 - 连接方式：USB 有线 CarPlay，或 Wi-Fi + 蓝牙无线 CarPlay
-- 默认界面：LVGL USB / Wireless 启动页，USB 自动启动
+- 默认界面：LVGL 9 Launcher V2，USB 与无线自动发现，无需选择模式
 
 ## 目录内容
 

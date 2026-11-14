@@ -13,5 +13,6 @@ int carplay_audio_input_stop(void);
  * A generation also preserves requests arriving during startup validation. */
 void carplay_audio_input_request_stop(void);
 void carplay_audio_input_mute(bool);
+bool carplay_audio_input_is_muted(void);
 void carplay_audio_input_reference(const int16_t *stereo, size_t frames);
 void carplay_audio_input_status(void);

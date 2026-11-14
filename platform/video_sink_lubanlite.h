@@ -37,6 +37,10 @@ int carplay_video_sink_set_display_observer(carplay_video_display_cb_t, void *);
 int carplay_video_sink_stop(void);
 
 bool carplay_video_sink_is_running(void);
+/* True only after a successful layer update and vsync in the current run.
+ * Decoder frame statistics include failed presentations; they are not ready.
+ * False while stopped/retiring. Host UI handoff is a separate policy result. */
+bool carplay_video_sink_has_presented(void);
 
 /* NAL units waiting for the decoder.  Useful to pace a file feeder. */
 size_t carplay_video_sink_pending(void);

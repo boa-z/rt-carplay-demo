@@ -1080,7 +1080,7 @@ int carplay_usb_close_session(void)
 static int cmd_carplay_usb_owned(int argc, char **argv)
 {
     const char *what = argc > 1 ? argv[1] : "status";
-#ifdef RTCARPLAY_DEMO_LAUNCHER
+#if defined(RTCARPLAY_DEMO_LAUNCHER) || defined(RTCARPLAY_AUTO_CONNECT)
     if (strcmp(what, "status") != 0 && strcmp(what, "net") != 0 &&
         !(strcmp(what, "desc") == 0 && argc == 2)) {
         rt_kprintf("[carplay_usb] automatic demo owns USB; unplug to end the session\n");

@@ -108,6 +108,35 @@ int usbh_kill_urb(struct usbh_urb *u)
 static void clean(void) { assert(!allocations && !semaphores && !locked); }
 int main(void)
 {
+#if defined(RTCARPLAY_AUTO_CONNECT)
+    /* A real class bind before open: phone already plugged in at boot.
+     * No callback is installed yet; the later owner reads the retained device. */
+    assert(s_usb.enabled);
+    static uint8_t raw[] = {
+        9,2,32,0,1,1,0,0x80,50,
+        9,4,0,0,2,0xff,0xfe,2,0,
+        7,5,4,2,0,2,0, 7,5,0x85,2,0,2,0
+    };
+    struct usbh_bus bus = {0};
+    struct usbh_hubport early = {0};
+    early.bus = &bus; early.dev_addr = 1; early.speed = USB_SPEED_HIGH;
+    early.device_desc.idVendor = APPLE_USB_VENDOR_ID;
+    early.device_desc.bNumConfigurations = 1;
+    early.raw_config_desc = raw;
+    early.config.config_desc.wTotalLength = sizeof(raw);
+    assert(carplay_usbmux_connect(&early, 0) == 0);
+    assert(s_usb.callback == NULL && s_usb.present);
+    assert(lubanlite_open(NULL, NULL, NULL) == RTCP_OK);
+    rtcp_usb_device_t boot_device;
+    assert(lubanlite_get_device(NULL, &boot_device) == RTCP_OK);
+    assert(boot_device.present && boot_device.vendor_id == APPLE_USB_VENDOR_ID);
+    assert(boot_device.configuration_value == 1 && boot_device.address == 1);
+    assert(carplay_usbmux_disconnect(&early, 0) == 0);
+    assert(lubanlite_get_device(NULL, &boot_device) == RTCP_ESTATE);
+    puts("actual USB class: boot-time bind before owner subscription retained and retired");
+#else
+    assert(!s_usb.enabled); /* Manual bring-up retains its opt-in behavior. */
+#endif
     struct usbh_hubport h = {0}; h.mutex = &h;
     struct usb_endpoint_descriptor ep = {.bEndpointAddress = 0x85};
     uint8_t bytes[200]; uint8_t *unaligned = bytes + 1;

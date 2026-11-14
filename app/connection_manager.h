@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include "rtcp_lubanlite.h"
 #include "pairing_manager.h"
+#include "rtcp/events.h"
 #if defined(RTCARPLAY_AUDIO)
 #include "audio_test_lubanlite.h"
 #endif
@@ -25,6 +26,10 @@ typedef struct {
     int error;
     char pin[16];
     bool usb;
+    bool automatic, wireless_enabled, usb_ready;
+    unsigned retry_seconds, reconnects;
+    int usb_error, wireless_error;
+    rtcp_receiver_state_t receiver;
     bool wireless, bt_ready, bt_connected, bt_identified, bt_authenticated;
     unsigned wifi_configs, availability, invites, reinvites, invite_acks;
     char ssid[33];
@@ -41,7 +46,11 @@ typedef struct {
  * the application owner before posting requests. Snapshots are caller-owned. */
 int carplay_connection_manager_start(void);
 bool carplay_connection_status(demo_status_t *out);
+/* Legacy manual diagnostic override; Launcher V2 uses automatic discovery. */
 void carplay_connection_select_mode(bool wireless);
+/* Idle-only setting. USB remains armed; false pauses wireless discovery.
+ * Settings are in RAM and reset to automatic/both at reboot. */
+bool carplay_connection_set_wireless_enabled(bool enabled);
 void carplay_connection_pairing_reply(uint32_t request, bool accept);
 void carplay_connection_retry(void);
 bool carplay_connection_files_open(void);

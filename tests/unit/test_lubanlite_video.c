@@ -289,7 +289,7 @@ int main(int argc, char **argv) {
     assert(!s_sink.display_reported);
     assert(drain_frames(&s_sink) == 3);
     assert(updates == 1 && vsyncs == 1 && displayed_id == 3);
-    assert(s_sink.display_reported); /* readiness, with no built-in UI policy */
+    assert(s_sink.display_reported && carplay_video_sink_has_presented()); /* no built-in UI policy */
     assert(return_count == 3 && returned[0] == 1 && returned[1] == 2 && returned[2] == 99);
     assert(s_sink.frame_count == 1 && s_sink.skipped_frames == 2 && s_sink.held.id == 3);
 
@@ -297,12 +297,16 @@ int main(int argc, char **argv) {
     s_display_observer = display_event; s_display_context = &visible_events;
     render_remaining = 1; fail_present = true;
     assert(drain_frames(&s_sink) == 1 && visible_events == 0);
+    assert(s_sink.frame_count > 0 && !carplay_video_sink_has_presented());
     render_remaining = 1; fail_present = false; fail_vsync = true;
     assert(drain_frames(&s_sink) == 1 && visible_events == 0);
+    assert(s_sink.frame_count > 0 && !carplay_video_sink_has_presented());
     render_remaining = 1; fail_vsync = false;
     assert(drain_frames(&s_sink) == 1 && visible_events == 1);
+    assert(carplay_video_sink_has_presented());
     render_remaining = 1;
     assert(drain_frames(&s_sink) == 1 && visible_events == 1);
+    assert(carplay_video_sink_has_presented());
     assert(carplay_video_sink_set_display_observer(NULL, NULL) == RTCP_ESTATE);
 
     reset(); /* Immediate stop must join a worker not yet scheduled. */

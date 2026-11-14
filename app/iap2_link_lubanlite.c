@@ -643,9 +643,9 @@ void carplay_iap2_get_status(carplay_iap2_status_t *out)
 static int cmd_carplay_iap2(int argc, char **argv)
 {
     const char *sub = argc >= 2 ? argv[1] : "status";
-#ifdef RTCARPLAY_DEMO_LAUNCHER
+#if defined(RTCARPLAY_DEMO_LAUNCHER) || defined(RTCARPLAY_AUTO_CONNECT)
     if (strcmp(sub, "status") != 0) {
-        rt_kprintf("LVGL demo owns Bluetooth iAP2; use the connection selector\n");
+        rt_kprintf("Automatic connection manager owns Bluetooth iAP2; use the connection selector\n");
         return 0;
     }
 #endif

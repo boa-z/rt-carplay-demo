@@ -237,6 +237,7 @@ typedef struct {
     carplay_app_screen_cb_t on_screen;
     void *screen_context;
 
+    rtcp_receiver_state_t receiver_state;
     rtcp_screen_stats_t screen_stats;
     rtcp_audio_stats_t audio_stats;
     rtcp_timing_stats_t timing_stats;
@@ -946,6 +947,7 @@ static void poll_thread(void *argument)
             rt_mutex_take(app->lock, RT_WAITING_NO) == RT_EOK) {
             rtcp_receiver_diagnostics_t diagnostics;
             (void)rtcp_receiver_get_diagnostics(app->receiver, &diagnostics);
+            (void)rtcp_receiver_get_state(app->receiver, &app->receiver_state);
             app->screen_stats = diagnostics.screen;
             app->audio_stats = diagnostics.audio;
             app->timing_stats = diagnostics.timing;
@@ -1570,6 +1572,22 @@ bool carplay_app_is_running(void)
     return s_receiver_running;
 }
 
+int carplay_app_session_state(rtcp_receiver_state_t *state)
+{
+    if (!state) return RTCP_EINVAL;
+    memset(state, 0, sizeof(*state));
+    if (!snapshot_enter()) return RTCP_ESTATE;
+    int result = RTCP_ESTATE;
+    if (s_receiver_running && !s_receiver_stop && s_app.lock &&
+        rt_mutex_take(s_app.lock, RT_WAITING_NO) == RT_EOK) {
+        *state = s_app.receiver_state;
+        (void)rt_mutex_release(s_app.lock);
+        result = RTCP_OK;
+    }
+    snapshot_leave();
+    return result;
+}
+
 int carplay_app_display_info(carplay_app_display_info_t *info)
 {
     if (info == NULL) return RTCP_EINVAL;
@@ -1731,9 +1749,9 @@ int carplay_app_autostart_wired(void)
 
 static int cmd_carplay_start(int argc, char **argv)
 {
-#ifdef RTCARPLAY_DEMO_LAUNCHER
+#if defined(RTCARPLAY_DEMO_LAUNCHER) || defined(RTCARPLAY_AUTO_CONNECT)
     (void)argc; (void)argv;
-    rt_kprintf("LVGL demo is active; select USB or Wireless on the display\n");
+    rt_kprintf("Automatic connection manager owns the receiver\n");
     return 0;
 #endif
     bool wired = argc > 1 && strcmp(argv[1], "wired") == 0;
@@ -1762,8 +1780,8 @@ static int cmd_carplay_stop(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
-#ifdef RTCARPLAY_DEMO_LAUNCHER
-    rt_kprintf("LVGL demo owns the receiver; use the connection selector\n");
+#if defined(RTCARPLAY_DEMO_LAUNCHER) || defined(RTCARPLAY_AUTO_CONNECT)
+    rt_kprintf("Automatic connection manager owns the receiver\n");
     return 0;
 #endif
     (void)carplay_app_stop();
@@ -2019,9 +2037,9 @@ done:
 static int carplay_bt_command_owned(int argc, char **argv)
 {
     const char *sub = argc >= 2 ? argv[1] : "status";
-#ifdef RTCARPLAY_DEMO_LAUNCHER
+#if defined(RTCARPLAY_DEMO_LAUNCHER) || defined(RTCARPLAY_AUTO_CONNECT)
     if (strcmp(sub, "status") != 0) {
-        rt_kprintf("LVGL demo owns Bluetooth; use the connection selector\n");
+        rt_kprintf("Automatic connection manager owns Bluetooth; use the connection selector\n");
         return 0;
     }
 #endif

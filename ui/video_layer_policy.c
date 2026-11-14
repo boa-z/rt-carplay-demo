@@ -6,6 +6,7 @@
 #include <rtthread.h>
 #include <rtdevice.h>
 #include <string.h>
+#include <stdatomic.h>
 #include "artinchip_fb.h"
 
 /* The reference application owns the entire launcher UI layer. A host with
@@ -13,7 +14,7 @@
 static rt_device_t framebuffer;
 static struct aicfb_alpha_config saved_alpha;
 static bool saved;
-static volatile bool handed_off;
+static atomic_bool handed_off;
 
 bool carplay_launcher_video_is_active(void)
 {

@@ -14,6 +14,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "rtcp/events.h"
 
 /* Screen sink.  configuration=true announces the H.264 SPS/PPS; otherwise
  * annex_b is one access unit prefixed with a start code.  Called from the
@@ -66,6 +67,9 @@ int carplay_app_autostart_wired(void);
 int carplay_app_stop(void);
 
 bool carplay_app_is_running(void);
+/* Owner-published protocol state, copied under the snapshot/queue guards.
+ * May lag one diagnostic tick (100 ms); zeroed on failure/retirement. */
+int carplay_app_session_state(rtcp_receiver_state_t *state);
 
 /* Copied display identity. Safe across stop/restart; returns ESTATE during
  * lifecycle changes and clears the output on failure. */

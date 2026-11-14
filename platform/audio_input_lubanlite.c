@@ -194,6 +194,7 @@ int carplay_audio_input_stop(void)
     atomic_flag_clear(&input_lifecycle);return result;
 }
 void carplay_audio_input_mute(bool mute){atomic_store(&input.mute,mute);}
+bool carplay_audio_input_is_muted(void){return atomic_load(&input.mute);}
 void carplay_audio_input_status(void)
 {
     rt_kprintf("[carplay-mic] running=%u mute=%u packets=%u samples=%u errors=%u\n",

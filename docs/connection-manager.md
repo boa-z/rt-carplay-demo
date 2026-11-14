@@ -1,42 +1,60 @@
 [English](connection-manager.md) | [简体中文](zh-CN/connection-manager.md)
 
-# Application connection manager
+# Automatic application connection manager
 
 ## Responsibility
 
-`app/connection_manager.c` owns the application connection worker, receiver start/stop, USB pairing, wireless iAP2 handover, connection stage publication, pairing confirmation requests, pairing-file operations and audio-test scheduling. It has no LVGL include or symbol dependency. `ui/lvgl_launcher.c` owns LVGL objects, display handoff policy and the launcher's pointer queue. The UI posts requests through `app/connection_manager.h` and reads copies of manager state. Protocol endpoint teardown remains the Receiver runtime's responsibility.
-
-This extraction completes a boundary required by the V2.1 refactor. It preserves the existing USB/wireless mode selector and connection timing. Simultaneous USB/wireless standby, automatic arbitration and the Launcher V2 visual redesign are subsequent work; this change does not claim to implement them.
+`app/connection_manager.c` owns the application connection worker, Receiver start/stop, USB pairing, wireless iAP2 handoff, stage publication, pairing confirmation, device trust records and audio-test scheduling. It has no LVGL dependency. `ui/lvgl_launcher.c` owns presentation and the pointer queue; it posts requests and reads caller-owned snapshots. Protocol endpoint teardown stays in the independent SDK Receiver. V2.1 was completed as the software prerequisite recorded in [the verification handoff](refactoring-v21-verification.md) before this automatic connection work.
 
 ## Startup and lifetime
 
-Call `carplay_connection_manager_start()` from the application startup owner. Initialization itself is not concurrent. Successful calls are idempotent. Mutex allocation, worker creation and worker startup failures return `RTCP_ENOMEM` or `RTCP_EIO`; a failed worker creation/startup can be retried without creating a second worker. The manager and its status mutex have application lifetime. This version does not expose a manager destruction API.
+`RTCARPLAY_AUTO_CONNECT` enables the same application owner with or without LVGL. Launcher V2 selects it and starts it after UI/input registration. Headless starts it from `main()`. With both wireless options present, boot arms USB discovery and starts SoftAP/mDNS/Bluetooth/iAP2 without requiring a mode selection. The USB configuration hook is enabled in static initialization before CherryUSB starts, so an already plugged-in phone can enumerate before GUI startup; the later owner reads its retained snapshot. Manual builds retain explicit USB enable behavior.
 
-The existing GUI configuration starts the manager after creating the launch page. The manual Headless profile keeps its existing CLI receiver lifecycle. The manager source can be compiled independently of LVGL with or without wireless/audio-test support; that compilation is distinct from enabling automatic connection policy in the Headless firmware.
+`carplay_connection_manager_start()` is called by one startup owner, is idempotent after successful startup, and returns `RTCP_ENOMEM` or `RTCP_EIO` on allocation/scheduling failure. Failed startup can be retried. The worker and mutex have application lifetime; no manager destruction API is exposed. A failed USB service open retries every five seconds while wireless remains available.
 
-## Requests and snapshots
+## Arbitration and recovery
 
-`carplay_connection_status()` copies the current connection stage, error, pairing challenge, endpoint and diagnostic counters under the manager mutex. It returns false if no manager exists or a nonblocking lock attempt fails. The caller owns the resulting value; subsequent worker updates do not change the copy. Transport, authentication and media readiness still have their separate SDK states; the application stage is a presentation summary.
+Only one Receiver and one application session owner run. During idle wireless discovery, an attached USB phone wins if no Bluetooth, handoff or AirPlay contender has been observed. Once wireless pairing/handoff starts, USB waits until that attempt ends; it never steals an active session. A USB attempt retires the wireless iAP2 owner, provider and Receiver before starting its IPv6 Receiver. USB enumeration stays armed during wireless operation. The unselected radio session is paused during a wired attempt/session because the board shares Receiver/media/MFi resources; simultaneous standby does not mean two concurrent protocol sessions.
 
-Mode selection, retry, Bluetooth confirmation, pairing-file scan/delete and audio-test controls enter through manager functions. The worker retains ownership of session teardown, file I/O and sound-device test start/stop. File and audio pages reserve connection ownership before the worker processes them. Opening the file manager during wireless standby retires the borrowed iAP2/receiver state before accessing persistent records. Requests that violate the current stage or reservation are ignored, preserving the existing UI policy.
+Wireless retains the existing bond restore, RFCOMM service, MFi and Wi-Fi handoff sequence. Its existing owner pages saved bonds after two seconds and retries every 30 seconds, pausing paging during handoff or a live session. No bond key, SDP or protocol timer was rewritten. The manager's separate failed-attempt cooldown is 5, 10, 20, 40 and then 60 seconds; the other path remains eligible while one path cools down. Normal disconnect uses a one-second quiet period. USB removal resets its cooldown. Retry clears both cooldowns. Deadline comparisons handle the 32-bit tick wrap.
 
-The file-list snapshot API copies entries into caller-provided storage and changes the revision only when a new list is available. UI button user data points into the UI-owned copy. Audio snapshots similarly copy selected settings and status. Audio test gain changes are posted to the manager and applied by the worker; no audio negotiation, decoding, mixing, microphone encryption or AEC behavior changes.
+USB trust, IPv6 readiness and first-frame waits retain their existing transport limits. GUI LIVE requires `carplay_video_sink_has_presented()`: successful layer submission and vsync, independently of decoded-frame counters. Failed presentation can increase decoded counts but cannot mark the session LIVE. Headless uses the copied protocol session state because no physical display exists. Protocol session loss after LIVE triggers cleanup and reconnect even if USB/iAP2 remains attached. State snapshots may lag by one 100 ms publication tick; loss detection first observes an established session before interpreting a later false value as disconnection.
 
-`carplay_connection_touch()` gates input against the manager's closing stage before calling the receiver's thread-safe queue. The receiver also excludes touch/Siri enqueue from start/stop to prevent access to a destroyed queue mutex. The launcher's own pointer mutex is independent of the manager mutex.
+Cleanup waits for USB and wireless owners before stopping the Receiver. Receiver shutdown retries media retirement before releasing borrowed resources. A worker that cannot retire keeps ownership and blocks replacement; it is never force-freed for a faster reconnect. Host scheduling models verify this order; physical USB cancellation and radio/device progress still require board tests.
+
+## Requests, settings and snapshots
+
+`carplay_connection_status()` copies stage, errors, discovery status, pairing challenge, endpoint, counters and separate public Receiver readiness fields under a nonblocking manager lock. A false result means no available snapshot. Copies do not change after publication. Stage is a UI summary; transport, authentication, session, video, audio and input readiness stay separate.
+
+Idle-only `carplay_connection_set_wireless_enabled()` selects automatic both-path discovery or USB-only operation. USB remains enabled. This setting is held in RAM and resets to both-path discovery at reboot. The legacy `carplay_connection_select_mode()` remains a manual diagnostic override, but Launcher V2 does not call it. `carplay_connection_retry()` accepts idle/failed requests. Bluetooth replies retain the current request token; the platform rejects stale confirmations.
+
+Device and audio pages reserve connection ownership. Wireless standby retires iAP2/Receiver before record access; deletion also stops a wired Receiver before reloading persistence. File snapshots copy entries into UI-owned storage with revisions, so row callbacks never borrow a worker array. Device identity files are excluded from deletion. Bluetooth reset affects all saved bonds; the UI explicitly confirms that scope. Audio tests release the Receiver before opening sound0/dmic0 and do not resume it until stop succeeds. Gain/test commands are applied by the worker. Negotiation, decoding, jitter, Mixer/Direct, encrypted microphone uplink and AEC policy remain unchanged.
+
+Touch is gated by the manager's closing stage and then queued through the Receiver owner's input interface. The launcher pointer mutex remains independent. Read-only settings and diagnostics never manipulate SDK objects. Manual lifecycle shell commands are blocked in automatic builds; use the manager command instead:
+
+```sh
+carplay_connection status
+carplay_connection retry
+carplay_connection wireless off
+carplay_connection wireless on
+```
 
 ## Validation
 
-Run from `packages/third-party/rt-carplay` with `SDK_ROOT` pointing to this checkout:
+Run from the Luban-Lite repository:
 
 ```sh
-make check-lubanlite-demo SDK_ROOT=/path/to/luban-lite-carplay
-make -j8 check
+make -C application/rt-thread/rtcarplay -j8 check
+make -C application/rt-thread/rtcarplay check-auto-connections
+make -C application/rt-thread/rtcarplay check-lubanlite-demo
+make -C application/rt-thread/rtcarplay check-lubanlite-usb
+make -C application/rt-thread/rtcarplay check-lubanlite-video
 ```
 
-The application regression compiles the actual manager and launcher sources against SDK LVGL headers. It executes the actual worker with modeled USB, radio, media and scheduler services under ASan/UBSan. Coverage includes trust/storage failure, replug, network/first-frame wait, quiescent close, asynchronous Bluetooth failure, wireless mode switching, pairing manager exclusion, pointer routing/overflow and audio-test ownership. Added request-API checks cover startup failure/retry, idempotent startup, copied snapshots, file-list revisions and mutually exclusive management pages. Two additional syntax checks compile the actual manager without an LVGL include path, with audio/wireless enabled and disabled.
+The actual automatic worker runs 32 repetitions of boot discovery, wireless reservation against USB arrival, USB cooldown/retry, asynchronous radio failure, USB-open failure, first-frame timeout, attached AirPlay loss, Receiver startup failure and clock wrap, under both GUI and Headless compilation. The actual USB Class binds before owner subscription in a separate automatic build. Video tests reject readiness after layer/vsync failure even with nonzero decoded counters. Existing manual-mode, trust/storage, manager exclusion, pointer overflow/routing, audio ownership, lifecycle and protocol tests are retained. Two syntax checks compile the manager without LVGL headers. [Launcher verification](launcher-v2.md) adds actual LVGL rendering and UI event routing with explicitly modeled connection values.
 
-The SDK Make suite passes 58 test binaries plus the legacy-configuration encrypted end-to-end variant; CTest passes 59 cases, including the actual RT-Thread wrapper lifecycle regression. Host tests and syntax checks do not validate physical USB cancellation, Bluetooth reconnection, sound-device release or panel handoff. GUI/Headless cross-build results must be associated with the exact published source revisions. D213 validation of these changes is `NOT_RUN` until a matching image is flashed and tested.
+Host ASan/UBSan, LVGL rendering and GUI/Headless cross-builds are separate evidence. This change's exact CI revision and images are recorded in its verification report. Physical D213 startup, display, USB/radio reconnection, persistence, audio and touch remain `NOT_RUN` until a matching image is tested.
 
 ## Receiver integration
 
-The pinned SDK now accepts public `rtcp_receiver_config_t.platform`, `.media` and `.iap2` descriptors. The RT-Thread composition populates those directly, and its owner sends HID, Siri and tunneled iAP2 through public Receiver functions. Video remains Annex-B H.264; audio preserves LPCM/AAC/Opus format, stream-slot and timestamp metadata. The host still owns decoding/device workers, touch focus and UI handoff. This API migration does not complete the remaining board-adapter relocation or the singleton diagnostic ownership audit. See the SDK's [Receiver API](../../../../packages/third-party/rt-carplay/docs/receiver-api.md) and [lifecycle contract](../../../../packages/third-party/rt-carplay/docs/lifecycle-and-ownership.md).
+The host composes public `rtcp_receiver_config_t.platform`, `.media` and `.iap2` descriptors and queues HID, Siri and tunneled iAP2 for the poll owner. `carplay_app_session_state()` copies owner-published public state without borrowing the protocol object. Video stays Annex-B H.264, and audio retains LPCM/AAC/Opus metadata and timestamps. The SDK remains independent, and cherryusb-ipheth remains an independent driver. See the SDK [Receiver API](../../../../packages/third-party/rt-carplay/docs/receiver-api.md) and [lifecycle contract](../../../../packages/third-party/rt-carplay/docs/lifecycle-and-ownership.md).
