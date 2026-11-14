@@ -27,5 +27,6 @@ void rt_thread_mdelay(int);
 rt_thread_t rt_thread_create(const char *,void (*)(void *),void *,unsigned,unsigned,unsigned);
 int rt_thread_startup(rt_thread_t);
 int rt_thread_delete(rt_thread_t);
+rt_thread_t rt_thread_self(void);
 #define MSH_CMD_EXPORT_ALIAS(fn,alias,desc) \
     static __typeof__(&fn) const host_command_##alias __attribute__((used)) = &fn

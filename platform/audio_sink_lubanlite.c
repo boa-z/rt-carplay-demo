@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <stdatomic.h>
 #include <math.h>
+#include <limits.h>
 #include "audio_jitter.h"
 #include "audio_mixer.h"
 #include "audio_codec.h"
@@ -99,6 +100,43 @@ typedef struct {
 } audio_sink_t;
 
 static audio_sink_t s_sink;
+
+/* Public operations retain a reader reference through their final semaphore
+ * or mutex access. Lifecycle owners retire readers before reset/destruction.
+ * This storage is outside the resettable sink and never cleared with it. */
+#define AUDIO_RETIRING (UINT_MAX ^ (UINT_MAX >> 1))
+static atomic_uint s_audio_access;
+static atomic_flag s_audio_lifecycle = ATOMIC_FLAG_INIT;
+
+static bool audio_read_enter(void)
+{
+    unsigned access = atomic_load(&s_audio_access);
+    do {
+        if ((access & AUDIO_RETIRING) || access == AUDIO_RETIRING - 1U)
+            return false;
+    } while (!atomic_compare_exchange_weak(&s_audio_access, &access, access + 1U));
+    return true;
+}
+
+static void audio_read_leave(void)
+{
+    atomic_fetch_sub(&s_audio_access, 1U);
+}
+
+static void audio_retire_readers(void)
+{
+    atomic_fetch_or(&s_audio_access, AUDIO_RETIRING);
+    while (atomic_load(&s_audio_access) != AUDIO_RETIRING) rt_thread_mdelay(1);
+}
+
+static void audio_lifecycle_leave(void)
+{
+    atomic_store(&s_audio_access, 0U);
+    atomic_flag_clear(&s_audio_lifecycle);
+}
+
+static int audio_stop_owned(void);
+
 
 /* ------------------------------------------------------------------ */
 /* Audio device (writer thread only)                                   */
@@ -536,10 +574,11 @@ static void sink_thread(void *argument)
 /* Public API                                                          */
 /* ------------------------------------------------------------------ */
 
-int carplay_audio_sink_start(void)
+static int audio_start_owned(void)
 {
     audio_sink_t *sink = &s_sink;
-    if (sink->running || sink->thread_running) return RTCP_ESTATE;
+    if (sink->running || sink->thread_running || sink->dev != NULL ||
+        sink->lock != NULL || sink->wake != NULL) return RTCP_ESTATE;
 
     memset(sink, 0, sizeof(*sink));
     sink->applied_volume = -1;
@@ -595,29 +634,31 @@ int carplay_audio_sink_start(void)
     if (rt_thread_startup(sink->thread) != RT_EOK) {
         sink->thread_running = false;
         (void)rt_thread_delete(sink->thread);
-        carplay_audio_sink_stop(); return RTCP_EIO;
+        (void)audio_stop_owned(); return RTCP_EIO;
     }
     return RTCP_OK;
 }
 
-void carplay_audio_sink_stop(void)
+static int audio_stop_owned(void)
 {
     audio_sink_t *sink = &s_sink;
-    if (!sink->running) return;
+    if (sink->dev == NULL && sink->lock == NULL && sink->wake == NULL)
+        return RTCP_OK;
 
     sink->running = false;
     sink->stop = true;
     if (sink->wake != NULL) (void)rt_sem_release(sink->wake);
     /* rt_device_write() blocks in the replay data queue until the audio ISR
      * consumes a block.  A stalled codec would keep the writer there, so wait
-     * with a bound and leak the sink rather than free memory still in use. */
+     * with a bound and retain ownership rather than free memory still in use.
+     * A later stop retries cleanup even after the writer exits asynchronously. */
     unsigned guard = 500U;
     while (sink->thread_running && guard-- != 0U) {
         rt_thread_mdelay(10);
     }
     if (sink->thread_running) {
-        rt_kprintf("[" TAG "] writer did not stop; resources left allocated\n");
-        return;
+        rt_kprintf("[" TAG "] writer did not stop; ownership retained\n");
+        return RTCP_ETIMEDOUT;
     }
 
     if (sink->dev != NULL && sink->device_opened) {
@@ -637,14 +678,15 @@ void carplay_audio_sink_stop(void)
     for (unsigned i = 0; i < RTCP_AUDIO_LANES; ++i) { rtcp_audio_jitter_destroy(sink->queue[i]); sink->queue[i] = NULL; }
     sink->thread = NULL;
     sink->thread_running = false;
+    return RTCP_OK;
 }
 
-bool carplay_audio_sink_is_running(void)
+static bool audio_is_running_owned(void)
 {
     return s_sink.running;
 }
 
-size_t carplay_audio_sink_pending(void)
+static size_t audio_pending_owned(void)
 {
     audio_sink_t *sink = &s_sink;
     if (!sink->running || sink->lock == NULL) return 0U;
@@ -658,7 +700,7 @@ size_t carplay_audio_sink_pending(void)
     return pending;
 }
 
-int carplay_audio_sink_packet(uint16_t type, const rtcp_audio_format_t *format,
+static int audio_packet_owned(uint16_t type, const rtcp_audio_format_t *format,
                                const uint8_t *data, size_t len, uint32_t timestamp, uint64_t arrival)
 {
     audio_sink_t *sink = &s_sink;
@@ -693,7 +735,7 @@ int carplay_audio_sink_packet(uint16_t type, const rtcp_audio_format_t *format,
     if (result == RTCP_OK) (void)rt_sem_release(sink->wake);
     return result;
 }
-void carplay_audio_sink_slot_stop(unsigned slot)
+static void audio_slot_stop_owned(unsigned slot)
 {
     audio_sink_t *sink=&s_sink;
     if(!sink->running || slot>=AIRPLAY_AUDIO_MAX_STREAMS || !sink->lock)return;
@@ -701,22 +743,21 @@ void carplay_audio_sink_slot_stop(unsigned slot)
     rtcp_audio_jitter_flush(sink->queue[slot]);++sink->generation[slot];
     (void)rt_mutex_release(sink->lock);(void)rt_sem_release(sink->wake);
 }
-void carplay_audio_sink_stream_stop(uint16_t type)
+static void audio_stream_stop_owned(uint16_t type)
 {
     for(unsigned i=0;i<AIRPLAY_AUDIO_MAX_STREAMS;++i)
-        if(airplay_audio_slot_type(i)==type)carplay_audio_sink_slot_stop(i);
+        if(airplay_audio_slot_type(i)==type)audio_slot_stop_owned(i);
 }
 int carplay_audio_sink_pcm(uint32_t rate, uint8_t channels, const uint8_t *data, size_t len)
 {
     /* Compatibility entry for local PCM producers; serialized on their owner. */
-    static uint32_t timestamp;
+    static atomic_uint timestamp;
     rtcp_audio_format_t f = {.sample_rate=rate, .channels=channels, .clock_rate=rate};
-    uint32_t ts = timestamp;
-    if (channels) timestamp += (uint32_t)(len/(2U*channels));
+    uint32_t ts = atomic_fetch_add(&timestamp, channels ? (uint32_t)(len/(2U*channels)) : 0U);
     return carplay_audio_sink_packet(100, &f, data, len, ts, sink_now_us());
 }
 
-void carplay_audio_sink_stats(unsigned *packets, unsigned *dropped_bytes,
+static void audio_stats_owned(unsigned *packets, unsigned *dropped_bytes,
                               unsigned *write_errors, unsigned *replays)
 {
     if (packets != NULL) *packets = s_sink.packets;
@@ -725,7 +766,7 @@ void carplay_audio_sink_stats(unsigned *packets, unsigned *dropped_bytes,
     if (replays != NULL) *replays = s_sink.replays;
 }
 
-void carplay_audio_sink_set_volume_db(float volume_db)
+static void audio_set_volume_db_owned(float volume_db)
 {
     audio_sink_t *sink = &s_sink;
     if (!sink->running || sink->lock == NULL) return;
@@ -755,7 +796,7 @@ void carplay_audio_sink_set_volume_db(float volume_db)
     (void)rt_sem_release(sink->wake);
 }
 
-int carplay_audio_sink_volume_percent(void)
+static int audio_volume_percent_owned(void)
 {
     audio_sink_t *sink = &s_sink;
     if (!sink->running || sink->lock == NULL) return -1;
@@ -765,7 +806,7 @@ int carplay_audio_sink_volume_percent(void)
     return percent;
 }
 
-void carplay_audio_sink_modes(const airplay_audio_modes_t *modes)
+static void audio_modes_owned(const airplay_audio_modes_t *modes)
 {
     audio_sink_t *sink=&s_sink;
     if(!modes || !sink->running || !sink->lock)return;
@@ -775,7 +816,7 @@ void carplay_audio_sink_modes(const airplay_audio_modes_t *modes)
     if(modes->has_main_audio)sink->focus.remote_audio_entity=modes->main_audio_entity;
     (void)rt_mutex_release(sink->lock);(void)rt_sem_release(sink->wake);
 }
-bool carplay_audio_sink_duck(bool ducked,float db,uint32_t duration)
+static bool audio_duck_owned(bool ducked,float db,uint32_t duration)
 {
     audio_sink_t *sink=&s_sink;
     if(!sink->running || !sink->lock || !isfinite(db) || db< -144 || db>0 || duration>10000)return false;
@@ -783,7 +824,7 @@ bool carplay_audio_sink_duck(bool ducked,float db,uint32_t duration)
     sink->ducked=ducked;sink->duck_db=db;sink->duck_ms=duration;
     (void)rt_mutex_release(sink->lock);(void)rt_sem_release(sink->wake);return true;
 }
-int carplay_audio_sink_local_pcm(const uint8_t *data,size_t len,uint32_t rate,uint8_t channels,bool critical)
+static int audio_local_pcm_owned(const uint8_t *data,size_t len,uint32_t rate,uint8_t channels,bool critical)
 {
     audio_sink_t *sink=&s_sink;
     if(!sink->running || !sink->lock)return RTCP_ESTATE;
@@ -835,7 +876,7 @@ static void probe_status(void)
     rt_kprintf("audio probe: state=%s frames=%u rate=%u ignored_live=%u\n",
       names[state],s_sink.probe_frames,s_sink.probe_rate,s_sink.probe_ignored);
 }
-static void audio_probe_command(int argc,char **argv)
+static void audio_probe_command_owned(int argc,char **argv)
 {
     if(!s_sink.running) {rt_kprintf("[carplay-aud] receiver audio not running\n");return;}
     unsigned cmd=0;
@@ -855,9 +896,9 @@ static void audio_probe_command(int argc,char **argv)
 usage:
     rt_kprintf("Usage: carplay_audio_probe [capture|replay|stop|clear|status]\n");
 }
-MSH_CMD_EXPORT_ALIAS(audio_probe_command,carplay_audio_probe,Capture decoded media and replay from RAM);
 
-void carplay_audio_sink_diagnostics(void)
+
+static void audio_diagnostics_owned(void)
 {
     audio_sink_t *s=&s_sink;
     if(!s->running)return;
@@ -886,13 +927,157 @@ void carplay_audio_sink_diagnostics(void)
           (unsigned)q.queued,(unsigned)q.late,(unsigned)q.duplicates,(unsigned)q.overflow);
     }
 }
-static void audio_path_command(int argc,char **argv)
+static void audio_path_command_owned(int argc,char **argv)
 {
     if(argc==2 && (!strcmp(argv[1],"direct") || !strcmp(argv[1],"mixer"))) {
         if(!s_sink.running) {rt_kprintf("[carplay-aud] receiver audio not running\n");return;}
         atomic_store(&s_sink.direct_requested,!strcmp(argv[1],"direct"));
         (void)rt_sem_release(s_sink.wake);
     } else if(argc!=1) {rt_kprintf("Usage: carplay_audio_path [mixer|direct]\n");return;}
-    carplay_audio_sink_diagnostics();
+    audio_diagnostics_owned();
+}
+
+
+/* Only lifecycle entry is exclusive. Readers coexist during normal playback;
+ * the original bounded queue lock and all media algorithms remain unchanged. */
+int carplay_audio_sink_start(void)
+{
+    if (atomic_flag_test_and_set(&s_audio_lifecycle)) return RTCP_ESTATE;
+    audio_retire_readers();
+    int result = audio_start_owned();
+    audio_lifecycle_leave();
+    return result;
+}
+
+int carplay_audio_sink_stop(void)
+{
+    if (atomic_flag_test_and_set(&s_audio_lifecycle)) return RTCP_ESTATE;
+    if (s_sink.thread_running && s_sink.thread == rt_thread_self()) {
+        atomic_flag_clear(&s_audio_lifecycle);
+        return RTCP_ESTATE;
+    }
+    audio_retire_readers();
+    int result = audio_stop_owned();
+    audio_lifecycle_leave();
+    return result;
+}
+
+bool carplay_audio_sink_is_running(void)
+{
+    if (!audio_read_enter()) return false;
+    bool result = audio_is_running_owned();
+    audio_read_leave();
+    return result;
+}
+
+size_t carplay_audio_sink_pending(void)
+{
+    if (!audio_read_enter()) return 0U;
+    size_t result = audio_pending_owned();
+    audio_read_leave();
+    return result;
+}
+
+int carplay_audio_sink_packet(uint16_t type, const rtcp_audio_format_t *format,
+                            const uint8_t *data, size_t len,
+                            uint32_t timestamp, uint64_t arrival)
+{
+    if (!audio_read_enter()) return RTCP_ESTATE;
+    int result = audio_packet_owned(type, format, data, len, timestamp, arrival);
+    audio_read_leave();
+    return result;
+}
+
+void carplay_audio_sink_slot_stop(unsigned slot)
+{
+    if (!audio_read_enter()) return;
+    audio_slot_stop_owned(slot);
+    audio_read_leave();
+}
+
+void carplay_audio_sink_stream_stop(uint16_t type)
+{
+    if (!audio_read_enter()) return;
+    audio_stream_stop_owned(type);
+    audio_read_leave();
+}
+
+void carplay_audio_sink_stats(unsigned *packets, unsigned *dropped_bytes,
+                            unsigned *write_errors, unsigned *replays)
+{
+    if (packets) *packets = 0U;
+    if (dropped_bytes) *dropped_bytes = 0U;
+    if (write_errors) *write_errors = 0U;
+    if (replays) *replays = 0U;
+    if (!audio_read_enter()) return;
+    audio_stats_owned(packets, dropped_bytes, write_errors, replays);
+    audio_read_leave();
+}
+
+void carplay_audio_sink_set_volume_db(float db)
+{
+    if (!audio_read_enter()) return;
+    audio_set_volume_db_owned(db);
+    audio_read_leave();
+}
+
+int carplay_audio_sink_volume_percent(void)
+{
+    if (!audio_read_enter()) return -1;
+    int result = audio_volume_percent_owned();
+    audio_read_leave();
+    return result;
+}
+
+void carplay_audio_sink_modes(const airplay_audio_modes_t *modes)
+{
+    if (!audio_read_enter()) return;
+    audio_modes_owned(modes);
+    audio_read_leave();
+}
+
+bool carplay_audio_sink_duck(bool ducked, float db, uint32_t duration)
+{
+    if (!audio_read_enter()) return false;
+    bool result = audio_duck_owned(ducked, db, duration);
+    audio_read_leave();
+    return result;
+}
+
+int carplay_audio_sink_local_pcm(const uint8_t *data, size_t len,
+                               uint32_t rate, uint8_t channels, bool critical)
+{
+    if (!audio_read_enter()) return RTCP_ESTATE;
+    int result = audio_local_pcm_owned(data, len, rate, channels, critical);
+    audio_read_leave();
+    return result;
+}
+
+void carplay_audio_sink_diagnostics(void)
+{
+    if (!audio_read_enter()) return;
+    audio_diagnostics_owned();
+    audio_read_leave();
+}
+
+static void audio_probe_command(int argc, char **argv)
+{
+    if (!audio_read_enter()) {
+        rt_kprintf("[carplay-aud] audio lifecycle busy\n");
+        return;
+    }
+    audio_probe_command_owned(argc, argv);
+    audio_read_leave();
+}
+MSH_CMD_EXPORT_ALIAS(audio_probe_command,carplay_audio_probe,Capture decoded media and replay from RAM);
+
+static void audio_path_command(int argc, char **argv)
+{
+    if (!audio_read_enter()) {
+        rt_kprintf("[carplay-aud] audio lifecycle busy\n");
+        return;
+    }
+    audio_path_command_owned(argc, argv);
+    audio_read_leave();
 }
 MSH_CMD_EXPORT_ALIAS(audio_path_command,carplay_audio_path,Compare mixed and direct media audio);

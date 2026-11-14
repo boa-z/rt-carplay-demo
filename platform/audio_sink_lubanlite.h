@@ -14,8 +14,17 @@
  * success, a negative RTCP error otherwise. */
 int carplay_audio_sink_start(void);
 
-/* Stops the writer thread, stops the replay stream and closes the device. */
-void carplay_audio_sink_stop(void);
+/* Ordinary-thread lifecycle calls are serialized; contention/self-join returns
+ * RTCP_ESTATE. Stop retires public operations, then waits up to five seconds
+ * for the writer. RTCP_ETIMEDOUT retains device/queue ownership: retry stop
+ * before restart or releasing borrowed state. Success closes the device.
+ * Never invoke lifecycle operations from device callbacks or sink workers. */
+int carplay_audio_sink_stop(void);
+
+/* During lifecycle retirement, packet/local enqueue returns RTCP_ESTATE,
+ * queries return false/zero/-1 and void commands are ignored. Normal readers
+ * coexist; the existing packet queue-lock timeout remains two milliseconds.
+ * Diagnostic fields are observational, not a transaction across all lanes. */
 
 bool carplay_audio_sink_is_running(void);
 

@@ -9,6 +9,7 @@
 #include <time.h>
 typedef struct { pthread_t thread; void (*fn)(void *); void *arg; } thread_t;
 static thread_t *worker;
+static _Thread_local thread_t *current_worker;
 int host_rtthread_fail_start;
 int rt_kprintf(const char *f,...) { (void)f; return 0; }
 rt_tick_t rt_tick_get(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return (rt_tick_t)((uint64_t)t.tv_sec*1000+t.tv_nsec/1000000); }
@@ -35,7 +36,8 @@ int rt_sem_delete(rt_sem_t s) { assert(!sem_destroy(s)); free(s);return 0; }
 rt_thread_t rt_thread_create(const char *n,void (*fn)(void *),void *a,unsigned st,unsigned p,unsigned tick) {
  (void)n;(void)st;(void)p;(void)tick; assert(!worker);worker=calloc(1,sizeof(*worker));worker->fn=fn;worker->arg=a;return worker;
 }
-static void *entry(void *a){thread_t *t=a;t->fn(t->arg);return NULL;}
+static void *entry(void *a){thread_t *t=a;current_worker=t;t->fn(t->arg);current_worker=NULL;return NULL;}
+rt_thread_t rt_thread_self(void) { return current_worker; }
 int rt_thread_startup(rt_thread_t a) { if(host_rtthread_fail_start)return -1;thread_t *t=a;return pthread_create(&t->thread,NULL,entry,t); }
 int rt_thread_delete(rt_thread_t a) { free(a); worker=NULL;return 0; }
 void host_rtthread_join(void) { if(worker) { assert(!pthread_join(worker->thread,NULL));free(worker);worker=NULL;} }

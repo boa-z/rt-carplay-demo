@@ -19,6 +19,11 @@ static atomic_bool check_samples;
 static atomic_bool allow_native;
 static atomic_uint actual_rate;
 static atomic_uint mixed_bytes;
+static atomic_bool hold_output, output_entered, self_stop_requested;
+static atomic_int self_stop_result;
+static atomic_int reader_result, stop_result;
+static atomic_bool observe_sink;
+static atomic_uint observations;
 static void wait_probe(unsigned state) {
  for(unsigned i=0;i<300 && s_sink.probe_state!=state;++i)rt_thread_mdelay(10);
  assert(s_sink.probe_state==state);
@@ -31,9 +36,38 @@ int rt_device_control(rt_device_t d,int cmd,void *a) {
 }
 rt_size_t rt_device_write(rt_device_t d,int p,const void *data,rt_size_t n) {
  (void)d;(void)p;assert(n%4==0);const int16_t *pcm=data;
+ if (atomic_exchange(&self_stop_requested, false))
+  atomic_store(&self_stop_result, carplay_audio_sink_stop());
+ if (atomic_load(&hold_output)) {
+  output_entered = true;
+  while (atomic_load(&hold_output)) rt_thread_mdelay(1);
+ }
  for(size_t i=0;i<n/2;++i) { if(check_samples && pcm[i]!=expected_sample) {fprintf(stderr,"sample=%d expected=%d offset=%zu\n",pcm[i],(int)expected_sample,i);assert(0); } }
  for(size_t i=0;i<n/2;++i) atomic_fetch_add(&energy,(unsigned long long)((int64_t)pcm[i]*pcm[i]));
  output_bytes+=(unsigned)n;if(actual_rate==48000)mixed_bytes+=(unsigned)n;rt_thread_mdelay(5);return n;
+}
+
+static void *read_volume(void *unused) {
+ (void)unused; reader_result=carplay_audio_sink_volume_percent();return NULL;
+}
+static void *stop_sink(void *unused) {
+ (void)unused;stop_result=carplay_audio_sink_stop();return NULL;
+}
+static void wait_flag(atomic_bool *flag) {
+ for(unsigned i=0;i<3000 && !atomic_load(flag);++i)rt_thread_mdelay(1);
+ assert(atomic_load(flag));
+}
+static void *observe_status(void *unused) {
+ (void)unused;
+ while (atomic_load(&observe_sink)) {
+  unsigned p,d,e,r;
+  (void)carplay_audio_sink_is_running();
+  carplay_audio_sink_stats(&p,&d,&e,&r);
+  (void)carplay_audio_sink_pending();
+  (void)carplay_audio_sink_volume_percent();
+  ++observations;
+ }
+ return NULL;
 }
 
 int main(void) {
@@ -189,5 +223,67 @@ int main(void) {
  assert(actual_rate==44100 && s_sink.output_frames==live_frames+probe_frames && !s_sink.probe_pcm);
  assert(s_sink.diag[2].decoded>=5 && s_sink.diag[2].peak_pcm>0 && !s_sink.diag[2].decode_errors);
 #endif
+ /* Actual blocking output retains device/queues until late worker retirement. */
+ assert(carplay_audio_sink_start()==RTCP_OK);
+ hold_output=true;output_entered=false;self_stop_requested=true;
+ self_stop_result=RTCP_OK;
+ assert(carplay_audio_sink_local_pcm(alert,sizeof(alert),48000,1,true)==RTCP_OK);
+ wait_flag(&output_entered);
+ assert(self_stop_result==RTCP_ESTATE && carplay_audio_sink_is_running());
+ unsigned before_close=closed;
+ rt_device_t retained_dev=s_sink.dev;
+ rt_mutex_t retained_lock=s_sink.lock;
+ rt_sem_t retained_wake=s_sink.wake;
+ rtcp_audio_mixer_t *retained_mixer=s_sink.mixer;
+ assert(carplay_audio_sink_stop()==RTCP_ETIMEDOUT);
+ assert(!carplay_audio_sink_is_running() && s_sink.thread_running);
+ assert(s_sink.dev==retained_dev && s_sink.lock==retained_lock &&
+        s_sink.wake==retained_wake && s_sink.mixer==retained_mixer && closed==before_close);
+ assert(carplay_audio_sink_start()==RTCP_ESTATE);
+ hold_output=false;host_rtthread_join();
+ assert(!s_sink.thread_running && closed==before_close);
+ assert(carplay_audio_sink_start()==RTCP_ESTATE); /* late exit still needs cleanup */
+ assert(carplay_audio_sink_stop()==RTCP_OK);
+ assert(closed==before_close+1 && !s_sink.dev && !s_sink.lock && !s_sink.wake && !s_sink.mixer);
+ assert(carplay_audio_sink_stop()==RTCP_OK);
+
+ /* Stop must drain a real public reader before deleting its queue mutex. */
+ assert(carplay_audio_sink_start()==RTCP_OK);
+ carplay_audio_sink_set_volume_db(0);
+ assert(rt_mutex_take(s_sink.lock,RT_WAITING_FOREVER)==RT_EOK);
+ pthread_t reader,stopper;
+ assert(!pthread_create(&reader,NULL,read_volume,NULL));
+ for(unsigned i=0;i<3000 && atomic_load(&s_audio_access)!=1U;++i)rt_thread_mdelay(1);
+ assert(atomic_load(&s_audio_access)==1U);
+ assert(!pthread_create(&stopper,NULL,stop_sink,NULL));
+ for(unsigned i=0;i<3000 && !(atomic_load(&s_audio_access)&AUDIO_RETIRING);++i)rt_thread_mdelay(1);
+ assert(atomic_load(&s_audio_access)==(AUDIO_RETIRING|1U));
+ assert(carplay_audio_sink_start()==RTCP_ESTATE && carplay_audio_sink_stop()==RTCP_ESTATE);
+ assert(!carplay_audio_sink_is_running() && !carplay_audio_sink_pending());
+ assert(carplay_audio_sink_volume_percent()==-1);
+ assert(carplay_audio_sink_packet(102,&native,native_pcm,sizeof(native_pcm),0,sink_now_us())==RTCP_ESTATE);
+ assert(carplay_audio_sink_local_pcm(alert,sizeof(alert),48000,1,true)==RTCP_ESTATE);
+ assert(!carplay_audio_sink_duck(true,-10,100));
+ carplay_audio_sink_set_volume_db(-144); /* cannot touch the held queue mutex */
+ carplay_audio_sink_slot_stop(2);carplay_audio_sink_stream_stop(102);
+ carplay_audio_sink_modes(&(airplay_audio_modes_t){.has_call=true,.call_active=true});
+ carplay_audio_sink_diagnostics();
+ audio_probe_command(2,capture_args);audio_path_command(2,direct_args);
+ unsigned p=1,d=1,e=1,r=1;carplay_audio_sink_stats(&p,&d,&e,&r);
+ assert(!p && !d && !e && !r && s_sink.volume_level==100);
+ rt_mutex_release(s_sink.lock);
+ assert(!pthread_join(reader,NULL) && !pthread_join(stopper,NULL));
+ assert(reader_result==100 && stop_result==RTCP_OK);host_rtthread_join();
+ observe_sink=true;
+ pthread_t observer;assert(!pthread_create(&observer,NULL,observe_status,NULL));
+ for(unsigned i=0;i<3000 && !observations;++i)rt_thread_mdelay(1);
+ assert(observations);
+ for(unsigned cycle=0;cycle<32;++cycle) {
+  assert(carplay_audio_sink_start()==RTCP_OK);
+  assert(carplay_audio_sink_stop()==RTCP_OK);host_rtthread_join();
+ }
+ observe_sink=false;assert(!pthread_join(observer,NULL));
+ assert(opened==closed);
  puts("actual RT-Thread audio sink: worker playback, failed startup, selective stop and repeated cleanup passed");
+ puts("actual audio lifecycle: self-join, timeout retention/retry, concurrent reader retirement and 32 restarts passed");
 }

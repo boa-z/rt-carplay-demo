@@ -689,7 +689,7 @@ static void shutdown_stack(app_state_t *app)
 #if defined(RTCARPLAY_MICROPHONE)
         carplay_audio_input_stop();
 #endif
-        carplay_audio_sink_stop();
+        while (carplay_audio_sink_stop() != RTCP_OK) rt_thread_mdelay(10);
         app->audio_started = false;
     }
 #endif
