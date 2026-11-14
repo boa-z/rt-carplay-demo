@@ -16,6 +16,7 @@ static unsigned packet_type;
 static unsigned render_remaining, render_id, returned[16], return_count;
 static unsigned updates, vsyncs, displayed_id;
 static bool fail_present, fail_vsync, lifecycle, fail_startup, worker_pending;
+static bool hold_worker, self_worker, reader_pending, check_display_reentry;
 static unsigned visible_events, stopped_events, thread_deletes;
 static uint8_t packet_data[1024];
 static const uint8_t config[] = {0,0,0,1,0x67,0x42,0x00,0x1f,0x80,
@@ -35,6 +36,14 @@ int rt_sem_take(rt_sem_t s, int t) {
     return 0;
 }
 void rt_thread_mdelay(int ms) {
+    if (reader_pending) {
+        assert(ms == 1 && atomic_load(&s_video_access) == (VIDEO_RETIRING | 1U));
+        assert(s_sink.decoder != NULL && s_sink.lock != NULL);
+        reader_pending = false;
+        video_read_leave();
+        return;
+    }
+    if (hold_worker) { assert(ms == 10 && s_sink.thread_running); return; }
     (void)ms; assert(++delays < 10);
     if (worker_pending) {
         worker_pending = false;
@@ -145,6 +154,9 @@ int rt_thread_startup(rt_thread_t t) {
 int rt_thread_delete(rt_thread_t t) {
     (void)t; assert(lifecycle && fail_startup); ++thread_deletes; return 0;
 }
+rt_thread_t rt_thread_self(void) {
+    return self_worker ? (rt_thread_t)(uintptr_t)1 : NULL;
+}
 
 static void display_event(bool active, void *context) {
     assert(context == &visible_events);
@@ -155,6 +167,11 @@ static void display_event(bool active, void *context) {
         assert(!s_sink.thread_running && !s_sink.running);
         assert(s_sink.decoder == NULL && s_sink.lock == NULL);
         ++stopped_events;
+        if (check_display_reentry) {
+            assert(carplay_video_sink_start(1024, 600) == RTCP_ESTATE);
+            assert(carplay_video_sink_stop() == RTCP_ESTATE);
+            assert(carplay_video_sink_set_display_observer(NULL, NULL) == RTCP_ESTATE);
+        }
     }
 }
 
@@ -293,15 +310,73 @@ int main(int argc, char **argv) {
     assert(carplay_video_sink_set_display_observer(display_event, &visible_events) == RTCP_OK);
     assert(carplay_video_sink_start(1024, 600) == RTCP_OK);
     assert(worker_pending && s_sink.thread_running);
-    carplay_video_sink_stop();
+    assert(carplay_video_sink_stop() == RTCP_OK);
     assert(!worker_pending && stopped_events == 1 && destroyed == 1);
-    carplay_video_sink_stop();
+    assert(carplay_video_sink_stop() == RTCP_OK);
     assert(stopped_events == 1);
     fail_startup = true;
     assert(carplay_video_sink_start(1024, 600) == RTCP_EIO);
     assert(thread_deletes == 1 && destroyed == 2);
     assert(!s_sink.running && !s_sink.thread_running && s_sink.lock == NULL);
     assert(stopped_events == 1 && carplay_video_sink_set_display_observer(NULL, NULL) == RTCP_OK);
+    fail_startup = false;
+    assert(carplay_video_sink_set_display_observer(display_event, &visible_events) == RTCP_OK);
+    assert(carplay_video_sink_start(1024, 600) == RTCP_OK);
+    self_worker = true;
+    assert(carplay_video_sink_stop() == RTCP_ESTATE);
+    assert(s_sink.running && !s_sink.stop); self_worker = false;
+    unsigned before_destroy = destroyed, before_stopped = stopped_events;
+    hold_worker = true;
+    assert(carplay_video_sink_stop() == RTCP_ETIMEDOUT);
+    assert(!s_sink.running && s_sink.thread_running && s_sink.decoder && s_sink.lock && s_sink.wake);
+    assert(destroyed == before_destroy && stopped_events == before_stopped);
+    assert(carplay_video_sink_start(1024, 600) == RTCP_ESTATE);
+    assert(carplay_video_sink_set_display_observer(NULL, NULL) == RTCP_ESTATE);
+    hold_worker = false;worker_pending = false;
+    sink_thread(&s_sink); /* late retirement after timeout */
+    assert(carplay_video_sink_start(1024, 600) == RTCP_ESTATE);
+    check_display_reentry = true;
+    assert(carplay_video_sink_stop() == RTCP_OK);
+    assert(destroyed == before_destroy + 1 && stopped_events == before_stopped + 1);
+    assert(carplay_video_sink_stop() == RTCP_OK);
+
+    delays = 0;
+    assert(carplay_video_sink_start(1024, 600) == RTCP_OK);
+    assert(video_read_enter());reader_pending = true;
+    assert(carplay_video_sink_stop() == RTCP_OK); /* retirement drains accepted reader */
+    assert(!reader_pending && atomic_load(&s_video_access) == 0U);
+    atomic_fetch_or(&s_video_access, VIDEO_RETIRING);
+    unsigned n = 1, f = 1, d = 1, e = 1;
+    carplay_video_sink_stats(&n, &f, &d, &e);
+    carplay_video_perf_t perf;memset(&perf, 0xff, sizeof(perf));
+    carplay_video_sink_perf(&perf);
+    assert(!n && !f && !d && !e && !perf.frames && !perf.packets);
+    assert(!carplay_video_sink_is_running() && !carplay_video_sink_pending());
+    unsigned head = s_sink.head;
+    carplay_video_sink_frame(false, frame, sizeof(frame), 0, NULL);
+    assert(head == s_sink.head);
+    char *status_args[] = {"carplay_video", "status"};
+    assert(cmd_carplay_video(2, status_args) == RTCP_ESTATE);
+    atomic_store(&s_video_access, 0U);
+    assert(!atomic_flag_test_and_set(&s_video_shell));
+    assert(cmd_carplay_video(2, status_args) == RTCP_ESTATE);
+    atomic_flag_clear(&s_video_shell);
+#ifdef RTCARPLAY_DEMO_LAUNCHER
+    char *stop_args[] = {"carplay_video", "stop"};
+    char *start_args[] = {"carplay_video", "start"};
+    char *play_args[] = {"carplay_video", "play", "unused"};
+    assert(cmd_carplay_video(2, stop_args) == RTCP_ESTATE);
+    assert(cmd_carplay_video(2, start_args) == RTCP_ESTATE);
+    assert(cmd_carplay_video(3, play_args) == RTCP_ESTATE);
+#endif
+    assert(cmd_carplay_video(2, status_args) == RTCP_OK);
+    for (unsigned cycle = 0; cycle < 32; ++cycle) {
+        delays = 0;
+        assert(carplay_video_sink_start(1024, 600) == RTCP_OK);
+        assert(carplay_video_sink_stop() == RTCP_OK);
+    }
+    assert(carplay_video_sink_set_display_observer(NULL, NULL) == RTCP_OK);
     puts("Luban-Lite actual video sink regression passed");
+    puts("Video lifecycle: self-join, retained timeout/late cleanup, reader retirement, command exclusion and 32 restarts passed");
     return 0;
 }

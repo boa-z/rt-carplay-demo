@@ -21,6 +21,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
+#include <limits.h>
 
 #include "artinchip_fb.h"
 #include "mpp_decoder.h"
@@ -64,44 +66,44 @@ typedef struct {
     uint16_t panel_height;
 
     nal_entry_t queue[SINK_QUEUE_LENGTH];
-    unsigned head;
-    unsigned tail;
+    atomic_uint head;
+    atomic_uint tail;
 
     struct mpp_frame held;
     bool have_frame;
     bool display_reported;
 
-    volatile bool stop;
-    volatile bool running;
-    volatile bool thread_running;
+    atomic_bool stop;
+    atomic_bool running;
+    atomic_bool thread_running;
 
-    unsigned nal_count;
-    unsigned frame_count;
-    unsigned skipped_frames;
-    unsigned dropped_nals;
-    unsigned loss_generation;
-    unsigned consumed_generation;
-    unsigned decode_errors;
-    unsigned decoder_resets;
+    atomic_uint nal_count;
+    atomic_uint frame_count;
+    atomic_uint skipped_frames;
+    atomic_uint dropped_nals;
+    atomic_uint loss_generation;
+    atomic_uint consumed_generation;
+    atomic_uint decode_errors;
+    atomic_uint decoder_resets;
     uint8_t *configuration;
     size_t configuration_len;
-    unsigned repeated_configs;
-    unsigned waiting_nals;
-    bool wait_idr;
+    atomic_uint repeated_configs;
+    atomic_uint waiting_nals;
+    atomic_bool wait_idr;
     bool recovery_pending;
-    unsigned queue_peak;
-    unsigned dequeued;
-    uint64_t queue_wait_ms;
-    uint32_t queue_wait_max_ms;
-    unsigned decode_calls;
-    uint64_t decode_ms;
-    uint32_t decode_max_ms;
-    unsigned present_calls;
-    uint64_t present_ms;
-    uint32_t present_max_ms;
+    atomic_uint queue_peak;
+    atomic_uint dequeued;
+    atomic_uint_fast64_t queue_wait_ms;
+    atomic_uint queue_wait_max_ms;
+    atomic_uint decode_calls;
+    atomic_uint_fast64_t decode_ms;
+    atomic_uint decode_max_ms;
+    atomic_uint present_calls;
+    atomic_uint_fast64_t present_ms;
+    atomic_uint present_max_ms;
     uint32_t report_ms;
-    unsigned report_frames;
-    unsigned report_nals;
+    atomic_uint report_frames;
+    atomic_uint report_nals;
 } video_sink_t;
 
 static uint32_t sink_now_ms(void)
@@ -113,7 +115,40 @@ static video_sink_t s_sink;
 static carplay_video_display_cb_t s_display_observer;
 static void *s_display_context;
 
-int carplay_video_sink_set_display_observer(carplay_video_display_cb_t callback,
+#define VIDEO_RETIRING (UINT_MAX ^ (UINT_MAX >> 1))
+static atomic_uint s_video_access;
+static atomic_flag s_video_lifecycle = ATOMIC_FLAG_INIT;
+static atomic_flag s_video_shell = ATOMIC_FLAG_INIT;
+
+static bool video_read_enter(void)
+{
+    unsigned access = atomic_load(&s_video_access);
+    do {
+        if ((access & VIDEO_RETIRING) || access == VIDEO_RETIRING - 1U)
+            return false;
+    } while (!atomic_compare_exchange_weak(&s_video_access, &access, access + 1U));
+    return true;
+}
+
+static void video_read_leave(void)
+{
+    atomic_fetch_sub(&s_video_access, 1U);
+}
+
+static void video_retire_readers(void)
+{
+    atomic_fetch_or(&s_video_access, VIDEO_RETIRING);
+    while (atomic_load(&s_video_access) != VIDEO_RETIRING) rt_thread_mdelay(1);
+}
+
+static void video_lifecycle_leave(void)
+{
+    atomic_store(&s_video_access, 0U);
+    atomic_flag_clear(&s_video_lifecycle);
+}
+
+
+static int video_set_display_observer_owned(carplay_video_display_cb_t callback,
                                            void *context)
 {
     if (s_sink.running || s_sink.thread_running || s_sink.lock != NULL)
@@ -203,7 +238,7 @@ static bool dequeue_nal(video_sink_t *sink, nal_entry_t *out)
     return available;
 }
 
-void carplay_video_sink_frame(bool configuration, const uint8_t *annex_b,
+static void video_frame_owned(bool configuration, const uint8_t *annex_b,
                               size_t annex_b_len, uint64_t sender_time_ns,
                               void *context)
 {
@@ -588,7 +623,7 @@ static void sink_thread(void *argument)
 /* Start / stop                                                        */
 /* ------------------------------------------------------------------ */
 
-int carplay_video_sink_start(uint16_t display_width, uint16_t display_height)
+static int video_start_owned(uint16_t display_width, uint16_t display_height)
 {
     video_sink_t *sink = &s_sink;
     if (sink->running || sink->thread_running || sink->lock != NULL)
@@ -671,18 +706,17 @@ int carplay_video_sink_start(uint16_t display_width, uint16_t display_height)
     return RTCP_OK;
 }
 
-void carplay_video_sink_stop(void)
+static int video_stop_owned(void)
 {
     video_sink_t *sink = &s_sink;
-    if (!sink->running) {
-        return;
-    }
+    if (!sink->running && sink->lock == NULL && !sink->thread_running)
+        return RTCP_OK;
     sink->running = false; /* stop accepting new NALs */
     sink->stop = true;
     if (sink->wake != NULL) (void)rt_sem_release(sink->wake);
-    while (sink->thread_running) {
+    for (unsigned waited = 0; sink->thread_running && waited < 3000U; waited += 10U)
         rt_thread_mdelay(10);
-    }
+    if (sink->thread_running) return RTCP_ETIMEDOUT;
 
     while (sink->tail != sink->head) {
         free(sink->queue[sink->tail].data);
@@ -709,14 +743,15 @@ void carplay_video_sink_stop(void)
     sink->thread = NULL;
     if (s_display_observer != NULL)
         s_display_observer(false, s_display_context);
+    return RTCP_OK;
 }
 
-bool carplay_video_sink_is_running(void)
+static bool video_is_running_owned(void)
 {
     return s_sink.running;
 }
 
-size_t carplay_video_sink_pending(void)
+static size_t video_pending_owned(void)
 {
     video_sink_t *sink = &s_sink;
     if (!sink->running || sink->lock == NULL) return 0U;
@@ -727,7 +762,7 @@ size_t carplay_video_sink_pending(void)
     return pending;
 }
 
-void carplay_video_sink_stats(unsigned *nals, unsigned *frames,
+static void video_stats_owned(unsigned *nals, unsigned *frames,
                               unsigned *dropped, unsigned *errors)
 {
     if (nals != NULL) *nals = s_sink.nal_count;
@@ -736,7 +771,7 @@ void carplay_video_sink_stats(unsigned *nals, unsigned *frames,
     if (errors != NULL) *errors = s_sink.decode_errors;
 }
 
-void carplay_video_sink_perf(carplay_video_perf_t *out)
+static void video_perf_owned(carplay_video_perf_t *out)
 {
     if (!out) return;
     rt_base_t level = rt_hw_interrupt_disable();
@@ -750,6 +785,84 @@ void carplay_video_sink_perf(carplay_video_perf_t *out)
         .present_ms = s_sink.present_ms,
     };
     rt_hw_interrupt_enable(level);
+}
+
+/* Public calls retain resources through their final queue/wake access. */
+int carplay_video_sink_set_display_observer(carplay_video_display_cb_t callback,
+                                          void *context)
+{
+    if (atomic_flag_test_and_set(&s_video_lifecycle)) return RTCP_ESTATE;
+    video_retire_readers();
+    int result = video_set_display_observer_owned(callback, context);
+    video_lifecycle_leave();
+    return result;
+}
+
+int carplay_video_sink_start(uint16_t width, uint16_t height)
+{
+    if (atomic_flag_test_and_set(&s_video_lifecycle)) return RTCP_ESTATE;
+    video_retire_readers();
+    int result = video_start_owned(width, height);
+    video_lifecycle_leave();
+    return result;
+}
+
+int carplay_video_sink_stop(void)
+{
+    if (atomic_flag_test_and_set(&s_video_lifecycle)) return RTCP_ESTATE;
+    if (s_sink.thread_running && s_sink.thread == rt_thread_self()) {
+        atomic_flag_clear(&s_video_lifecycle);
+        return RTCP_ESTATE;
+    }
+    video_retire_readers();
+    int result = video_stop_owned();
+    video_lifecycle_leave();
+    return result;
+}
+
+void carplay_video_sink_frame(bool configuration, const uint8_t *annex_b,
+                             size_t length, uint64_t timestamp, void *context)
+{
+    if (!video_read_enter()) return;
+    video_frame_owned(configuration, annex_b, length, timestamp, context);
+    video_read_leave();
+}
+
+bool carplay_video_sink_is_running(void)
+{
+    if (!video_read_enter()) return false;
+    bool result = video_is_running_owned();
+    video_read_leave();
+    return result;
+}
+
+size_t carplay_video_sink_pending(void)
+{
+    if (!video_read_enter()) return 0U;
+    size_t result = video_pending_owned();
+    video_read_leave();
+    return result;
+}
+
+void carplay_video_sink_stats(unsigned *nals, unsigned *frames,
+                             unsigned *dropped, unsigned *errors)
+{
+    if (nals) *nals = 0U;
+    if (frames) *frames = 0U;
+    if (dropped) *dropped = 0U;
+    if (errors) *errors = 0U;
+    if (!video_read_enter()) return;
+    video_stats_owned(nals, frames, dropped, errors);
+    video_read_leave();
+}
+
+void carplay_video_sink_perf(carplay_video_perf_t *out)
+{
+    if (!out) return;
+    memset(out, 0, sizeof(*out));
+    if (!video_read_enter()) return;
+    video_perf_owned(out);
+    video_read_leave();
 }
 
 /* ------------------------------------------------------------------ */
@@ -862,12 +975,18 @@ static int play_h264_file(const char *path)
     return RTCP_OK;
 }
 
-static int cmd_carplay_video(int argc, char **argv)
+static int cmd_carplay_video_owned(int argc, char **argv)
 {
     if (argc < 2) {
         rt_kprintf("usage: carplay_video start [width height] | stop | status | play <annexb-file>\n");
         return 0;
     }
+#ifdef RTCARPLAY_DEMO_LAUNCHER
+    if (strcmp(argv[1], "status") != 0) {
+        rt_kprintf("[" TAG "] launcher owns video; manual mutation unavailable\n");
+        return RTCP_ESTATE;
+    }
+#endif
     if (strcmp(argv[1], "start") == 0) {
         unsigned width = argc >= 4 ? (unsigned)atoi(argv[2]) : 1280U;
         unsigned height = argc >= 4 ? (unsigned)atoi(argv[3]) : 480U;
@@ -876,16 +995,17 @@ static int cmd_carplay_video(int argc, char **argv)
         return 0;
     }
     if (strcmp(argv[1], "stop") == 0) {
-        carplay_video_sink_stop();
-        rt_kprintf("[" TAG "] stopped\n");
-        return 0;
+        int result = carplay_video_sink_stop();
+        rt_kprintf("[" TAG "] stop result=%d\n", result);
+        return result;
     }
     if (strcmp(argv[1], "status") == 0) {
+        if (!video_read_enter()) return RTCP_ESTATE;
         unsigned nals = 0U, frames = 0U, dropped = 0U, errors = 0U;
-        carplay_video_sink_stats(&nals, &frames, &dropped, &errors);
+        video_stats_owned(&nals, &frames, &dropped, &errors);
         rt_kprintf("[" TAG "] %s, pending %u, NALs %u, frames %u, dropped %u, errors %u\n",
-                   carplay_video_sink_is_running() ? "running" : "stopped",
-                   (unsigned)carplay_video_sink_pending(), nals, frames,
+                   video_is_running_owned() ? "running" : "stopped",
+                   (unsigned)video_pending_owned(), nals, frames,
                    dropped, errors);
         video_sink_t *sink = &s_sink;
         uint32_t now = sink_now_ms();
@@ -909,6 +1029,7 @@ static int cmd_carplay_video(int argc, char **argv)
         sink->report_ms = now;
         sink->report_frames = frames;
         sink->report_nals = nals;
+        video_read_leave();
         return 0;
     }
     if (strcmp(argv[1], "play") == 0) {
@@ -921,6 +1042,14 @@ static int cmd_carplay_video(int argc, char **argv)
     }
     rt_kprintf("unknown carplay_video subcommand: %s\n", argv[1]);
     return 0;
+}
+
+static int cmd_carplay_video(int argc, char **argv)
+{
+    if (atomic_flag_test_and_set(&s_video_shell)) return RTCP_ESTATE;
+    int result = cmd_carplay_video_owned(argc, argv);
+    atomic_flag_clear(&s_video_shell);
+    return result;
 }
 
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_video, carplay_video,

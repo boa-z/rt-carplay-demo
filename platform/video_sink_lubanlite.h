@@ -28,16 +28,22 @@ int carplay_video_sink_start(uint16_t display_width, uint16_t display_height);
 typedef void (*carplay_video_display_cb_t)(bool active, void *context);
 int carplay_video_sink_set_display_observer(carplay_video_display_cb_t, void *);
 
-/* Stops the thread, releases in-flight frames and disables the video layer.
- * Host HMI visibility is exclusively the registered observer's policy. */
-void carplay_video_sink_stop(void);
+/* Ordinary-thread lifecycle calls serialize with a nonblocking gate. Contention
+ * or worker self-join returns RTCP_ESTATE. Stop retires accepted queue/query
+ * calls, then waits up to three seconds for the decoder. RTCP_ETIMEDOUT retains
+ * all decoder/frame/display resources; retry stop before restart or releasing
+ * the observer context. Success disables video and notifies host policy.
+ * Lifecycle calls must not run from device/display callbacks. */
+int carplay_video_sink_stop(void);
 
 bool carplay_video_sink_is_running(void);
 
 /* NAL units waiting for the decoder.  Useful to pace a file feeder. */
 size_t carplay_video_sink_pending(void);
 
-/* Decoder counters since start; any output pointer may be NULL. */
+/* Decoder counters since start; any output pointer may be NULL. Public queries
+ * return false/zero while lifecycle retirement rejects new readers; frame
+ * callbacks are ignored then. Counters are observational across fields. */
 void carplay_video_sink_stats(unsigned *nals, unsigned *frames,
                               unsigned *dropped, unsigned *errors);
 

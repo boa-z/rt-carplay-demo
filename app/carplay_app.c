@@ -660,7 +660,7 @@ static void shutdown_stack(app_state_t *app)
 #endif
 #if defined(RTCARPLAY_VIDEO)
     if (app->video_started) {
-        carplay_video_sink_stop();
+        while (carplay_video_sink_stop() != RTCP_OK) rt_thread_mdelay(10);
         app->video_started = false;
     }
 #endif

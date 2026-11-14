@@ -52,6 +52,14 @@ USB 应用操作与全部 Shell 命令共享一个非阻塞原子调用门。争
 
 实际音频回归保留 PCM/AAC 样本、音量、Direct/Mixer、关键告警和 Probe 检查。新增真实 pthread 用例验证拒绝写线程等待自身、阻塞设备写入导致超时、句柄保留、延迟清理重试、读取者阻塞在队列锁内时停止等待、退出阶段拒绝全部公开／Shell 读取者，以及带并发状态读取者的 32 轮立即停止／重启。相同延迟退出场景在历史源码上失败，修复版通过。ASan/UBSan 不是 ThreadSanitizer 或可听实机证明。设备辅助函数、解码和完整播放 Worker 与前一基线逐字节一致；没有改变音频协商、Codec、Jitter、Mixing、Gain 或 AEC 策略。
 
+## 视频退出与 Shell 所有权
+
+视频生命周期操作与显示 Observer 注册共享非阻塞调用门。重置存储或释放互斥锁、信号量、解码器前，先停止接受新读取者并等待已接受的 Frame/Queue/Query 读取者退出。争用和 Worker 等待自身返回 `RTCP_ESTATE`。停止最多等待解码器三秒；超时保留 Decoder/Frame/Display/Observer 所有权，并禁止重启，直到再次停止完成清理。Receiver 关闭 Owner 重试停止。Stopped Observer 只在解码器退出并完成资源清理后，在生命周期互斥下通知；拒绝回调重入。
+
+运行标志和诊断计数使用原子变量。各字段统计仍为观察值，保留已有单核中断屏蔽的 Performance Copy。退出阶段查询返回 false/zero，传入 Frame Callback 忽略。Shell 调用串行管理自己的报告窗口和文件提交器；`status` 保留读取者引用直到最后一次访问。Launcher 构建中的手动 `start`、`stop` 和 `play` 返回 `RTCP_ESTATE`，避免替换其视频所有权；只读状态仍可用。禁用 Launcher 后仍可手动调试。
+
+实际源码回归分别在手动与 Launcher 配置运行，保留原子 SPS/PPS、IDR 恢复、队列背压、Scanout 有效期及首帧／HMI 测试，并新增停止超时／延迟清理、等待自身、模拟读取者退出、拒绝 Observer 重入、命令互斥和 32 轮立即停止／重启。设备辅助函数、解码／恢复及完整解码 Worker 与前一基线逐字节一致。这是模拟 MPP/DE 证据，不是开发板帧率或可见输出验收。
+
 ## 已执行回归与剩余审查
 
 `make -C application/rt-thread/rtcarplay -j8 check` 使用真实 Linux 协议、熵源和模拟的 RT-Thread 调度、设备接口执行实际组合源码，覆盖有线、无线、显示元数据复制，IPv6 就绪状态，源数据清空后的快照保留，并发读取，写入方等待真实 pthread 读取者退出，拆除期间拒绝查询，以及已有的 32 轮生命周期测试。实际 iAP2 Provider 回归验证返回指针归属、源数据结束以及刷新失败时已保留字符串仍有效。组合回归还使用真实 Browser 解析实际 DNS SRV 响应，检查请求排队与应用状态、Browser 销毁后端点副本有效，以及销毁期间拒绝命令。两者均在 Host CI Job 中通过 ASan/UBSan 执行。

@@ -75,6 +75,12 @@ check-lubanlite-video:
 	  -Wl,--gc-sections -o $(BUILD)/test_lubanlite_video
 	$(BUILD)/test_lubanlite_video
 	$(BUILD)/test_lubanlite_video queue
+	$(CC) $(CFLAGS) $(CPPFLAGS) -DRTCARPLAY_DEMO_LAUNCHER -Itests/support/lubanlite_video \
+	  -I$(SDK_ROOT)/packages/artinchip/mpp/include \
+	  -I$(SDK_ROOT)/bsp/artinchip/include/uapi \
+	  -ffunction-sections -fdata-sections tests/unit/test_lubanlite_video.c \
+	  -Wl,--gc-sections -o $(BUILD)/test_lubanlite_video_launcher
+	$(BUILD)/test_lubanlite_video_launcher
 	$(CC) $(CFLAGS) $(CPPFLAGS) -Itests/support/lubanlite_video \
 	  -I$(SDK_ROOT)/bsp/artinchip/include/uapi \
 	  $(SDK_ROOT)/application/rt-thread/rtcarplay/tests/test_video_layer_policy.c \

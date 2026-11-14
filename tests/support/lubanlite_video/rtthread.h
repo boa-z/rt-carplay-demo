@@ -25,6 +25,7 @@ void rt_thread_mdelay(int);
 rt_thread_t rt_thread_create(const char *, void (*)(void *), void *, unsigned, unsigned, unsigned);
 int rt_thread_startup(rt_thread_t);
 int rt_thread_delete(rt_thread_t);
+rt_thread_t rt_thread_self(void);
 /* Retain shell entry for warning-clean compilation. */
 #define MSH_CMD_EXPORT_ALIAS(fn, alias, desc) \
     static int (*const test_shell_##alias)(int, char **) __attribute__((used)) = fn
