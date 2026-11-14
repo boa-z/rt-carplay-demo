@@ -1,0 +1,260 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Standalone SDK application integration ("app mode").  Copy this directory to
+# application/rt-thread/rtcarplay/ inside Luban-Lite.  In this mode the
+# package Kconfig (packages/third-party/rt-carplay/Kconfig) must NOT be
+# sourced as well, or the LPKG_RT_CARPLAY_* symbols are defined twice.
+
+menu "rt-carplay application"
+
+config RTCARPLAY_DEMO_LAUNCHER
+    bool "LVGL USB/wireless demonstration launch page"
+    default n
+    depends on LPKG_USING_LVGL && LVGL_V_9 && RTCARPLAY_USB_HOST && RTCARPLAY_VIDEO
+    depends on !RT_USING_MODULE && !LPKG_USING_LVGL_SQUARELINE
+    help
+      Display a USB/wireless selector with connection diagnostics and
+      pairing record management. USB starts automatically by default.
+      Wireless requires the Wi-Fi and Bluetooth iAP2 options; the UI starts
+      SoftAP/mDNS and RFCOMM and handles numeric pairing confirmation.
+      No console commands are needed. Phone consent remains required.
+      Mode switches quiesce the old session before restarting the receiver.
+      Requires the SDK lv_user_gui_init hook. LVGL never opens the panel;
+      CarPlay owns touch exclusively. Do not mix manual start/stop commands
+      with this automatic owner. Disable for manual bring-up.
+
+config RTCARPLAY_AUTO_START
+    bool "Start the AirPlay receiver automatically after boot"
+    depends on !RTCARPLAY_DEMO_LAUNCHER
+    default n
+    help
+      Start the receiver from main() instead of waiting for the
+      carplay_start MSH command.  Enable after the manual bring-up has been
+      verified on the board.
+
+config RTCARPLAY_DIR
+    string "rt-carplay repository path"
+    default "../../../packages/third-party/rt-carplay"
+    help
+      Path to the rt-carplay checkout, relative to this directory or
+      absolute.  The default points at the bundled git submodule in
+      packages/third-party/rt-carplay; initialise it with
+      "git submodule update --init packages/third-party/rt-carplay".
+      Override only when building against a separate checkout.
+
+config RTCARPLAY_WIRED_NETIF
+    string "Wired Ethernet device name (two characters)"
+    default "i0"
+    help
+      RT-Thread Ethernet device used for wired IPv6, e.g. i0 for external
+      cherryusb-ipheth or u1 for CDC-NCM. No private driver API is required.
+
+config RTCARPLAY_SCREEN_WIDTH
+    int "AirPlay display width (must match the panel)"
+    default 1024
+    help
+      The display mode advertised to the controller in /info and used for
+      HID touch mapping.  It should equal the panel and
+      AIC_SCREEN_REAL_X_RESOLUTION (1024 on demo128-nand-carplay): the
+      video sink letterboxes into the panel, and a different mode makes the
+      CarPlay UI and the touch coordinates disagree.
+
+config RTCARPLAY_SCREEN_HEIGHT
+    int "AirPlay display height (must match the panel)"
+    default 600
+
+config RTCARPLAY_ROTATION
+    int "Display rotation (0, 90, 180 or 270)"
+    default 0
+
+config RTCARPLAY_VIDEO
+    bool "Decode and display the AirPlay screen stream"
+    default y
+    depends on LPKG_MPP && AIC_MPP_H264_DEC_ENABLE && AIC_DE_DRV
+    help
+      Feed the Screen stream to the SDK MPP H.264 decoder (VE) and present
+      the frames through the "aicfb" video layer.  This takes over the video
+      layer and dims the UI layer while the receiver runs.
+
+      Disable to keep the receiver headless (the application then only
+      counts screen frames).  Requires the VE (video engine) and DE (display
+      engine) drivers.
+
+config RTCARPLAY_AUDIO
+    bool "Play the AirPlay audio stream"
+    default y
+    depends on RT_USING_AUDIO
+    help
+      Decrypt the AirPlay audio DataStream (ChaCha20-Poly1305), advertise the
+      available LPCM/AAC-LC/Opus output capabilities in /info and feed a
+      dedicated jitter/decode/mix worker to RT-Thread sound0. Output uses
+      48 kHz stereo with resampling and software gain/ducking. Compressed
+      formats require LPKG_RT_CARPLAY_AUDIO_CODECS.
+
+      Requires CONFIG_AIC_USING_AUDIO (which selects RT_USING_AUDIO) and the
+      board's PA/speaker wiring.  Without this option the receiver is
+      video-only and the controller starts no audio stream.
+
+config RTCARPLAY_MICROPHONE
+    bool "CarPlay microphone uplink (requires verified dmic0 hardware)"
+    default n
+    depends on RTCARPLAY_AUDIO && AIC_AUDIO_DMIC
+    help
+      Enable opt-in Siri/call input over AirPlay UDP using independent input
+      keys. Captures 48 kHz stereo to preserve the shared codec clock and
+      sends mono LPCM/Opus. Verify physical microphone wiring before enabling.
+      This does not claim tuned acoustic echo cancellation.
+
+config RTCARPLAY_MIC_AEC
+    bool "Experimental acoustic echo cancellation (requires delay calibration)"
+    default n
+    depends on RTCARPLAY_MICROPHONE && LPKG_RT_CARPLAY_AUDIO_CODECS
+    help
+      SpeexDSP fixed-point AEC with the actual output mix as far-end reference.
+      Must be calibrated on the installed speaker/microphone path. Host tests
+      verify aligned synthetic echo attenuation, not acoustic performance.
+
+config RTCARPLAY_MIC_AEC_DELAY_MS
+    int "Speaker-to-microphone reference delay (ms)"
+    default 30
+    range 0 200
+    depends on RTCARPLAY_MIC_AEC
+
+# Library switches consumed by the rt-carplay SConscript.  Defined here only
+# for app mode; package mode defines them in the package Kconfig.
+
+config RTCARPLAY_TOUCH_PANEL
+    bool "Forward the touch panel to CarPlay"
+    default y
+    depends on RT_USING_TOUCH
+    help
+      Open the RT-Thread CTP device selected by the display configuration
+      (CONFIG_AIC_TOUCH_PANEL_NAME, "gt911" on demo128-nand-carplay), read
+      its points on the panel interrupt and feed them to the CarPlay HID
+      touch report.  Coordinates are scaled from the panel range to the
+      display size. The SDK LVGL display port must reserve the exclusive
+      touch device for this reader instead of opening it a second time.
+
+      The HID report carries two contacts, so a third simultaneous finger
+      is not forwarded.  Without this option only the carplay_touch shell
+      command injects touches.
+
+config LPKG_USING_RT_CARPLAY
+    bool
+    default y
+
+config LPKG_RT_CARPLAY_RTTHREAD_RUNTIME
+    bool
+    default y
+
+config LPKG_RT_CARPLAY_LOG
+    bool
+    default y
+
+config LPKG_RT_CARPLAY_AUDIO_CODECS
+    bool "AAC-LC and Opus audio (vendored fixed point sources)"
+    default y if RTCARPLAY_AUDIO
+    depends on RTCARPLAY_AUDIO
+
+config LPKG_RT_CARPLAY_ED25519
+    bool
+    default y
+
+config LPKG_RT_CARPLAY_LUBANLITE_WIFI
+    bool
+    default y
+    depends on AIC_WLAN_REALTEK
+
+config LPKG_RT_CARPLAY_LUBANLITE_BT
+    bool
+    default y
+    depends on LPKG_USING_ZEPHYR_BLUETOOTH && LPKG_BT_CLASSIC && LPKG_BT_RFCOMM
+
+config LPKG_RT_CARPLAY_LUBANLITE_MFI
+    bool
+    default y if RTCARPLAY_MFI
+    depends on AIC_I2C_DRV
+
+config LPKG_RT_CARPLAY_LUBANLITE_USB
+    bool
+    default y if RTCARPLAY_USB_HOST
+    depends on LPKG_CHERRYUSB_HOST
+
+config RTCARPLAY_USB_HOST
+    bool "Wired CarPlay USB host (CherryUSB)"
+    default y
+    depends on LPKG_CHERRYUSB_HOST
+    help
+      Add the carplay_usb shell command and compile the Luban-Lite CherryUSB
+      host seam: hint the iPhone for its CarPlay USB configuration (Apple
+      vendor request 0x52), select that configuration by descriptor, claim
+      the USBMUX bulk interface and expose control/bulk transfers to the
+      protocol core.  The board must enable a host controller, normally
+      CONFIG_AIC_USING_USB1_HOST.
+
+      This stage only proves enumeration, descriptor identification and the
+      bulk pipe. An Ethernet host driver (for Apple ff/fd/01 use external
+      cherryusb-ipheth) and lwIP IPv6 are
+      required later for the wired AirPlay IP link.
+
+config RTCARPLAY_BT
+    bool "Bluetooth RFCOMM bring-up command"
+    default y
+    depends on LPKG_RT_CARPLAY_LUBANLITE_BT
+    help
+      Add the carplay_bt shell command: enable the Zephyr Classic host, open
+      the iAP2 RFCOMM service with an SDP record, accept a phone connection
+      and echo bytes.  This is the board bring-up path for the wireless iAP2
+      transport; it does not start iAP2 or CarPlay by itself.
+
+config SETTINGS
+    bool
+    help
+      Zephyr settings API provided by the CarPlay DFS backend.
+
+config RTCARPLAY_BT_PERSISTENCE
+    bool "Save Bluetooth bonds in /data"
+    depends on RTCARPLAY_BT && RT_USING_DFS
+    default y
+    select SETTINGS
+    select LPKG_BT_SETTINGS
+    help
+      Restore Bluetooth link keys before publishing the iAP2 service.
+      Uses rt-carplay/port/luban-lite/rtcp_bt_settings.c and the SDK
+      settings-handler linker section. A full firmware flash erases /data.
+
+config RTCARPLAY_IAP2
+    bool "Wireless iAP2 session command"
+    default y
+    depends on RTCARPLAY_BT
+    help
+      Add the carplay_iap2 shell command: drive core/iap2/iap2_session over
+      the RFCOMM transport (SDP iAP2 service, iAP2 link framing,
+      IdentificationInformation, Wi-Fi configuration, CarPlay invite).  The
+      receiver must be running (carplay_start).  Without an MFi 2.0C provider
+      the session stops after identification and cannot reach
+      CarPlayStartSession.
+
+config RTCARPLAY_MFI
+    bool "MFi 2.0C authentication coprocessor"
+    default y
+    depends on RTCARPLAY_IAP2 && AIC_I2C_DRV
+    help
+      Probe the MFi 2.0C-compatible authentication coprocessor at startup and
+      use it for the iAP2 certificate/challenge exchange.  demo128-nand-carplay
+      has the Apple 2.0C on i2c0 at 0x10 (0x11 also answers; board-verified in
+      the CarPlay PoC).  The 0x6A device on the same bus is the vendor
+      RJGT204, not the MFi coprocessor.  When the probe fails the session
+      still runs, but stops after identification.
+
+config RTCARPLAY_MFI_I2C_BUS
+    string "I2C bus carrying the MFi coprocessor"
+    default "i2c0"
+    depends on RTCARPLAY_MFI
+
+config RTCARPLAY_MFI_I2C_ADDR
+    hex "MFi coprocessor I2C address"
+    default 0x10
+    depends on RTCARPLAY_MFI
+
+endmenu
