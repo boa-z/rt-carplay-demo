@@ -16,6 +16,7 @@
 #include <rtdevice.h>
 
 #include <string.h>
+#include <stdatomic.h>
 
 #include "rtcp/input.h"
 #include "rtcp/rtcp.h"
@@ -38,21 +39,41 @@ typedef struct {
     rt_thread_t thread;
     rt_sem_t wake;
     struct rt_touch_data *points;
-    uint16_t point_count;
+    atomic_uint point_count;
     uint16_t range_x;
     uint16_t range_y;
     uint16_t width;
     uint16_t height;
-    unsigned reads;
-    unsigned events;
+    atomic_uint reads;
+    atomic_uint events;
     carplay_touch_panel_cb_t callback;
     void *context;
-    volatile bool stop;
-    volatile bool running;
-    volatile bool thread_running;
+    atomic_bool stop;
+    atomic_bool running;
+    atomic_bool thread_running;
 } touch_panel_t;
 
 static touch_panel_t s_panel;
+static atomic_flag s_panel_call = ATOMIC_FLAG_INIT;
+
+/* Only the lifecycle owner resets the payload after reader retirement.
+ * Keep storage read by diagnostics atomic, even between runs. */
+static void panel_reset(touch_panel_t *panel)
+{
+    panel->dev = NULL;
+    panel->thread = NULL;
+    panel->wake = NULL;
+    panel->points = NULL;
+    panel->point_count = 0U;
+    panel->range_x = panel->range_y = 0U;
+    panel->width = panel->height = 0U;
+    panel->reads = panel->events = 0U;
+    panel->callback = NULL;
+    panel->context = NULL;
+    panel->stop = false;
+    panel->running = false;
+    panel->thread_running = false;
+}
 
 static uint16_t scale_axis(uint16_t value, uint16_t range, uint16_t extent)
 {
@@ -112,15 +133,16 @@ static void panel_thread(void *argument)
     panel->thread_running = false;
 }
 
-int carplay_touch_panel_start(uint16_t width, uint16_t height,
+static int panel_start_owned(uint16_t width, uint16_t height,
                               carplay_touch_panel_cb_t callback,
                               void *context)
 {
     touch_panel_t *panel = &s_panel;
-    if (panel->running || panel->thread_running) return RTCP_ESTATE;
+    if (panel->running || panel->thread_running || panel->dev != NULL)
+        return RTCP_ESTATE;
     if (width == 0U || height == 0U || callback == NULL) return RTCP_EINVAL;
 
-    memset(panel, 0, sizeof(*panel));
+    panel_reset(panel);
     panel->width = width;
     panel->height = height;
     panel->callback = callback;
@@ -183,7 +205,7 @@ int carplay_touch_panel_start(uint16_t width, uint16_t height,
         (void)rt_device_close(panel->dev);
         rt_free(panel->points);
         (void)rt_sem_delete(panel->wake);
-        memset(panel, 0, sizeof(*panel));
+        panel_reset(panel);
         return RTCP_ENOMEM;
     }
     /* Set before scheduling so an immediate stop cannot free resources
@@ -197,7 +219,7 @@ int carplay_touch_panel_start(uint16_t width, uint16_t height,
         (void)rt_device_close(panel->dev);
         rt_free(panel->points);
         (void)rt_sem_delete(panel->wake);
-        memset(panel, 0, sizeof(*panel));
+        panel_reset(panel);
         return RTCP_EIO;
     }
     (void)rt_device_control(panel->dev, RT_TOUCH_CTRL_ENABLE_INT, RT_NULL);
@@ -209,23 +231,25 @@ int carplay_touch_panel_start(uint16_t width, uint16_t height,
     return RTCP_OK;
 }
 
-void carplay_touch_panel_stop(void)
+static int panel_stop_owned(void)
 {
     touch_panel_t *panel = &s_panel;
-    if (!panel->running) return;
+    if (panel->dev == NULL) return RTCP_OK;
+    if (panel->thread_running && panel->thread == rt_thread_self())
+        return RTCP_ESTATE;
 
     panel->running = false;
     panel->stop = true;
     if (panel->wake != NULL) (void)rt_sem_release(panel->wake);
-    /* The reader can be inside a short I2C read; give it a bound, then leak
-     * rather than close a device still in use. */
+    /* A timed-out reader retains its device and borrowed callback. A later
+     * stop retries cleanup, even though running is already false. */
     unsigned guard = 100U;
     while (panel->thread_running && guard-- != 0U) {
         rt_thread_mdelay(10);
     }
     if (panel->thread_running) {
-        rt_kprintf("[" TAG "] reader did not stop; resources left allocated\n");
-        return;
+        rt_kprintf("[" TAG "] reader did not stop; ownership retained\n");
+        return RTCP_ETIMEDOUT;
     }
 
     if (panel->dev != NULL) {
@@ -248,6 +272,24 @@ void carplay_touch_panel_stop(void)
     panel->context = NULL;
     panel->point_count = 0U;
     panel->thread_running = false;
+    return RTCP_OK;
+}
+
+int carplay_touch_panel_start(uint16_t width, uint16_t height,
+                             carplay_touch_panel_cb_t callback, void *context)
+{
+    if (atomic_flag_test_and_set(&s_panel_call)) return RTCP_ESTATE;
+    int result = panel_start_owned(width, height, callback, context);
+    atomic_flag_clear(&s_panel_call);
+    return result;
+}
+
+int carplay_touch_panel_stop(void)
+{
+    if (atomic_flag_test_and_set(&s_panel_call)) return RTCP_ESTATE;
+    int result = panel_stop_owned();
+    atomic_flag_clear(&s_panel_call);
+    return result;
 }
 
 bool carplay_touch_panel_is_running(void)

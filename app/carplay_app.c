@@ -652,7 +652,9 @@ static void shutdown_stack(app_state_t *app)
     s_receiver_shutting_down = true;
 #if defined(RTCARPLAY_TOUCH_PANEL)
     if (app->touch_panel_started) {
-        carplay_touch_panel_stop();
+        /* Keep the callback/context alive until the reader is quiescent,
+         * including after a bounded device-read stop timeout. */
+        while (carplay_touch_panel_stop() != RTCP_OK) rt_thread_mdelay(10);
         app->touch_panel_started = false;
     }
 #endif

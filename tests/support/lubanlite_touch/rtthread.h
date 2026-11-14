@@ -6,5 +6,6 @@ typedef size_t rt_size_t;
 #define RT_NULL NULL
 int rt_tick_from_millisecond(unsigned);
 int rt_thread_delete(rt_thread_t);
+rt_thread_t rt_thread_self(void);
 void *rt_malloc(size_t);
 void rt_free(void *);

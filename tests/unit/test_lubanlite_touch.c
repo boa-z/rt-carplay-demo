@@ -6,7 +6,7 @@
 #include "../../platform/touch_panel_lubanlite.c"
 
 static unsigned tokens, callbacks, closes, allocations;
-static bool opened, irq, startup_fail, busy;
+static bool opened, irq, startup_fail, busy, hold_reader, self_reader;
 static void (*entry)(void *);
 static void *entry_arg;
 static rt_err_t (*rx)(rt_device_t, rt_size_t);
@@ -77,8 +77,10 @@ int rt_thread_startup(rt_thread_t t) {
     return startup_fail ? -1 : 0;
 }
 int rt_thread_delete(rt_thread_t t) { assert(t == &entry); entry = NULL; return 0; }
+rt_thread_t rt_thread_self(void) { return self_reader ? &entry : NULL; }
 void rt_thread_mdelay(int ms) {
     assert(ms == 10 && entry != NULL && allocations == 1);
+    if (hold_reader) return;
     /* Schedule the pending reader during an immediate stop; its buffer
      * and callback must still exist until it exits. */
     entry(entry_arg); entry = NULL;
@@ -107,16 +109,41 @@ int main(void) {
     unsigned reads, events;
     carplay_touch_panel_stats(&reads, &events);
     assert(reads == 1 && events == 3);
-    carplay_touch_panel_stop();
+    assert(carplay_touch_panel_stop() == RTCP_OK);
     assert(!opened && !irq && rx == NULL && allocations == 0);
 
     assert(carplay_touch_panel_start(1024, 600, callback, &dev) == 0);
-    carplay_touch_panel_stop(); /* reader has not entered yet */
+    assert(carplay_touch_panel_stop() == RTCP_OK); /* reader has not entered yet */
     assert(!opened && allocations == 0 && entry == NULL);
 
     startup_fail = true;
     assert(carplay_touch_panel_start(1024, 600, callback, &dev) == RTCP_EIO);
     assert(!opened && !irq && rx == NULL && allocations == 0 && entry == NULL);
-    puts("actual touch reader: ownership, IRQ, coordinates, events and teardown passed");
+    startup_fail = false;
+    assert(carplay_touch_panel_start(1024, 600, callback, &dev) == RTCP_OK);
+    self_reader = true;
+    assert(carplay_touch_panel_stop() == RTCP_ESTATE);
+    assert(s_panel.running && !s_panel.stop && opened); self_reader = false;
+    assert(!atomic_flag_test_and_set(&s_panel_call));
+    assert(carplay_touch_panel_stop() == RTCP_ESTATE);
+    assert(carplay_touch_panel_start(1024, 600, callback, &dev) == RTCP_ESTATE);
+    atomic_flag_clear(&s_panel_call);
+    unsigned before = closes;
+    hold_reader = true;
+    assert(carplay_touch_panel_stop() == RTCP_ETIMEDOUT);
+    assert(!s_panel.running && s_panel.thread_running && opened && allocations == 1);
+    assert(s_panel.callback == callback && s_panel.context == &dev && closes == before);
+    assert(carplay_touch_panel_start(1024, 600, callback, &dev) == RTCP_ESTATE);
+    /* Reader retires after timeout: restart must still await resource cleanup. */
+    entry(entry_arg); entry = NULL; hold_reader = false;
+    assert(carplay_touch_panel_start(1024, 600, callback, &dev) == RTCP_ESTATE);
+    assert(carplay_touch_panel_stop() == RTCP_OK);
+    assert(!opened && allocations == 0 && rx == NULL && closes == before + 1);
+    assert(carplay_touch_panel_stop() == RTCP_OK);
+    for (unsigned cycle = 0; cycle < 32; ++cycle) {
+        assert(carplay_touch_panel_start(1024, 600, callback, &dev) == RTCP_OK);
+        assert(carplay_touch_panel_stop() == RTCP_OK);
+    }
+    puts("actual touch reader: ownership, IRQ, coordinates, command gate, self-join, timeout retry and 32 restarts passed");
     return 0;
 }

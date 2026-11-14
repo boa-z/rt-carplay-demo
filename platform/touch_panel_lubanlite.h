@@ -28,8 +28,11 @@ int carplay_touch_panel_start(uint16_t width, uint16_t height,
                               carplay_touch_panel_cb_t callback,
                               void *context);
 
-/* Disables the panel interrupt, stops the reader and closes the device. */
-void carplay_touch_panel_stop(void);
+/* Ordinary-thread start/stop calls serialize with a nonblocking gate.
+ * Contention/self-join returns RTCP_ESTATE. Stop returns RTCP_ETIMEDOUT after
+ * one second if the reader still owns the device: retain callback/context
+ * and retry stop before restart or freeing them. Success closes the device. */
+int carplay_touch_panel_stop(void);
 
 bool carplay_touch_panel_is_running(void);
 
