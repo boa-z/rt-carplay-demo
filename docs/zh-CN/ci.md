@@ -50,4 +50,8 @@ bash packages/third-party/cherryusb-luban/tests/run_control_probe.sh
 
 ## 视频显示回归
 
-CI 还执行 `make -C packages/third-party/rt-carplay check-lubanlite-video SDK_ROOT="$PWD"`，覆盖实际 MPP Sink 和宿主 UI 策略，包括 SDK framebuffer 命令 ABI。已确认的命令不匹配和板端验收要求见 [视频交接修复](video-handoff-fix.md)，固件身份及更正后的用户反馈见 [迁移验证报告](repository-migration-verification.md)。
+CI 还执行 `make -C application/rt-thread/rtcarplay check-lubanlite-video SDK_ROOT="$PWD"`，覆盖实际 MPP Sink 和宿主 UI 策略，包括 SDK framebuffer 命令 ABI。已确认的命令不匹配和板端验收要求见 [视频交接修复](video-handoff-fix.md)，固件身份及更正后的用户反馈见 [迁移验证报告](repository-migration-verification.md)。
+
+## 宿主持有的平台回归测试集
+
+`host-regressions` CI Job 获取 SDK 固定版本的 mbedTLS 后，在 ASan/UBSan 下执行 `make -C application/rt-thread/rtcarplay -j8 check`，包括迁移的 Receiver、音频、配对测试，以及已有视频、触摸、启动页、Bond、USB DMA、Handoff、重连和能力测试。SDK 独立测试集不再编译板级源码。通用 SDK 开关只从其 Kconfig Source 一次，硬件选择与源码收集由应用负责。参见 SDK [迁移说明](../../../../../packages/third-party/rt-carplay/docs/zh-CN/luban-lite-migration.md)。这些验证使用 Host 设备、调度模型，不是实机验收。

@@ -1,9 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Standalone SDK application integration ("app mode").  Copy this directory to
-# application/rt-thread/rtcarplay/ inside Luban-Lite.  In this mode the
-# package Kconfig (packages/third-party/rt-carplay/Kconfig) must NOT be
-# sourced as well, or the LPKG_RT_CARPLAY_* symbols are defined twice.
+# Generic SDK switches are sourced once here; board switches belong to this app.
+source "packages/third-party/rt-carplay/Kconfig"
 
 menu "rt-carplay application"
 
@@ -120,8 +118,7 @@ config RTCARPLAY_MIC_AEC_DELAY_MS
     range 0 200
     depends on RTCARPLAY_MIC_AEC
 
-# Library switches consumed by the rt-carplay SConscript.  Defined here only
-# for app mode; package mode defines them in the package Kconfig.
+# Board integration switches; portable SDK switches are defined by the SDK Kconfig.
 
 config RTCARPLAY_TOUCH_PANEL
     bool "Forward the touch panel to CarPlay"
@@ -139,26 +136,10 @@ config RTCARPLAY_TOUCH_PANEL
       is not forwarded.  Without this option only the carplay_touch shell
       command injects touches.
 
-config LPKG_USING_RT_CARPLAY
+config RTCARPLAY_SDK_INTEGRATION
     bool
     default y
-
-config LPKG_RT_CARPLAY_RTTHREAD_RUNTIME
-    bool
-    default y
-
-config LPKG_RT_CARPLAY_LOG
-    bool
-    default y
-
-config LPKG_RT_CARPLAY_AUDIO_CODECS
-    bool "AAC-LC and Opus audio (vendored fixed point sources)"
-    default y if RTCARPLAY_AUDIO
-    depends on RTCARPLAY_AUDIO
-
-config LPKG_RT_CARPLAY_ED25519
-    bool
-    default y
+    select LPKG_USING_RT_CARPLAY
 
 config LPKG_RT_CARPLAY_LUBANLITE_WIFI
     bool
@@ -220,7 +201,7 @@ config RTCARPLAY_BT_PERSISTENCE
     select LPKG_BT_SETTINGS
     help
       Restore Bluetooth link keys before publishing the iAP2 service.
-      Uses rt-carplay/port/luban-lite/rtcp_bt_settings.c and the SDK
+      Uses platform/rtcp_bt_settings.c and the SDK
       settings-handler linker section. A full firmware flash erases /data.
 
 config RTCARPLAY_IAP2

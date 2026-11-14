@@ -50,4 +50,8 @@ The tests compile actual adapter sources with ASan/UBSan. They verify software c
 
 ## Video display regression
 
-CI also runs `make -C packages/third-party/rt-carplay check-lubanlite-video SDK_ROOT="$PWD"`. This covers the actual MPP sink and host UI policy, including the SDK framebuffer command ABI. See the [video handoff fix](video-handoff-fix.md) for the confirmed command mismatch and the required board acceptance, and the [migration verification report](repository-migration-verification.md) for firmware identities and corrected user feedback.
+CI also runs `make -C application/rt-thread/rtcarplay check-lubanlite-video SDK_ROOT="$PWD"`. This covers the actual MPP sink and host UI policy, including the SDK framebuffer command ABI. See the [video handoff fix](video-handoff-fix.md) for the confirmed command mismatch and the required board acceptance, and the [migration verification report](repository-migration-verification.md) for firmware identities and corrected user feedback.
+
+## Host-owned platform regression suite
+
+The `host-regressions` CI job runs `make -C application/rt-thread/rtcarplay -j8 check` under ASan/UBSan after fetching the SDK's pinned mbedTLS. It includes the relocated receiver/audio/pairing tests and the existing video, touch, launcher, bonds, USB DMA, handoff, reconnect and capability tests. The SDK's standalone suite no longer compiles board sources. Generic SDK switches are sourced once from its Kconfig; the application owns hardware selection and source collection. See the SDK [migration guide](../../../../packages/third-party/rt-carplay/docs/luban-lite-migration.md). These are Host device/scheduler models, not physical board acceptance.
