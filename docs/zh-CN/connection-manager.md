@@ -10,7 +10,7 @@
 
 `RTCARPLAY_AUTO_CONNECT` 在有无 LVGL 时启用相同应用 Owner。Launcher V2 选中该配置，在 UI/输入注册后启动；Headless 从 `main()` 启动。无线选项齐全时，开机启用 USB 发现并启动 SoftAP/mDNS/Bluetooth/iAP2，无需选择模式。USB 配置选择 Hook 在 CherryUSB 启动前的静态初始化阶段启用，因此开机前已插入的手机可在 GUI 启动前枚举，稍后 Owner 读取保留快照。手动构建继续使用显式 USB 启用行为。
 
-`carplay_connection_manager_start()` 由单个启动 Owner 调用，启动成功后幂等；分配、调度失败返回 `RTCP_ENOMEM` 或 `RTCP_EIO`，失败可重试。Worker 和互斥锁具有应用生命周期，没有管理器销毁 API。USB 服务 Open 失败每五秒重试，无线继续可用。
+`carplay_connection_manager_start()` 由单个启动 Owner 调用，启动成功后幂等；分配、调度失败返回 `RTCP_ENOMEM` 或 `RTCP_EIO`，GUI 启动 Owner 每秒重试失败的 Worker 启动，Headless main 使用相同间隔；成功后幂等，不创建第二个 Worker。Worker 和互斥锁具有应用生命周期，没有管理器销毁 API。USB 服务 Open 失败每五秒重试，无线继续可用。
 
 ## 仲裁与恢复
 

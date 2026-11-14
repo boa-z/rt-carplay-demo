@@ -36,8 +36,15 @@ int main(void)
 #if defined(RTCARPLAY_DEMO_LAUNCHER)
     rt_kprintf("rt-carplay: Launcher V2; automatic USB and wireless discovery\n");
 #elif defined(RTCARPLAY_AUTO_CONNECT)
-    int result = carplay_connection_manager_start();
-    rt_kprintf("rt-carplay: automatic Headless connections, manager=%d\n", result);
+    int result;
+    do {
+        result = carplay_connection_manager_start();
+        if (result != RTCP_OK) {
+            rt_kprintf("rt-carplay: connection owner startup failed=%d; retrying\n", result);
+            rt_thread_mdelay(1000);
+        }
+    } while (result != RTCP_OK);
+    rt_kprintf("rt-carplay: automatic Headless USB/wireless discovery\n");
 #elif defined(RTCARPLAY_AUTO_START)
     rtcarplay_autostart();
 #else

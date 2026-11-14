@@ -329,6 +329,15 @@ static void update_files(void)
 static void update_page(lv_timer_t *timer)
 {
     (void)timer;
+    /* Same GUI startup owner retries a failed worker allocation/schedule.
+     * Successful manager startup is idempotent and creates no second worker. */
+    static bool attempted;
+    static uint32_t last_attempt;
+    uint32_t now = rt_tick_get_millisecond();
+    if (!attempted || (uint32_t)(now - last_attempt) >= 1000U) {
+        attempted = true; last_attempt = now;
+        (void)carplay_connection_manager_start();
+    }
     demo_status_t s;
     if (!carplay_connection_status(&s)) return;
     /* Close read-only pages once when the first visible frame takes over. */

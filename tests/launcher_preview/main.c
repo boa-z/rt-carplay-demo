@@ -9,13 +9,15 @@ static demo_status_t model;
 static uint8_t pixels[1024 * 600 * 4];
 static bool files_opened, audio_opened, microphone_muted;
 static unsigned file_version, replies, audio_selection;
-uint32_t rt_tick_get_millisecond(void) { return 183000; }
+static unsigned preview_ms = 183000, manager_calls;
+uint32_t rt_tick_get_millisecond(void) { return preview_ms; }
 rt_mutex_t rt_mutex_create(const char *n, int f) { (void)n; (void)f; return (void *)1; }
 int rt_mutex_take(rt_mutex_t m, int w) { (void)m; (void)w; return 0; }
 int rt_mutex_release(rt_mutex_t m) { (void)m; return 0; }
 int rt_kprintf(const char *f, ...) { (void)f; return 0; }
 bool carplay_connection_status(demo_status_t *s) { *s = model; return true; }
-int carplay_connection_manager_start(void) { return RTCP_OK; }
+int carplay_connection_manager_start(void)
+{ return ++manager_calls <= 2 ? RTCP_ENOMEM : RTCP_OK; }
 int carplay_touch_panel_start(uint16_t w, uint16_t h, carplay_touch_panel_cb_t c, void *p)
 { assert(w == 1024 && h == 600 && c); (void)p; return RTCP_OK; }
 bool carplay_launcher_video_is_active(void) { return false; }
@@ -90,6 +92,11 @@ int main(int argc, char **argv)
     snprintf(model.ssid, sizeof(model.ssid), "ArtInChip CarPlay");
     snprintf(model.pin, sizeof(model.pin), "3939");
     carplay_demo_launcher_init();
+    assert(manager_calls == 1);
+    update_page(NULL); assert(manager_calls == 2);
+    preview_ms += 1000;
+    update_page(NULL); assert(manager_calls == 3);
+    update_page(NULL); assert(manager_calls == 3); /* One retry per second. */
     screenshot(argv[1], "home");
     inside(heading); inside(pin_label); inside(path_labels[1]); inside(retry_button);
     assert(!lv_obj_has_state(manage_button, LV_STATE_DISABLED));

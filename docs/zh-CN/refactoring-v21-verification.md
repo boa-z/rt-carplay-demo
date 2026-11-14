@@ -83,3 +83,7 @@ SDK 仅豁免 third_party/ed25519/UPSTREAM.md，保留上游来源记录。原�
 物理 USB/无线仲裁、Trust/Bond 持久化、重连、首个可见帧和 Launcher 恢复、sound0/dmic0、触摸、失败回滚及长时间压力测试仍为 NOT_RUN。此前 framebuffer ioctl ABI 缺陷已有实际源码回归和软件修复，面板可见行为需要新一轮开发板测试。ASan/UBSan 和调度模型不能证明不存在所有硬件或跨线程竞态。
 
 自动同时发现、单活动连接策略及 Launcher V2 是后续应用修改，必须保留这些 SDK/驱动边界和音频行为。授权的历史分支、仓库清理属于独立管理操作，需要刷新并验证备份，本交接未执行。交付没有创建 PR、创建分支或切换分支。
+
+## 验证后的仓库清理
+
+按照所有者明确要求，在 V2 软件验证后重建 boa-z/rt-carplay，以移除两条已关闭 PR 记录。仓库 ID 从 1450313589 变为 1458244070，全部状态 PR 数量为零。现有 main 分支现在从 57936326c311850e006310e94d2aa9d711ba6a1e 开始，作者和提交者均为 boa-z <boa-z@outlook.com>。代码、测试与 68158e3 字节一致，仅两份 README 增加历史与证据说明。新 SDK [CI 43648984405](https://github.com/boa-z/rt-carplay/actions/runs/43648984405)独立通过。本历史报告中的旧 SDK 提交、CI 链接可能不再可访问；完整 Git Bundle、已恢复并通过 fsck 的镜像仓库、PR 元数据及最终 CI ZIP 日志保留于所有者离线备份。旧宿主 Gitlink 需要该备份。当前宿主继续在 carplay-oss 开发，SDK 使用 main，没有新建额外开发分支或 PR。

@@ -10,7 +10,7 @@
 
 `RTCARPLAY_AUTO_CONNECT` enables the same application owner with or without LVGL. Launcher V2 selects it and starts it after UI/input registration. Headless starts it from `main()`. With both wireless options present, boot arms USB discovery and starts SoftAP/mDNS/Bluetooth/iAP2 without requiring a mode selection. The USB configuration hook is enabled in static initialization before CherryUSB starts, so an already plugged-in phone can enumerate before GUI startup; the later owner reads its retained snapshot. Manual builds retain explicit USB enable behavior.
 
-`carplay_connection_manager_start()` is called by one startup owner, is idempotent after successful startup, and returns `RTCP_ENOMEM` or `RTCP_EIO` on allocation/scheduling failure. Failed startup can be retried. The worker and mutex have application lifetime; no manager destruction API is exposed. A failed USB service open retries every five seconds while wireless remains available.
+`carplay_connection_manager_start()` is called by one startup owner, is idempotent after successful startup, and returns `RTCP_ENOMEM` or `RTCP_EIO` on allocation/scheduling failure. The GUI startup owner retries failed worker startup once per second; Headless main retries at the same interval. Successful startup is idempotent and creates no second worker. The worker and mutex have application lifetime; no manager destruction API is exposed. A failed USB service open retries every five seconds while wireless remains available.
 
 ## Arbitration and recovery
 
