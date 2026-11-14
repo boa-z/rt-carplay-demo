@@ -1,8 +1,8 @@
 # rt-carplay 应用
 
-V2.1 重构的已实现边界、真实测试结果及剩余任务见 [阶段实施记录](docs/refactoring-v21-progress.md)。当前为增量迁移，尚未完成最终架构验收。
+V2.1 的架构边界、生命周期修复、真实测试和独立实机限制见 [验证交接](docs/refactoring-v21-verification.md)。软件基线已验证，实机验收为 NOT_RUN。
 
-Luban-Lite 侧的 rt-carplay 集成入口。CarPlay 协议栈、AirPlay 接收及过渡期平台适配代码位于 SDK 内置的[`rt-carplay`](../../../packages/third-party/rt-carplay) git submodule；本目录拥有 SDK 应用入口、Kconfig、构建集成及 `ui/lvgl_launcher.c` 启动页。首次构建前需要初始化 submodule：
+Luban-Lite 侧的 rt-carplay 集成入口。CarPlay 协议栈与公共 Receiver Runtime 位于 SDK 内置的[`rt-carplay`](../../../packages/third-party/rt-carplay) git submodule；本目录拥有应用组合、连接管理、板级适配、Kconfig、构建集成及 `ui/lvgl_launcher.c` 启动页。首次构建前需要初始化 submodule：
 
 ```sh
 git submodule update --init packages/third-party/rt-carplay
@@ -20,7 +20,7 @@ git submodule update --init packages/third-party/rt-carplay
 | `main.c` | 应用入口。默认等待 `carplay_start`，启用启动页或自动启动时按配置接管 |
 | `Kconfig` | `RTCARPLAY_*` 应用配置项 |
 | `SConscript` | 通过 `RTCARPLAY_DIR` 引入内置 rt-carplay 的 根目录正式 `SConscript`（不再编译示例应用） |
-| `ui/lvgl_launcher.c` | 宿主拥有的 LVGL 启动页与过渡期连接 Worker |
+| `ui/lvgl_launcher.c` | 宿主拥有的 LVGL 启动页；连接 Worker 位于 app/connection_manager.c |
 | `docs/` | 本应用的构建、验证与架构文档 |
 
 ## 内置组件与源码布局
@@ -30,18 +30,15 @@ SDK 通过 git submodule 固定 CarPlay 相关组件的版本，源码位于 SDK
 ```text
 luban-lite-carplay/
 ├── application/rt-thread/rtcarplay/       # 应用入口、Kconfig、构建集成
-├── packages/third-party/rt-carplay/      # 协议栈、Runtime、过渡期平台适配（submodule）
+├── packages/third-party/rt-carplay/      # 协议栈、公共 Runtime、通用 Port（submodule）
 ├── packages/third-party/cherryusb-ipheth/ # Apple Ethernet / USB 类驱动（submodule）
 ├── packages/third-party/cherryusb-luban/ # CherryUSB 上游源码的 SDK 胶水
 └── packages/third-party/cherryusb/        # 官方 CherryUSB 1.6.1 快照
 ```
 
-- `rt-carplay`：路径由 `CONFIG_RTCARPLAY_DIR` 指定，默认
-  `../../../packages/third-party/rt-carplay`（相对本目录）。
-- `cherryusb-ipheth`：由 `CONFIG_LPKG_CHERRYUSB_IPHETH_PATH` 指定，默认
-  `packages/third-party/cherryusb-ipheth`（相对 SDK 根目录）。
-- `cherryusb-luban`：SDK 内置，见
-  [`packages/third-party/cherryusb-luban/README.md`](../../../packages/third-party/cherryusb-luban/README.md)。
+- `rt-carplay`：路径由 `CONFIG_RTCARPLAY_DIR` 指定，默认 `../../../packages/third-party/rt-carplay`（相对本目录）。
+- `cherryusb-ipheth`：由 `CONFIG_LPKG_CHERRYUSB_IPHETH_PATH` 指定，默认 `packages/third-party/cherryusb-ipheth`（相对 SDK 根目录）。
+- `cherryusb-luban`：SDK 内置，见 [`packages/third-party/cherryusb-luban/README.md`](../../../packages/third-party/cherryusb-luban/README.md)。
 
 submodule 的 URL 和固定 commit 记录在 SDK 仓库的 `.gitmodules` 与 gitlink 中：
 

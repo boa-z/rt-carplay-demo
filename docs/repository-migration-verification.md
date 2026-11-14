@@ -36,4 +36,4 @@ Headless board operation, individual U-disk/SD-card upgrade cases, OTG role swit
 
 ## Remaining V2.1 scope
 
-Repository migration and a complete IMG CI do not complete the entire V2.1 architecture task. The RT-Thread application wrapper and launcher still need the remaining lifecycle/connection-manager extraction, platform ownership and final SDK API work listed in [the V2.1 progress report](refactoring-v21-progress.md). The complete rt-carplay bilingual documentation audit remains open. Audio negotiation and routing behavior remains frozen for the separate audio-debug handoff.
+The later [V2.1 verification handoff](refactoring-v21-verification.md) supersedes the intermediate migration status and records the implemented architecture, lifecycle audit, bilingual documentation and exact-image software verification. Physical acceptance remains NOT_RUN. Audio negotiation and routing behavior remains frozen for the separate audio-debug handoff.

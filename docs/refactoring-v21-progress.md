@@ -1,6 +1,6 @@
 # Portable CarPlay V2.1 implementation progress
 
-This is an intermediate implementation record, not a final acceptance report. The full V2.1 task remains open. Host tests, cross-builds and physical hardware validation are separate evidence categories.
+This is a historical intermediate implementation record. Its remaining-work statements describe their recorded migration stages and are superseded by the [V2.1 verification handoff](refactoring-v21-verification.md). Host tests, cross-builds and physical hardware validation are separate evidence categories.
 
 ## Starting revisions
 

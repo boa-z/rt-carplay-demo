@@ -76,4 +76,4 @@ The actual worker regression retains PCM/Opus authenticated UDP decryption, nonc
 
 `check-usb-iap2-worker` extracts the actual link type, reset/cleanup, worker, call gate and public/shell wrappers, links real SDK iAP2 sessions and models thread scheduling, provider release and blocking command I/O. It covers create/start rollback, failed-install cleanup ownership, detach during bootstrap/thread creation, stop before scheduling, self-join, timeout retaining the stream, a real competing pthread rejected by all wrappers, error-path gate release and 32 restart cycles under ASan/UBSan. It does not exercise real Lockdown trust or the physical USB scheduler.
 
-These tests do not establish physical pairing, reconnect or playback. Other device worker lifetimes still need audit. Complete V2.1 acceptance and subsequent Launcher V2 work remain open.
+These tests do not establish physical pairing, reconnect or playback. The [V2.1 verification handoff](refactoring-v21-verification.md) records the completed software ownership audit and separate hardware limitations. Automatic connection and Launcher V2 remain subsequent application work.
