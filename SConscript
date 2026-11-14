@@ -111,7 +111,15 @@ if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_USB'):
         cpppath.append(os.path.join(cherryusb, 'common'))
         cpppath.append(os.path.join(cherryusb, 'core'))
 
+# These sources previously inherited the SDK group's force-included logger.
+# Keep that provider local to the host group after moving the implementations.
+ccflags = ''
+if GetDepend('LPKG_RT_CARPLAY_LOG'):
+    ccflags = '-include ' + os.path.join(
+        repo, 'port', 'rtthread', 'include', 'rtcp_log_rtthread.h')
+
 group = DefineGroup('Applications', src, depend=[''], CPPPATH=cpppath,
+                    LOCAL_CCFLAGS=ccflags,
                     CPPDEFINES=['MBEDTLS_CHACHA20_C', 'MBEDTLS_CHACHAPOLY_C',
                                 'MBEDTLS_HKDF_C'])
 
