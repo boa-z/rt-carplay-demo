@@ -35,4 +35,8 @@ make -j8 check
 
 应用回归使用 SDK LVGL 头文件编译实际管理器和启动页源码，并在 ASan/UBSan 下以模拟 USB、无线、媒体和调度服务执行实际 Worker。覆盖信任或存储失败、重插、网络与首帧等待、静默关闭、异步蓝牙失败、无线模式切换、配对管理互斥、指针路由与溢出以及音频测试所有权。新增请求 API 检查覆盖启动失败后重试、幂等启动、状态副本、文件列表版本和管理页面互斥。另有两项语法检查在不提供 LVGL 头文件路径的条件下编译实际管理器，分别启用、禁用音频及无线功能。
 
-SDK Make 与 CTest 测试集均通过 58 项测试，包含实际 RT-Thread 包装层生命周期回归。Host 测试和语法检查不能验证真实 USB 取消、蓝牙重连、音频设备释放或面板交接。GUI/Headless 交叉构建结果需要关联准确的已发布源码版本。在刷入匹配镜像并完成测试之前，这些改动的 D213 验证状态为 `NOT_RUN`。
+SDK Make 通过 58 个测试程序及旧配置加密端到端变体，CTest 通过 59 项，包含实际 RT-Thread 包装层生命周期回归。Host 测试和语法检查不能验证真实 USB 取消、蓝牙重连、音频设备释放或面板交接。GUI/Headless 交叉构建结果需要关联准确的已发布源码版本。在刷入匹配镜像并完成测试之前，这些改动的 D213 验证状态为 `NOT_RUN`。
+
+## Receiver 集成
+
+固定版本 SDK 现已接收公共 `rtcp_receiver_config_t.platform`、`.media` 和 `.iap2` 描述。RT-Thread 组合实现直接填写这些配置，其 Owner 通过公共 Receiver 函数发送 HID、Siri 和隧道 iAP2。视频仍为 Annex-B H.264，音频保留 LPCM/AAC/Opus 格式、流槽位及时间戳元数据。解码和设备 Worker、触摸焦点及 UI 交接仍由宿主负责。此 API 迁移不表示其余板级适配迁移或单例诊断所有权审查已经完成。参见 SDK 的 [Receiver API](../../../../../packages/third-party/rt-carplay/docs/zh-CN/receiver-api.md) 与[生命周期契约](../../../../../packages/third-party/rt-carplay/docs/zh-CN/lifecycle-and-ownership.md)。
