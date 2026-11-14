@@ -26,8 +26,14 @@ Wireless and USB iAP2 links keep their own endpoint structure. Wi-Fi and AirPlay
 
 This changes ownership only. Capability advertisement, Pair-Setup/Pair-Verify, iAP2 message timing, endpoint values, audio negotiation and media behavior remain unchanged.
 
+## Worker startup and quiescence
+
+Bluetooth Echo publishes its atomic running state before scheduling, serializes commands and checks startup errors. Create/start failures remove its callback and release its Bluetooth claim. Stop before first scheduling skips controller enable and listener registration. Stop cannot join its own worker; a bounded timeout leaves ownership with the worker until it completes disconnect/callback cleanup and publishes quiescence as its last operation. Stopping an inactive Echo does not disconnect another Bluetooth owner.
+
+The wired USB iAP2 worker similarly checks thread startup and rolls back its session and MFi provider on failure. Its run/running flags are atomic. A stop queued before scheduling skips link-up transmission, and the final stopped log and provider cleanup precede the quiescence flag. The standalone worker regression extracts these actual functions and the actual link type, links real SDK iAP2 session code, and models only thread scheduling and provider release.
+
 ## Executed regressions and remaining audit
 
 `make -C application/rt-thread/rtcarplay -j8 check` runs the actual composition against real Linux protocol/entropy ports and modeled RT-Thread scheduling/device APIs. It checks copied wired/wireless/display metadata, IPv6 readiness, retained snapshots after source clearing, concurrent readers, writer waiting for a real pthread reader, rejection during teardown and the existing 32 lifecycle cycles. The actual iAP2 provider regression verifies returned pointer ownership, source retirement and failed refresh without invalidating retained strings. The composition regression also parses an actual DNS SRV response with the real Browser, checks queued versus applied Control commands, copies endpoint data across Browser destruction, and verifies command rejection during teardown. Both run under ASan/UBSan in the host CI job.
 
-These tests do not establish physical pairing, reconnect or playback. The remaining audit includes Bluetooth/iAP2/device worker lifetimes. Complete V2.1 acceptance and subsequent Launcher V2 work remain open.
+These tests do not establish physical pairing, reconnect or playback. The remaining audit includes wireless iAP2 status publication, USB command serialization and other device worker lifetimes. Complete V2.1 acceptance and subsequent Launcher V2 work remain open.

@@ -31,6 +31,7 @@
 #include <rtthread.h>
 
 #include <string.h>
+#include <stdatomic.h>
 
 #include "carplay_app.h"
 #include "carplay_usb.h"
@@ -596,8 +597,8 @@ typedef struct {
     iap2_session_t *session;
     iap2_stream_rx_t rx;
     rt_thread_t thread;
-    volatile bool run;
-    volatile bool running;
+    atomic_bool run;
+    atomic_bool running;
     volatile bool identified;
     volatile bool authenticated;
     unsigned events;
@@ -748,8 +749,10 @@ static void iap2_usb_thread(void *parameter)
 {
     iap2_usb_link_t *link = parameter;
 
-    iap2_session_link_up(link->session, iap2_usb_now_ms());
-    rt_kprintf("[carplay_usb] iap2: link up\n");
+    if (link->run) {
+        iap2_session_link_up(link->session, iap2_usb_now_ms());
+        rt_kprintf("[carplay_usb] iap2: link up\n");
+    }
     while (link->run) {
         int ret = iap2_stream_rx_step(&link->rx, link->session,
                                       IAP2_USB_RX_TIMEOUT_MS,
@@ -770,8 +773,34 @@ static void iap2_usb_thread(void *parameter)
     link->session = NULL;
     carplay_mfi_provider_release(link->mfi);
     link->mfi = NULL;
-    link->running = false;
+    link->run = false;
     rt_kprintf("[carplay_usb] iap2: stopped (events=%u)\n", link->events);
+    /* No link/session access after publishing quiescence. */
+    link->running = false;
+}
+
+static int iap2_usb_start_worker(void)
+{
+    s_iap2_usb.run = true;
+    s_iap2_usb.running = true;
+    s_iap2_usb.thread = rt_thread_create("carplay-iap2u",
+                                         iap2_usb_thread, &s_iap2_usb,
+                                         IAP2_USB_STACK_BYTES,
+                                         IAP2_USB_PRIORITY, IAP2_USB_TICK);
+    int result = RTCP_ENOMEM;
+    if (s_iap2_usb.thread != NULL) {
+        if (rt_thread_startup(s_iap2_usb.thread) == RT_EOK) return RTCP_OK;
+        (void)rt_thread_delete(s_iap2_usb.thread);
+        s_iap2_usb.thread = NULL;
+        result = RTCP_EIO;
+    }
+    iap2_session_destroy(s_iap2_usb.session);
+    s_iap2_usb.session = NULL;
+    carplay_mfi_provider_release(s_iap2_usb.mfi);
+    s_iap2_usb.mfi = NULL;
+    s_iap2_usb.run = false;
+    s_iap2_usb.running = false;
+    return result;
 }
 
 static int cmd_iap2(void)
@@ -808,6 +837,8 @@ static int cmd_iap2(void)
     }
 
     memset(&s_iap2_usb, 0, sizeof(s_iap2_usb));
+    atomic_init(&s_iap2_usb.run, false);
+    atomic_init(&s_iap2_usb.running, false);
     iap2_stream_rx_init(&s_iap2_usb.rx, &service);
 
     iap2_identity_config_t identity = iap2_usb_identity();
@@ -836,22 +867,11 @@ static int cmd_iap2(void)
         return 0;
     }
 
-    s_iap2_usb.run = true;
-    s_iap2_usb.running = true;
-    s_iap2_usb.thread = rt_thread_create("carplay-iap2u",
-                                         iap2_usb_thread, &s_iap2_usb,
-                                         IAP2_USB_STACK_BYTES,
-                                         IAP2_USB_PRIORITY, IAP2_USB_TICK);
-    if (s_iap2_usb.thread == NULL) {
-        iap2_session_destroy(s_iap2_usb.session);
-        s_iap2_usb.session = NULL;
-        carplay_mfi_provider_release(s_iap2_usb.mfi);
-        s_iap2_usb.mfi = NULL;
-        s_iap2_usb.running = false;
-        rt_kprintf("[carplay_usb] iap2: cannot create the link thread\n");
-        return 0;
+    ret = iap2_usb_start_worker();
+    if (ret != RTCP_OK) {
+        rt_kprintf("[carplay_usb] iap2: cannot start the link thread rc=%d\n", ret);
+        return ret;
     }
-    rt_thread_startup(s_iap2_usb.thread);
     rt_kprintf("[carplay_usb] iap2: running over the %s carkit stream, "
                "usb interface=%d\n",
                s_lockdown_session.service_ssl ? "TLS" : "raw",

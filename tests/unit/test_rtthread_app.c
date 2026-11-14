@@ -11,6 +11,7 @@
  * and protocol dependencies; only RT-Thread scheduling/locks are modeled. */
 #define LPKG_RT_CARPLAY_LUBANLITE_USB 1
 #define RT_USING_LWIP 1
+#define RTCARPLAY_BT 1
 #include "../../app/carplay_app.c"
 #include "../../app/pairing_files.c"
 
@@ -19,7 +20,7 @@ struct test_thread { void (*entry)(void *); void *context; };
 static struct test_thread *pending;
 static struct test_thread *current;
 static unsigned live_mutexes, thread_deletes, delays;
-static bool fail_create, fail_startup;
+static bool fail_create, fail_startup, hold_bt_worker;
 static bool check_input_reentry;
 static bool ipv6_valid = true;
 static unsigned ipv6_queries;
@@ -74,6 +75,37 @@ static void check_queries_rejected(void)
     assert(cmd_carplay_ctrl(2, ctrl) == RTCP_ESTATE);
 }
 
+
+static unsigned bt_enables, bt_disconnects, bt_listens;
+static int bt_enable_result = RTCP_OK;
+static void (*bt_callback)(int, void *);
+static int bt_enable(const char *name, const uint8_t *address)
+{
+    (void)name; (void)address; ++bt_enables;
+    char *stop[] = {"carplay_bt", "stop"};
+    assert(cmd_carplay_bt(2, stop) == RTCP_ESTATE); /* Cannot join self. */
+    return bt_enable_result;
+}
+static int bt_listen(uint8_t channel, const char *name, const char *uuid, uint8_t *out)
+{
+    (void)channel; (void)name; (void)uuid; ++bt_listens; *out = 1; return RTCP_OK;
+}
+const struct rtcp_bt rtcp_bt_lubanlite = {.enable = bt_enable, .rfcomm_listen = bt_listen};
+void rtcp_bt_lubanlite_set_event_cb(void (*cb)(int, void *), void *user)
+{ (void)user; bt_callback = cb; }
+void rtcp_bt_lubanlite_disconnect(void) { ++bt_disconnects; }
+int rtcp_bt_lubanlite_rfcomm_accept(int lfd, int *fd)
+{ (void)lfd; (void)fd; return RTCP_EIO; }
+int rtcp_bt_lubanlite_recv(int fd, void *buffer, size_t size)
+{ (void)fd; (void)buffer; (void)size; return RTCP_EIO; }
+int rtcp_bt_lubanlite_send(int fd, const void *buffer, size_t size)
+{ (void)fd; (void)buffer; (void)size; return RTCP_EIO; }
+bool rtcp_bt_lubanlite_is_up(void) { return false; }
+bool rtcp_bt_lubanlite_link_up(void) { return false; }
+uint8_t rtcp_bt_lubanlite_channel(void) { return 0; }
+unsigned rtcp_bt_lubanlite_rx_dropped(void) { return 0; }
+void rtcp_bt_lubanlite_pairing_status(rtcp_bt_pairing_status_t *out)
+{ memset(out, 0, sizeof(*out)); }
 
 bool rtcp_lubanlite_random(uint8_t *data, size_t length)
 {
@@ -132,8 +164,14 @@ rt_thread_t rt_thread_create(const char *name, void (*entry)(void *), void *cont
 int rt_thread_startup(rt_thread_t thread)
 {
     assert(thread && !pending);
-    assert(s_receiver_worker_live); /* Ownership precedes first scheduling. */
-    assert(carplay_app_stop() == RTCP_ESTATE); /* Startup reentry. */
+    if (thread->entry == poll_thread) {
+        assert(s_receiver_worker_live); /* Ownership precedes first scheduling. */
+        assert(carplay_app_stop() == RTCP_ESTATE); /* Startup reentry. */
+    } else {
+        assert(thread->entry == bt_serve_thread && s_bt_thread_running);
+        char *stop[] = {"carplay_bt", "stop"};
+        assert(cmd_carplay_bt(2, stop) == RTCP_ESTATE); /* Start serialized. */
+    }
     if (fail_startup) return -1;
     pending = thread; return RT_EOK;
 }
@@ -153,11 +191,15 @@ void rt_thread_mdelay(int milliseconds)
         (void)nanosleep(&pause, NULL);
         return;
     }
-    assert(milliseconds > 0 && ++delays < 100);
+    assert(milliseconds > 0 && ++delays < 1000);
+    if (hold_bt_worker && pending && pending->entry == bt_serve_thread) return;
     /* Stop before first scheduling: execute the real worker, which must
      * still own all its state/resources until its last access. */
     assert(pending);
-    assert(s_receiver_stop && s_receiver_worker_live && s_receiver_running);
+    if (pending->entry == poll_thread)
+        assert(s_receiver_stop && s_receiver_worker_live && s_receiver_running);
+    else
+        assert(!s_bt_serve && s_bt_thread_running);
     struct test_thread *thread = pending;
     pending = NULL;
     current = thread;
@@ -248,8 +290,57 @@ static void test_control_commands(void)
     assert(copy.has_endpoint && copy.endpoint.ipv4[3] == 2);
 }
 
+static void run_bt_worker(void)
+{
+    struct test_thread *thread = pending;
+    assert(thread && thread->entry == bt_serve_thread);
+    pending = NULL; current = thread;
+    thread->entry(thread->context);
+    current = NULL; free(thread);
+    assert(!s_bt_thread_running && !s_bt_serve && !s_bt_thread && !bt_callback);
+    assert(carplay_bt_owner() == CARPLAY_BT_OWNER_NONE);
+}
+static void test_bt_lifetime(void)
+{
+    char *start[] = {"carplay_bt", "start"};
+    char *stop[] = {"carplay_bt", "stop"};
+    fail_create = true;
+    assert(cmd_carplay_bt(2, start) == RTCP_ENOMEM);
+    assert(!s_bt_thread_running && !s_bt_thread && !bt_callback);
+    assert(carplay_bt_owner() == CARPLAY_BT_OWNER_NONE);
+    fail_create = false; fail_startup = true;
+    assert(cmd_carplay_bt(2, start) == RTCP_EIO);
+    assert(!s_bt_thread_running && !s_bt_thread && !bt_callback);
+    assert(carplay_bt_owner() == CARPLAY_BT_OWNER_NONE);
+    fail_startup = false;
+    assert(cmd_carplay_bt(2, start) == RTCP_OK && pending);
+    assert(s_bt_thread_running && carplay_bt_owner() == CARPLAY_BT_OWNER_ECHO);
+    hold_bt_worker = true;
+    assert(cmd_carplay_bt(2, stop) == RTCP_ETIMEDOUT);
+    assert(pending && s_bt_thread_running && carplay_bt_owner() == CARPLAY_BT_OWNER_ECHO);
+    hold_bt_worker = false;
+    assert(cmd_carplay_bt(2, stop) == RTCP_OK); /* Before first scheduling. */
+    assert(!pending && !s_bt_thread_running && !s_bt_thread && !bt_callback);
+    assert(!bt_enables && !bt_listens); /* Stop cannot create a late listener. */
+    unsigned disconnected = bt_disconnects;
+    assert(carplay_bt_claim(CARPLAY_BT_OWNER_IAP2));
+    assert(cmd_carplay_bt(2, stop) == RTCP_OK && bt_disconnects == disconnected);
+    carplay_bt_release(CARPLAY_BT_OWNER_IAP2);
+    bt_enable_result = RTCP_EIO;
+    assert(cmd_carplay_bt(2, start) == RTCP_OK);
+    run_bt_worker();
+    assert(bt_enables == 1 && !bt_listens);
+    bt_enable_result = RTCP_OK;
+    assert(cmd_carplay_bt(2, start) == RTCP_OK);
+    run_bt_worker();
+    assert(bt_enables == 2 && bt_listens == 1);
+    delays = 0;
+}
+
 int main(void)
 {
+    test_bt_lifetime();
+    thread_deletes = 0;
     char directory[] = "/tmp/rtcp-rtthread-lifecycle-XXXXXX";
     assert(mkdtemp(directory));
     char seed[256], store[256];

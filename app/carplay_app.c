@@ -1949,9 +1949,10 @@ static int cmd_carplay_randtest(int argc, char **argv)
 #define BT_BRINGUP_PRIORITY 20U
 #define BT_BRINGUP_TICK 20U
 
-static volatile bool s_bt_serve;
-static volatile bool s_bt_thread_running;
-static rt_thread_t s_bt_thread;
+static atomic_bool s_bt_serve = ATOMIC_VAR_INIT(false);
+static atomic_bool s_bt_thread_running = ATOMIC_VAR_INIT(false);
+static atomic_flag s_bt_call = ATOMIC_FLAG_INIT;
+static _Atomic(rt_thread_t) s_bt_thread;
 
 static void bt_event_cb(int ev, void *user)
 {
@@ -1964,14 +1965,15 @@ static void bt_event_cb(int ev, void *user)
 static void bt_serve_thread(void *parameter)
 {
     (void)parameter;
-    s_bt_thread_running = true;
-
-    int result = rtcp_bt_lubanlite.enable("rt-carplay", NULL);
+    int result = RTCP_OK;
+    if (!s_bt_serve) goto done;
+    result = rtcp_bt_lubanlite.enable("rt-carplay", NULL);
     if (result != RTCP_OK) {
         APP_LOG("bt enable failed rc=%d", result);
         goto done;
     }
 
+    if (!s_bt_serve) goto done;
     uint8_t channel = 0U;
     result = rtcp_bt_lubanlite.rfcomm_listen(0U, "rt-carplay",
                                              BT_BRINGUP_UUID, &channel);
@@ -2003,11 +2005,16 @@ static void bt_serve_thread(void *parameter)
     }
 
 done:
-    s_bt_thread_running = false;
+    rtcp_bt_lubanlite_disconnect();
+    rtcp_bt_lubanlite_set_event_cb(NULL, NULL);
+    s_bt_serve = false;
+    s_bt_thread = NULL;
     carplay_bt_release(CARPLAY_BT_OWNER_ECHO);
+    /* Quiescence is the final publication, including stop before scheduling. */
+    s_bt_thread_running = false;
 }
 
-static int cmd_carplay_bt(int argc, char **argv)
+static int carplay_bt_command_owned(int argc, char **argv)
 {
     const char *sub = argc >= 2 ? argv[1] : "status";
 #ifdef RTCARPLAY_DEMO_LAUNCHER
@@ -2035,19 +2042,31 @@ static int cmd_carplay_bt(int argc, char **argv)
                                        BT_BRINGUP_TICK);
         if (s_bt_thread == NULL) {
             s_bt_serve = false;
+            rtcp_bt_lubanlite_set_event_cb(NULL, NULL);
             carplay_bt_release(CARPLAY_BT_OWNER_ECHO);
             rt_kprintf("carplay_bt: cannot create thread\n");
-            return 0;
+            return RTCP_ENOMEM;
         }
-        (void)rt_thread_startup(s_bt_thread);
+        s_bt_thread_running = true;
+        if (rt_thread_startup(s_bt_thread) != RT_EOK) {
+            (void)rt_thread_delete(s_bt_thread);
+            s_bt_thread = NULL;
+            s_bt_serve = false;
+            rtcp_bt_lubanlite_set_event_cb(NULL, NULL);
+            carplay_bt_release(CARPLAY_BT_OWNER_ECHO);
+            s_bt_thread_running = false;
+            return RTCP_EIO;
+        }
         return 0;
     }
     if (strcmp(sub, "stop") == 0) {
+        if (!s_bt_thread_running) return RTCP_OK;
+        if (rt_thread_self() == s_bt_thread) return RTCP_ESTATE;
         s_bt_serve = false;
         rtcp_bt_lubanlite_disconnect();
-        while (s_bt_thread_running) {
+        for (unsigned waited = 0; s_bt_thread_running && waited < 3000U; waited += 10U)
             rt_thread_mdelay(10);
-        }
+        if (s_bt_thread_running) return RTCP_ETIMEDOUT;
         rt_kprintf("carplay_bt stopped\n");
         return 0;
     }
@@ -2072,6 +2091,18 @@ static int cmd_carplay_bt(int argc, char **argv)
     }
     rt_kprintf("usage: carplay_bt start|stop|status\n");
     return 0;
+}
+static int cmd_carplay_bt(int argc, char **argv)
+{
+    if (argc < 1 || argc > 2 ||
+        (argc == 2 && strcmp(argv[1], "start") != 0 &&
+                      strcmp(argv[1], "stop") != 0 && strcmp(argv[1], "status") != 0))
+        return RTCP_EINVAL;
+    if (atomic_flag_test_and_set_explicit(&s_bt_call, memory_order_acquire))
+        return RTCP_ESTATE;
+    int result = carplay_bt_command_owned(argc, argv);
+    atomic_flag_clear_explicit(&s_bt_call, memory_order_release);
+    return result;
 }
 #endif /* RTCARPLAY_BT */
 
