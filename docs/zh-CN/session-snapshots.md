@@ -30,7 +30,9 @@
 
 蓝牙 Echo 在调度前发布原子运行状态，串行处理命令，并检查启动错误。创建或启动失败时移除回调并释放蓝牙占用。首次调度前收到停止请求时，跳过控制器启用和监听器注册。停止操作不能等待自身 Worker；有界等待超时后，资源仍归 Worker 所有，直到它完成断开与回调清理，并以最后一步发布静止状态。停止未运行的 Echo 不会断开其他蓝牙所有者。
 
-有线 USB iAP2 Worker 同样检查线程启动结果，失败时回滚 Session 和 MFi Provider。run/running 标志使用原子类型。调度前收到停止请求时，跳过链路建立发送；最终停止日志和 Provider 清理先于静止标志发布。独立 Worker 回归提取这些实际函数和真实链路类型，链接真实 SDK iAP2 Session 代码，仅模拟线程调度与 Provider 释放。
+有线 USB iAP2 Worker 同样检查线程启动结果，在失败时回滚 Session 和成功安装的 MFi Provider。Provider 安装失败时不会释放其他 Owner 的引用。run/running 标志和线程句柄均为原子变量，重置时保留原子存储，以允许并发观察者读取。拔线请求代次避免后续启动覆盖更早到达的拔线请求。首次调度前收到停止请求时跳过 Link-Up 发送，最终停止日志和 Provider 清理先于静止标志发布。停止拒绝等待自身，在三秒超时后保留流所有权；Shell `stop` 也必须先结束流 Owner，再关闭 USB Hook。
+
+USB 应用操作与全部 Shell 命令共享一个非阻塞原子调用门。争用返回 `RTCP_ESTATE`，不会进入 Lockdown 或 Transport 代码。这保证单项操作串行化，也覆盖使用可复用描述符存储的状态命令；由多个操作组成的 pair/start 序列仍需一个应用 Owner 负责组织。拔线回调保持非阻塞，仅发布停止标志／请求代次。信任缓存结果通过原子变量发布。公开 Session 关闭接口在超时或拒绝等待自身时返回 `RTCP_ETIMEDOUT` 并保留流，Worker 结束后再次关闭即可完成清理。
 
 无线 iAP2 服务通过原子生命周期 Gate 串行化 start/stop，争用和等待自身返回 `RTCP_ESTATE`。run 标志、Worker 句柄、运行状态及跨 Owner 的进度／计数器均使用原子类型。Bootstrap 和 AirPlay Tunnel 重置时逐字段存储诊断值，不以 `memset` 清零正在被读取的原子存储。状态读取不解引用 Session，只复制观察字段；这些字段可能反映相邻 Owner 步骤，并非事务性的一次 Session 状态转换。
 
@@ -42,4 +44,6 @@
 
 `check-wireless-iap2-worker` 编译实际无线状态、回调、Owner、Tunnel 和 start/stop 函数，链接真实 SDK iAP2 Session，仅模拟蓝牙／调度／MFi 探测边界。覆盖创建／启动失败、生命周期争用、占用期间和调度前停止、probe/enable/Session 创建／accept 期间停止、Provider 安装失败时的所有权、等待自身、有界超时保留，以及带并发状态读取者的 32 轮重启／Tunnel 重置。ASan/UBSan 检查内存及未定义行为；这不是 ThreadSanitizer 结果，也不是线上 MFi 握手测试。
 
-这些测试不代表实机配对、重连或播放通过。剩余审查包括 USB 命令串行化和其他设备 Worker 生命周期。完整 V2.1 验收与后续 Launcher V2 工作仍未完成。
+`check-usb-iap2-worker` 提取实际链路类型、重置／清理、Worker、调用门及公开／Shell 包装函数，链接真实 SDK iAP2 Session，仅模拟线程调度、Provider 释放和阻塞命令 I/O。ASan/UBSan 覆盖创建／启动回滚、安装失败后的清理所有权、初始化／线程创建期间拔线、首次调度前停止、等待自身、超时保留流、真实竞争 pthread 被全部包装函数拒绝、错误路径释放调用门，以及 32 轮重启。不覆盖真实 Lockdown 信任过程或物理 USB 调度。
+
+这些测试不代表实机配对、重连或播放通过。其他设备 Worker 生命周期仍需审查。完整 V2.1 验收与后续 Launcher V2 工作仍未完成。

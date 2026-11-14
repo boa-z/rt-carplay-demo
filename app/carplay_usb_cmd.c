@@ -58,6 +58,22 @@
 
 #define MUX_REPLY_MAX 2048U
 
+/* One ordinary-thread caller owns command/session state. Never wait here:
+ * pairing can block on the phone's trust dialog. The detach callback only
+ * publishes atomics and does not enter this gate. */
+static atomic_flag s_usb_call = ATOMIC_FLAG_INIT;
+static atomic_uint s_usb_stop_generation;
+
+static bool usb_call_enter(void)
+{
+    return !atomic_flag_test_and_set(&s_usb_call);
+}
+
+static void usb_call_leave(void)
+{
+    atomic_flag_clear(&s_usb_call);
+}
+
 /* Defined with the wired iAP2 state below; the detach event only raises the
  * stop flag so the USB hub thread never blocks on the iAP2 thread. */
 static void iap2_usb_request_stop(void);
@@ -436,7 +452,7 @@ static bool lockdown_session_active(void)
            s_lockdown_session.service.ops != NULL;
 }
 
-static int s_trust_cache; /* 0 unknown, 1 new, 2 reused, 3 saved, negative I/O */
+static atomic_int s_trust_cache; /* 0 unknown, 1 new, 2 reused, 3 saved, negative I/O */
 int carplay_usb_trust_cache_status(void) { return s_trust_cache; }
 
 static bool pair_cache_path(char *path, size_t capacity)
@@ -596,19 +612,47 @@ static int cmd_pair(void)
 typedef struct {
     iap2_session_t *session;
     iap2_stream_rx_t rx;
-    rt_thread_t thread;
+    _Atomic(rt_thread_t) thread;
     atomic_bool run;
     atomic_bool running;
-    volatile bool identified;
-    volatile bool authenticated;
+    bool identified;
+    bool authenticated;
     unsigned events;
     bool airplay_unavailable_logged;
     char ip_address[64];
     carplay_app_wired_info_t endpoint;
-    const struct rtcp_mfi *mfi; /* installed AirPlay /auth-setup provider */
+    const struct rtcp_mfi *mfi;
+    bool provider_installed; /* release only our successful install */
+    unsigned stop_generation;
 } iap2_usb_link_t;
 
 static iap2_usb_link_t s_iap2_usb;
+
+static void iap2_usb_release_provider(iap2_usb_link_t *link)
+{
+    if (link->provider_installed) carplay_mfi_provider_release(link->mfi);
+    link->provider_installed = false;
+    link->mfi = NULL;
+}
+
+/* Caller owns the command gate and has observed worker quiescence. Readers
+ * may still load running/thread, so do not memset or reinitialize atomics. */
+static void iap2_usb_reset(unsigned stop_generation)
+{
+    s_iap2_usb.session = NULL;
+    memset(&s_iap2_usb.rx, 0, sizeof(s_iap2_usb.rx));
+    s_iap2_usb.thread = NULL;
+    s_iap2_usb.run = false;
+    s_iap2_usb.identified = false;
+    s_iap2_usb.authenticated = false;
+    s_iap2_usb.events = 0U;
+    s_iap2_usb.airplay_unavailable_logged = false;
+    memset(s_iap2_usb.ip_address, 0, sizeof(s_iap2_usb.ip_address));
+    memset(&s_iap2_usb.endpoint, 0, sizeof(s_iap2_usb.endpoint));
+    s_iap2_usb.mfi = NULL;
+    s_iap2_usb.provider_installed = false;
+    s_iap2_usb.stop_generation = stop_generation;
+}
 
 static uint32_t iap2_usb_now_ms(void)
 {
@@ -749,7 +793,7 @@ static void iap2_usb_thread(void *parameter)
 {
     iap2_usb_link_t *link = parameter;
 
-    if (link->run) {
+    if (link->run && link->stop_generation == atomic_load(&s_usb_stop_generation)) {
         iap2_session_link_up(link->session, iap2_usb_now_ms());
         rt_kprintf("[carplay_usb] iap2: link up\n");
     }
@@ -771,8 +815,7 @@ static void iap2_usb_thread(void *parameter)
     iap2_session_link_down(link->session);
     iap2_session_destroy(link->session);
     link->session = NULL;
-    carplay_mfi_provider_release(link->mfi);
-    link->mfi = NULL;
+    iap2_usb_release_provider(link);
     link->run = false;
     rt_kprintf("[carplay_usb] iap2: stopped (events=%u)\n", link->events);
     /* No link/session access after publishing quiescence. */
@@ -782,6 +825,9 @@ static void iap2_usb_thread(void *parameter)
 static int iap2_usb_start_worker(void)
 {
     s_iap2_usb.run = true;
+    /* A detach during probe/reset must not be overwritten by this start. */
+    if (s_iap2_usb.stop_generation != atomic_load(&s_usb_stop_generation))
+        s_iap2_usb.run = false;
     s_iap2_usb.running = true;
     s_iap2_usb.thread = rt_thread_create("carplay-iap2u",
                                          iap2_usb_thread, &s_iap2_usb,
@@ -796,8 +842,7 @@ static int iap2_usb_start_worker(void)
     }
     iap2_session_destroy(s_iap2_usb.session);
     s_iap2_usb.session = NULL;
-    carplay_mfi_provider_release(s_iap2_usb.mfi);
-    s_iap2_usb.mfi = NULL;
+    iap2_usb_release_provider(&s_iap2_usb);
     s_iap2_usb.run = false;
     s_iap2_usb.running = false;
     return result;
@@ -805,6 +850,7 @@ static int iap2_usb_start_worker(void)
 
 static int cmd_iap2(void)
 {
+    unsigned stop_generation = atomic_load(&s_usb_stop_generation);
     if (!lockdown_session_active()) {
         rt_kprintf("[carplay_usb] iap2: no open carkit session; run "
                    "'carplay_usb pair' first\n");
@@ -836,9 +882,7 @@ static int cmd_iap2(void)
         return 0;
     }
 
-    memset(&s_iap2_usb, 0, sizeof(s_iap2_usb));
-    atomic_init(&s_iap2_usb.run, false);
-    atomic_init(&s_iap2_usb.running, false);
+    iap2_usb_reset(stop_generation);
     iap2_stream_rx_init(&s_iap2_usb.rx, &service);
 
     iap2_identity_config_t identity = iap2_usb_identity();
@@ -847,8 +891,11 @@ static int cmd_iap2(void)
     config.identity = identity;
     s_iap2_usb.mfi = iap2_usb_mfi();
     config.mfi = s_iap2_usb.mfi;
-    if (s_iap2_usb.mfi != NULL &&
-        carplay_mfi_provider_install(s_iap2_usb.mfi) != RTCP_OK) {
+    if (s_iap2_usb.mfi != NULL) {
+        s_iap2_usb.provider_installed =
+            carplay_mfi_provider_install(s_iap2_usb.mfi) == RTCP_OK;
+    }
+    if (s_iap2_usb.mfi != NULL && !s_iap2_usb.provider_installed) {
         rt_kprintf("[carplay_usb] iap2: AirPlay /auth-setup MFi provider "
                    "unavailable; auth-setup would return 503\n");
     }
@@ -861,8 +908,7 @@ static int cmd_iap2(void)
 
     s_iap2_usb.session = iap2_session_create(&config);
     if (s_iap2_usb.session == NULL) {
-        carplay_mfi_provider_release(s_iap2_usb.mfi);
-        s_iap2_usb.mfi = NULL;
+        iap2_usb_release_provider(&s_iap2_usb);
         rt_kprintf("[carplay_usb] iap2: cannot allocate the session\n");
         return 0;
     }
@@ -881,10 +927,8 @@ static int cmd_iap2(void)
 
 static void iap2_usb_request_stop(void)
 {
-    if (s_iap2_usb.running) {
-        s_iap2_usb.run = false;
-        rt_kprintf("[carplay_usb] iap2: stop requested\n");
-    }
+    atomic_fetch_add(&s_usb_stop_generation, 1U);
+    s_iap2_usb.run = false;
 }
 
 /* Returns true only when the iAP2 thread has finished and is no longer
@@ -896,6 +940,10 @@ static bool cmd_iap2_stop(void)
     if (!s_iap2_usb.running) {
         rt_kprintf("[carplay_usb] iap2: not running\n");
         return true;
+    }
+    if (atomic_load(&s_iap2_usb.thread) == rt_thread_self()) {
+        rt_kprintf("[carplay_usb] iap2: cannot wait for its own worker\n");
+        return false;
     }
     s_iap2_usb.run = false;
     for (unsigned waited = 0U; s_iap2_usb.running && waited < 3000U;
@@ -979,11 +1027,14 @@ static int cmd_net(void)
     return 0;
 }
 
-/* Programmatic composition: shell commands and the demo share one transport.
- * The demo worker serializes these calls; no blocking work runs in LVGL. */
+/* Programmatic composition and shell share the same nonblocking call gate.
+ * No blocking work runs in LVGL. */
 int carplay_usb_open(void)
 {
-    return rtcp_usb_lubanlite.ops->open(rtcp_usb_lubanlite.context, usb_event, NULL);
+    if (!usb_call_enter()) return RTCP_ESTATE;
+    int result = rtcp_usb_lubanlite.ops->open(rtcp_usb_lubanlite.context, usb_event, NULL);
+    usb_call_leave();
+    return result;
 }
 
 bool carplay_usb_attached(void)
@@ -994,28 +1045,39 @@ bool carplay_usb_attached(void)
 
 int carplay_usb_pair(void)
 {
+    if (!usb_call_enter()) return RTCP_ESTATE;
     (void)cmd_pair();
     rtcp_stream_t service = rtcp_lockdown_session_service(&s_lockdown_session);
-    return service.ops != NULL ? RTCP_OK : RTCP_EIO;
+    int result = service.ops != NULL ? RTCP_OK : RTCP_EIO;
+    usb_call_leave();
+    return result;
 }
 
 int carplay_usb_start_iap2(void)
 {
-    (void)cmd_iap2();
-    return s_iap2_usb.running ? RTCP_OK : RTCP_EIO;
+    if (!usb_call_enter()) return RTCP_ESTATE;
+    int result = cmd_iap2();
+    if (result == RTCP_OK) result = s_iap2_usb.running ? RTCP_OK : RTCP_EIO;
+    usb_call_leave();
+    return result;
 }
 
 bool carplay_usb_iap2_running(void) { return s_iap2_usb.running; }
 
 int carplay_usb_close_session(void)
 {
-    if (!cmd_iap2_stop()) return RTCP_ETIMEDOUT;
+    if (!usb_call_enter()) return RTCP_ESTATE;
+    if (!cmd_iap2_stop()) {
+        usb_call_leave();
+        return RTCP_ETIMEDOUT;
+    }
     rtcp_lockdown_session_close(&s_lockdown_session);
     memset(&s_lockdown_session, 0, sizeof(s_lockdown_session));
+    usb_call_leave();
     return RTCP_OK;
 }
 
-static int cmd_carplay_usb(int argc, char **argv)
+static int cmd_carplay_usb_owned(int argc, char **argv)
 {
     const char *what = argc > 1 ? argv[1] : "status";
 #ifdef RTCARPLAY_DEMO_LAUNCHER
@@ -1033,6 +1095,10 @@ static int cmd_carplay_usb(int argc, char **argv)
         return 0;
     }
     if (strcmp(what, "stop") == 0) {
+        /* The hook must outlive the stream owner, including a timed-out stop. */
+        if (!cmd_iap2_stop()) return 1;
+        rtcp_lockdown_session_close(&s_lockdown_session);
+        memset(&s_lockdown_session, 0, sizeof(s_lockdown_session));
         rtcp_usb_lubanlite.ops->close(rtcp_usb_lubanlite.context);
         rt_kprintf("[carplay_usb] stopped; existing device is left "
                    "configured\n");
@@ -1076,6 +1142,17 @@ static int cmd_carplay_usb(int argc, char **argv)
                "[start|stop|status|request|mux|pair|unpair|iap2|iap2stop|net|"
                "desc [request]]\n");
     return 0;
+}
+
+static int cmd_carplay_usb(int argc, char **argv)
+{
+    if (!usb_call_enter()) {
+        rt_kprintf("[carplay_usb] another command owns USB; retry later\n");
+        return RTCP_ESTATE;
+    }
+    int result = cmd_carplay_usb_owned(argc, argv);
+    usb_call_leave();
+    return result;
 }
 
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_usb, carplay_usb,
