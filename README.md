@@ -1,94 +1,60 @@
-# rt-carplay 应用
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-V2.1 的架构边界、生命周期修复和软件验证见 [验证交接](docs/refactoring-v21-verification.md)。后续自动连接、GUI/Headless 统一连接 Owner 与 1024×600 LVGL 9 界面见 [Launcher V2](docs/launcher-v2.md)；实机验收仍为 NOT_RUN。
+# D213 CarPlay application
 
-Luban-Lite 侧的 rt-carplay 集成入口。CarPlay 协议栈与公共 Receiver Runtime 位于 SDK 内置的[`rt-carplay`](../../../packages/third-party/rt-carplay) git submodule；本目录拥有应用组合、连接管理、板级适配、Kconfig、构建集成及 `ui/lvgl_launcher.c` 启动页。首次构建前需要初始化 submodule：
+The application integrates the independent portable rt-carplay SDK into Luban-Lite on D213 with RT-Thread and a 1024×600 panel. [V2.1 verification](docs/refactoring-v21-verification.md) records the completed software architecture/lifecycle baseline. [Launcher V2](docs/launcher-v2.md) adds automatic USB/wireless discovery, a single session owner shared by GUI and Headless, and the LVGL 9 dashboard. Current source/image hardware acceptance remains NOT_RUN.
 
-```sh
-git submodule update --init packages/third-party/rt-carplay
-```
+## Source ownership
 
-- 目标板：D213 `demo128-nand-carplay`，1024×600 面板
-- 内核：RT-Thread
-- 连接方式：USB 有线 CarPlay，或 Wi-Fi + 蓝牙无线 CarPlay
-- 默认界面：LVGL 9 Launcher V2，USB 与无线自动发现，无需选择模式
-
-## 目录内容
-
-| 文件 | 说明 |
+| Directory | Responsibility |
 | --- | --- |
-| `main.c` | 应用入口。默认等待 `carplay_start`，启用启动页或自动启动时按配置接管 |
-| `Kconfig` | `RTCARPLAY_*` 应用配置项 |
-| `SConscript` | 通过 `RTCARPLAY_DIR` 引入内置 rt-carplay 的 根目录正式 `SConscript`（不再编译示例应用） |
-| `ui/lvgl_launcher.c` | 宿主拥有的 LVGL 启动页；连接 Worker 位于 app/connection_manager.c |
-| `docs/` | 本应用的构建、验证与架构文档 |
+| `app/` | Receiver composition, automatic connection manager, USB/iAP2, pairing and trust records |
+| `platform/` | Board-specific Wi-Fi/Bluetooth/MFi/USB, video, audio/capture and touch |
+| `ui/` | LVGL 9 Launcher V2 and host display policy |
+| `tests/` | Actual-source protocol/worker/device-boundary tests and actual LVGL preview |
+| `Kconfig` and `SConscript` | Application options and official SDK build integration |
 
-## 内置组件与源码布局
+The portable SDK remains the `packages/third-party/rt-carplay` Git submodule. Its root build entry provides generic protocols, runtime and ports; production builds do not compile SDK board examples. Independent Apple Ethernet support remains in `packages/third-party/cherryusb-ipheth`. The CherryUSB overlay owns SDK/baremetal integration, and `packages/third-party/cherryusb` retains the official 1.6.1 snapshot. Submodule URLs and exact revisions are in `.gitmodules` and Gitlinks.
 
-SDK 通过 git submodule 固定 CarPlay 相关组件的版本，源码位于 SDK 目录内：
+## Build
 
-```text
-luban-lite-carplay/
-├── application/rt-thread/rtcarplay/       # 应用入口、Kconfig、构建集成
-├── packages/third-party/rt-carplay/      # 协议栈、公共 Runtime、通用 Port（submodule）
-├── packages/third-party/cherryusb-ipheth/ # Apple Ethernet / USB 类驱动（submodule）
-├── packages/third-party/cherryusb-luban/ # CherryUSB 上游源码的 SDK 胶水
-└── packages/third-party/cherryusb/        # 官方 CherryUSB 1.6.1 快照
-```
-
-- `rt-carplay`：路径由 `CONFIG_RTCARPLAY_DIR` 指定，默认 `../../../packages/third-party/rt-carplay`（相对本目录）。
-- `cherryusb-ipheth`：由 `CONFIG_LPKG_CHERRYUSB_IPHETH_PATH` 指定，默认 `packages/third-party/cherryusb-ipheth`（相对 SDK 根目录）。
-- `cherryusb-luban`：SDK 内置，见 [`packages/third-party/cherryusb-luban/README.md`](../../../packages/third-party/cherryusb-luban/README.md)。
-
-submodule 的 URL 和固定 commit 记录在 SDK 仓库的 `.gitmodules` 与 gitlink 中：
+Use the existing `carplay-oss` branch with the configured Linux toolchain/dependencies described in [CI](docs/ci.md). Populate all submodules first:
 
 ```sh
-git submodule status
 git submodule update --init --recursive
 ```
 
-需要临时对比或调试独立分支时，可在 menuconfig 中把上述路径改为 SDK 外的绝对路径，无需修改源码。
-
-## 构建
-
-当前正式配置为[`d21x_demo128-nand_rt-thread_rtcarplay_defconfig`](../../../target/configs/d21x_demo128-nand_rt-thread_rtcarplay_defconfig)。在 SDK 根目录执行：
+The maintained build helper builds the same-tree baremetal Bootloader, verifies the packaged binary, applies the application defconfig, builds and validates the complete IMG. Baremetal CherryUSB OSAL is implemented and tested; no manually generated address file or unverified prebuilt Bootloader is required.
 
 ```sh
+bash .ci/build-firmware.sh gui
+# Use a separate clean checkout/build workspace for the other variant.
+bash .ci/build-firmware.sh headless
+```
+
+For manual local builds from the repository root:
+
+```sh
+scons --apply-def=d21x_demo128-nand-carplay_baremetal_bootloader_defconfig
+scons -j8
 scons --apply-def=d21x_demo128-nand_rt-thread_rtcarplay_defconfig
 scons --info
 scons -j8
 ```
 
-全新 clone 在构建前还需要生成打包用的 `target/d21x/demo128-nand-carplay/pack/.image_cfg.json.tmp`。该文件正常由 bootloader 工程生成；当前 CherryUSB 1.6.1 缺少裸机 OSAL，bootloader 暂不可编译，而板级已提交 `pack/bootloader.bin`，因此手工生成地址文件后直接构建应用：
+After selecting a profile, normal incremental builds use `scons -j8`; repeatedly applying a defconfig resets local configuration. Images are under `output/{profile}/images/`. CI publishes complete GUI/Headless IMG files, Bootloaders, configurations, layout/source manifests and SHA256 checksums. It also publishes Launcher previews separately. A build proves neither flashing nor physical CarPlay operation.
 
-```sh
-scons --apply-def=d21x_demo128-nand-carplay_baremetal_bootloader_defconfig
-PYTHONPATH="$PWD/kernel/rt-thread/tools" python3 tools/scripts/calc_linked_addr.py \
-  -i target/d21x/demo128-nand-carplay/pack/image_cfg.json -c .config \
-  -o target/d21x/demo128-nand-carplay/pack/.image_cfg.json.tmp
-scons --apply-def=d21x_demo128-nand_rt-thread_rtcarplay_defconfig
-scons -j8
-```
+## Run
 
-构建环境、全新构建顺序、镜像路径、烧录步骤和验证记录统一见 [`docs/build.md`](docs/build.md)。日常增量编译直接执行 `scons -j8`；不要每次重复 apply defconfig，否则会重置当前 `.config`。
+The GUI defconfig selects `RTCARPLAY_DEMO_LAUNCHER`, which selects `RTCARPLAY_AUTO_CONNECT`. USB enumeration is armed before host initialization, while the application starts wireless discovery and arbitrates a single active session. No mode selection is required. The Headless defconfig enables the same automatic owner without LVGL, video, audio or touch. The standalone generic SDK Headless example is compiled for inspection but not started alongside the application's Receiver.
 
-## 运行
-
-默认 defconfig 启用 `CONFIG_RTCARPLAY_DEMO_LAUNCHER=y`：启动后显示 LVGL选择页，USB 模式自动连接 iPhone，Wireless 模式启动 SoftAP、mDNS、蓝牙RFCOMM 和 iAP2 配对流程。
-
-未启用启动页时，可选择：
-
-- 启用 `CONFIG_RTCARPLAY_AUTO_START=y`：开机后自动启动接收器；
-- 保持默认：在串口控制台手动执行：
+Use the manager's queued controls in automatic builds:
 
 ```text
-carplay_start
-carplay_status
-```
-
-常用诊断命令：
-
-```text
+carplay_connection status
+carplay_connection retry
+carplay_connection wireless off
+carplay_connection wireless on
 carplay_status
 carplay_video status
 carplay_bt status
@@ -96,35 +62,47 @@ carplay_iap2 status
 ipheth_status
 ```
 
-首次有线连接若需手动 bring-up，先关闭 `RTCARPLAY_DEMO_LAUNCHER`，再在控制台执行 `carplay_start`；配对 PIN 会打印在串口日志中。不要同时使用启动页和手动启停命令。完整验证步骤与已知问题见 [`docs/build.md`](docs/build.md)。
+Settings are held in RAM and reset at reboot. Wireless off leaves USB enabled. Pairing and trust records persist independently. For manual bring-up, disable both automatic options before using `carplay_start wired` or `carplay_start`; do not mix manual lifecycle commands with an active manager.
 
-## 主要配置项
+## Application configuration
 
-通过 `scons --menuconfig` 修改，位于 `rt-carplay application` 菜单。下表为当前defconfig 的实际取值：
+The `rt-carplay application` menu owns board options; generic SDK options have one owner in the SDK Kconfig. The GUI configuration enables the following features; Headless deliberately omits media/input devices.
 
-| 配置项 | 当前值 | 说明 |
-| --- | --- | --- |
-| `RTCARPLAY_DEMO_LAUNCHER` | y | LVGL USB / Wireless 启动页 |
-| `RTCARPLAY_AUTO_START` | n | 无启动页时开机自动启动 |
-| `RTCARPLAY_DIR` | `../../../packages/third-party/rt-carplay` | 内置 rt-carplay submodule 路径 |
-| `RTCARPLAY_USB_HOST` | y | CherryUSB 有线 CarPlay |
-| `RTCARPLAY_BT` / `RTCARPLAY_IAP2` | y | 蓝牙 RFCOMM 与无线 iAP2 会话 |
-| `RTCARPLAY_MFI` | y | MFi 2.0C 认证芯片 |
-| `RTCARPLAY_VIDEO` | y（默认） | H.264 解码与 `aicfb` 显示 |
-| `RTCARPLAY_AUDIO` | y | AirPlay 音频播放 |
-| `RTCARPLAY_MICROPHONE` | y | Siri / 通话麦克风上行，需先确认 dmic0 硬件 |
-| `RTCARPLAY_TOUCH_PANEL` | y | 触摸面板转发为 CarPlay HID |
-| `RTCARPLAY_SCREEN_WIDTH/HEIGHT` | 1024 / 600 | 必须与面板一致 |
-
-板级 pinmux、时钟和分区表位于[`target/d21x/demo128-nand-carplay/`](../../../target/d21x/demo128-nand-carplay/)。修改屏幕尺寸、触摸或音频通路时，需要同时核对板级配置与 defconfig。
-
-## 文档索引
-
-| 文档 | 内容 |
+| Option | GUI setting and purpose |
 | --- | --- |
-| [`docs/build.md`](docs/build.md) | 仓库布局、首次构建、烧录、有线/无线验证、音频与已知问题 |
-| [`docs/architecture.md`](docs/architecture.md) | rt-carplay 分层、目录设计、平台 seam 与接口边界 |
+| `RTCARPLAY_DEMO_LAUNCHER` | LVGL 9 Launcher V2 |
+| `RTCARPLAY_AUTO_CONNECT` | Automatic single-session USB/wireless manager |
+| `RTCARPLAY_AUTO_START` | Disabled; separate manual Receiver autostart option |
+| `RTCARPLAY_DIR` | `../../../packages/third-party/rt-carplay` relative to this directory |
+| `RTCARPLAY_USB_HOST` | CherryUSB wired CarPlay |
+| `RTCARPLAY_BT` / `RTCARPLAY_IAP2` | Bluetooth RFCOMM and wireless iAP2 |
+| `RTCARPLAY_MFI` | Board MFi 2.0C provider |
+| `RTCARPLAY_VIDEO` | MPP H.264 and host-owned display policy |
+| `RTCARPLAY_AUDIO` | Existing sound0 output, with frozen audio behavior |
+| `RTCARPLAY_MICROPHONE` | dmic0 uplink; physical microphone verification still required |
+| `RTCARPLAY_TOUCH_PANEL` | Exclusive panel reader and CarPlay HID routing |
+| `RTCARPLAY_SCREEN_WIDTH/HEIGHT` | 1024 / 600, matching the panel |
 
-内置的 `packages/third-party/rt-carplay/docs/` 还包含更细的专题文档，例如`audio-subsystem.md`、`wireless-bringup.md`、`wired-video-performance.md`；协议实现和主机测试以该子模块的文档为准。
+Pinmux, clocks and partition layout belong to [the board](../../../target/d21x/demo128-nand-carplay/). Verify board and application configuration together when changing media or input. Protocol negotiation, jitter, Mixer/Direct, encrypted microphone uplink and AEC behavior were not changed for Launcher V2; audio-routing issues have their own SDK handoff.
 
-独立仓库、上游关系与完整 IMG CI：见 [CI 文档](docs/zh-CN/ci.md)（[English](docs/ci.md)）。
+## Test and documentation
+
+```sh
+packages/third-party/rt-carplay/scripts/fetch-mbedtls.sh
+make -C application/rt-thread/rtcarplay -j8 check
+```
+
+The host suite runs actual sources with ASan/UBSan and modeled scheduling/device boundaries. The [Launcher preview](docs/launcher-v2.md) additionally builds actual LVGL and exercises UI events. The independent SDK and IPHETH repositories retain their own Make/CMake/CTest and bilingual-documentation gates.
+
+| Document | Scope |
+| --- | --- |
+| [V2 verification](docs/v2-verification.md) | Verified revisions, CI, IMG checksums and remaining board acceptance |
+| [Connection manager](docs/connection-manager.md) | Arbitration, retry, settings, ownership and Headless behavior |
+| [Launcher V2](docs/launcher-v2.md) | Pages, real LVGL preview and hardware checklist |
+| [V2.1 verification](docs/refactoring-v21-verification.md) | Architecture, migration, lifecycle, bilingual audit and SDK repository cleanup |
+| [Session snapshots](docs/session-snapshots.md) | Concurrency, retained ownership, callback lifetime and actual-source regressions |
+| [CI](docs/ci.md) | Upstream, toolchain, build/package and evidence |
+| [Historical bring-up](docs/build.md) | Earlier investigations and board reports; not the current build authority |
+| [Portable SDK](../../../packages/third-party/rt-carplay/README.md) | Public APIs, Linux/RT-Thread ports, media and audio handoff |
+
+Development uses existing `carplay-oss` and SDK `main` branches, with boa-z identity and no PR creation. The prior SDK repository was backed up and re-created at the owner's request; old Gitlinks/CI references require the verified offline backup. Current submodule commits are published and fetchable.

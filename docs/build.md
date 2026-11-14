@@ -1,5 +1,8 @@
 # D213 开源 CarPlay 开发与构建
 
+> 历史调试记录：下文版本、旧路径和当时构建限制保留为历史证据。当前 V2 架构、自动连接、同源码树裸机 Bootloader 与完整 IMG 构建以 [应用 README](../README.zh-CN.md)、[CI](zh-CN/ci.md) 和 [Launcher V2](zh-CN/launcher-v2.md) 为准，历史运行结果不能作为当前镜像的实机验收。
+
+
 > 应用概览、配置摘要和文档索引见 [README](../README.md)。
 
 最新的 READY 主动寻呼、控制器扫描核验固件及验证方式见第 11 节。
