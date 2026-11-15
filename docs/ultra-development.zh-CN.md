@@ -200,3 +200,9 @@ SDK 8a0d71acb97bbc62426bc96ae13872f2baa2b95d 通过显式配对的内部视频�
 本地完整 SDK Make、ASan/UBSan 下 CMake 67/67 项及完整集成 Host 套件通过。Python plistlib 独立提供混合流输入，并解码不同的 Main/备用响应端口、未改变的初始能力及旧配置中省略的不支持备用流。回调测试覆盖重复/冲突 ID、幂等、失败/零端口回调、音频及响应编码失败、回滚和单次资源清理。这不是加密 Type 111 或真实手机证据，D213 的模拟 Vehicle State 配置及独立 LVGL 融合行为不变。
 
 后续设备检查确认 COM9 已注册且串口写入被接受，但仍没有运行输出，升级接口也未枚举到升级设备。这些观察不能证明 Shell 可达或确定静默原因。未尝试进入升级模式、刷写或重启，L0 PASS、完整范围 L1 PARTIAL、L2-L5 NOT_RUN 不变。
+
+## 独立视频会话 CI 与产物核验
+
+SDK 8a0d71acb97bbc62426bc96ae13872f2baa2b95d 的 [sanitizer Host 和双语文档 CI 均通过](https://github.com/boa-z/rt-carplay/actions/runs/43768403492)。集成 5be76b8b9b322481d9d40bc1a6839c9f3da1ff7f 的 [Host、GUI、Headless CI 全部通过](https://github.com/boa-z/luban-lite-carplay/actions/runs/43768478380)。三个产物均已下载，两份固件清单精确匹配上述版本，SDK/集成工作区记录为空。每份固件六项 SHA256、完整镜像九个组件边界/CRC32 检查全部通过。
+
+GUI 镜像 SHA256：fc31e995d7e2d793019031f535343c281297de16adaaa8e5379f259c92defee1。Headless 镜像 SHA256：1fc2a4e97790d4486b6b872d13568a40b9e4cdffdd01cf7bf5d3a8690bf93e0f。下载后的 ELF/config 组合在本地通过有线/模拟模型检查器，清单保留 SIMULATED_ENGINE_RPM、PHONE_OFFER_REQUIRED 及 UI Sync 关闭。生产 server 仍未接入实验性备用视频回调。两份镜像均未刷写，滚动 Preview Release 已跳过；仅文档跟进不会改变镜像身份及 L0 PASS、完整范围 L1 PARTIAL、L2-L5 NOT_RUN 的验收状态。
