@@ -27,9 +27,7 @@ git submodule update --init --recursive
 The maintained build helper builds the same-tree baremetal Bootloader, verifies the packaged binary, applies the application defconfig, builds and validates the complete IMG. Baremetal CherryUSB OSAL is implemented and tested; no manually generated address file or unverified prebuilt Bootloader is required.
 
 ```sh
-bash .ci/build-firmware.sh gui
-# Use a separate clean checkout/build workspace for the other variant.
-bash .ci/build-firmware.sh headless
+bash .ci/build-firmware.sh
 ```
 
 For manual local builds from the repository root:
@@ -42,11 +40,11 @@ scons --info
 scons -j8
 ```
 
-After selecting a profile, normal incremental builds use `scons -j8`; repeatedly applying a defconfig resets local configuration. Images are under `output/{profile}/images/`. CI publishes complete GUI/Headless IMG files, Bootloaders, configurations, layout/source manifests and SHA256 checksums. It also publishes Launcher previews separately. A build proves neither flashing nor physical CarPlay operation.
+After selecting a profile, normal incremental builds use `scons -j8`; repeatedly applying a defconfig resets local configuration. Images are under `output/{profile}/images/`. CI publishes the complete IMG, the A/B OTA package and the matching Bootloader as a rolling `preview` GitHub Release, with SHA256 checksums. A build proves neither flashing nor physical CarPlay operation.
 
 ## Run
 
-The GUI defconfig selects `RTCARPLAY_DEMO_LAUNCHER`, which selects `RTCARPLAY_AUTO_CONNECT`. USB enumeration is armed before host initialization, while the application starts wireless discovery and arbitrates a single active session. No mode selection is required. The Headless defconfig enables the same automatic owner without LVGL, video, audio or touch. The standalone generic SDK Headless example is compiled for inspection but not started alongside the application's Receiver.
+The GUI defconfig selects `RTCARPLAY_DEMO_LAUNCHER`, which selects `RTCARPLAY_AUTO_CONNECT`. USB enumeration is armed before host initialization, while the application starts wireless discovery and arbitrates a single active session. No mode selection is required.
 
 Use the manager's queued controls in automatic builds:
 

@@ -27,9 +27,7 @@ git submodule update --init --recursive
 持续维护的构建脚本先编译同源码树裸机 Bootloader，核对打包二进制，再应用应用 Defconfig、构建并校验完整 IMG。裸机 CherryUSB OSAL 已实现并测试，不需要手工生成地址文件或使用未核对的预编译 Bootloader。
 
 ```sh
-bash .ci/build-firmware.sh gui
-# Use a separate clean checkout/build workspace for the other variant.
-bash .ci/build-firmware.sh headless
+bash .ci/build-firmware.sh
 ```
 
 从仓库根目录手动本地构建：
@@ -42,11 +40,11 @@ scons --info
 scons -j8
 ```
 
-选择方案后，日常增量构建使用 `scons -j8`，反复应用 Defconfig 会重置本地配置。镜像位于 `output/{profile}/images/`。CI 发布完整 GUI/Headless IMG、Bootloader、配置、布局/源码清单和 SHA256 校验，并单独发布 Launcher 预览。构建不证明烧录或物理 CarPlay 运行。
+选择方案后，日常增量构建使用 `scons -j8`，反复应用 Defconfig 会重置本地配置。镜像位于 `output/{profile}/images/`。CI 将完整 IMG、A/B OTA 包和匹配的 Bootloader 作为滚动 `preview` GitHub Release 发布，并附带 SHA256 校验。构建不证明烧录或物理 CarPlay 运行。
 
 ## 运行
 
-GUI Defconfig 选中 `RTCARPLAY_DEMO_LAUNCHER`，后者选中 `RTCARPLAY_AUTO_CONNECT`。USB 枚举在 Host 初始化前启用，应用启动无线发现并仲裁单个活动会话，无需选择模式。Headless Defconfig 启用同一自动 Owner，不启用 LVGL、视频、音频或触摸。独立通用 SDK Headless 示例仅编译供检查，不与应用 Receiver 同时启动。
+GUI Defconfig 选中 `RTCARPLAY_DEMO_LAUNCHER`，后者选中 `RTCARPLAY_AUTO_CONNECT`。USB 枚举在 Host 初始化前启用，应用启动无线发现并仲裁单个活动会话，无需选择模式。
 
 自动构建使用管理器排队控制：
 

@@ -11,26 +11,24 @@ git remote add upstream https://github.com/boa-z/luban-lite.git
 git fetch upstream master
 ```
 
-The upstream default branch is `master`. Fetching upstream does not automatically change the integration branch or its pinned submodules. Review SDK updates and run both firmware variants before incorporating them. The repository does not automatically open pull requests.
+The upstream default branch is `master`. Fetching upstream does not automatically change the integration branch or its pinned submodules. Review SDK updates and build the firmware before incorporating them. The repository does not automatically open pull requests.
 
 ## Firmware builds
 
-The `D213 firmware` GitHub Actions workflow runs on pushes to `carplay-oss` and supports manual dispatch. Independent Ubuntu 24.04 jobs build the GUI and Headless variants. Checkout enables Git LFS and recursive submodules; the SDK contains the Xuantie V2.6.1 Linux toolchain archive and the required Realtek library as LFS objects.
+The `D213 firmware` GitHub Actions workflow runs on pushes to `carplay-oss` and supports manual dispatch. It builds the GUI firmware, then publishes the resulting IMG, A/B OTA package and Bootloader as a rolling `preview` GitHub Release. Checkout enables Git LFS and recursive submodules; the SDK contains the Xuantie V2.6.1 Linux toolchain archive and the required Realtek library as LFS objects.
 
 ```sh
 python3 -m venv .ci-venv
 . .ci-venv/bin/activate
 pip install -r .ci/requirements.txt
-bash .ci/build-firmware.sh gui
-# Use a separate clean checkout for the other variant.
-bash .ci/build-firmware.sh headless
+bash .ci/build-firmware.sh
 ```
 
-Install `build-essential`, `patch`, `dosfstools`, `mtools`, `device-tree-compiler` and `u-boot-tools` on Ubuntu. The build script first compiles `d21x_demo128-nand-carplay_baremetal_bootloader_defconfig` from this repository. It verifies that the packaged Bootloader is byte-identical to the newly built binary. It then applies the selected RT-Thread defconfig and produces the complete ArtInChip `.img` container. It does not rely on a prebuilt Bootloader or a second SDK checkout. Before upload, `.ci/verify-image.py` checks the container bounds, all nine component CRC32 values and the mandatory DDR updater, Bootloader and OS records.
+Install `build-essential`, `patch`, `dosfstools`, `mtools`, `device-tree-compiler`, `u-boot-tools` and `cpio` on Ubuntu. The build script first compiles `d21x_demo128-nand-carplay_baremetal_bootloader_defconfig` from this repository. It verifies that the packaged Bootloader is byte-identical to the newly built binary. It then applies `d21x_demo128-nand_rt-thread_rtcarplay_defconfig` and produces the complete ArtInChip `.img` container. It does not rely on a prebuilt Bootloader or a second SDK checkout. Before upload, `.ci/verify-image.py` checks the container bounds, all nine component CRC32 values and the mandatory DDR updater, Bootloader and OS records.
 
-Artifacts contain `d213-carplay-gui.img` or `d213-carplay-headless.img`, the matching Bootloader, firmware configuration, resolved image layout, source/submodule identities and `SHA256SUMS`. Download and unpack the corresponding workflow artifact, then run `sha256sum -c SHA256SUMS` before flashing with the board's ArtInChip tool. These are D213 `demo128-nand-carplay` images for the existing 128 MiB SPI NAND board and panel configuration; select the correct variant and board.
+The workflow publishes `d213-carplay.img`, the A/B OTA package `ota.cpio`, the matching Bootloader, `source-manifest.txt` and `SHA256SUMS` to the rolling `preview` prerelease. Download them from there and run `sha256sum -c SHA256SUMS` before flashing with the board's ArtInChip tool. These are D213 `demo128-nand-carplay` images for the existing 128 MiB SPI NAND board and panel configuration. The OTA package keeps the same URL across builds.
 
-Artifacts are retained for 14 days. Build logs are uploaded on failure. A successful workflow confirms cross-compilation and packaging; physical USB upgrade, NAND boot, panel, audio and iPhone acceptance require a separate board run and are recorded as `NOT_RUN` in the source manifest.
+Build logs are uploaded on failure. A successful workflow confirms cross-compilation and packaging; physical USB upgrade, NAND boot, panel, audio and iPhone acceptance require a separate board run and are recorded as `NOT_RUN` in the source manifest.
 
 ## CherryUSB baremetal integration
 
@@ -50,8 +48,8 @@ The tests compile actual adapter sources with ASan/UBSan. They verify software c
 
 ## Video display regression
 
-CI also runs `make -C application/rt-thread/rtcarplay check-lubanlite-video SDK_ROOT="$PWD"`. This covers the actual MPP sink and host UI policy, including the SDK framebuffer command ABI. See the [video handoff fix](video-handoff-fix.md) for the confirmed command mismatch and the required board acceptance, and the [migration verification report](repository-migration-verification.md) for firmware identities and corrected user feedback.
+Run `make -C application/rt-thread/rtcarplay check-lubanlite-video SDK_ROOT="$PWD"` when changing the video path. This covers the actual MPP sink and host UI policy, including the SDK framebuffer command ABI. See the [video handoff fix](video-handoff-fix.md) for the confirmed command mismatch and the required board acceptance, and the [migration verification report](repository-migration-verification.md) for firmware identities and corrected user feedback.
 
 ## Host-owned platform regression suite
 
-The `host-regressions` CI job runs `make -C application/rt-thread/rtcarplay -j8 check` under ASan/UBSan after fetching the SDK's pinned mbedTLS. It includes the relocated receiver/audio/pairing tests and the existing video, touch, launcher, bonds, USB DMA, handoff, reconnect and capability tests. The SDK's standalone suite no longer compiles board sources. Generic SDK switches are sourced once from its Kconfig; the application owns hardware selection and source collection. See the SDK [migration guide](../../../../packages/third-party/rt-carplay/docs/luban-lite-migration.md). These are Host device/scheduler models, not physical board acceptance.
+Run `make -C application/rt-thread/rtcarplay -j8 check` under ASan/UBSan after fetching the SDK's pinned mbedTLS. It includes the relocated receiver/audio/pairing tests and the existing video, touch, launcher, bonds, USB DMA, handoff, reconnect and capability tests. The SDK's standalone suite no longer compiles board sources. Generic SDK switches are sourced once from its Kconfig; the application owns hardware selection and source collection. See the SDK [migration guide](../../../../packages/third-party/rt-carplay/docs/luban-lite-migration.md). These are Host device/scheduler models, not physical board acceptance.

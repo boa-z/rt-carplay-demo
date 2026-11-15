@@ -11,26 +11,24 @@ git remote add upstream https://github.com/boa-z/luban-lite.git
 git fetch upstream master
 ```
 
-上游默认分支是 `master`。获取上游更新不会自动修改集成分支或固定的子模块版本。合入 SDK 更新前应审查差异，并构建两个固件变体。仓库不会自动创建 PR。
+上游默认分支是 `master`。获取上游更新不会自动修改集成分支或固定的子模块版本。合入 SDK 更新前应审查差异并构建固件。仓库不会自动创建 PR。
 
 ## 固件构建
 
-`D213 firmware` GitHub Actions 工作流在推送到 `carplay-oss` 时运行，也支持手动触发。GUI 和 Headless 在独立的 Ubuntu 24.04 任务中构建。检出启用 Git LFS 和递归子模块；SDK 通过 LFS 保存 Xuantie V2.6.1 Linux 工具链压缩包及所需 Realtek 库。
+`D213 firmware` GitHub Actions 工作流在推送到 `carplay-oss` 时运行，也支持手动触发。它构建 GUI 固件，然后把生成的 IMG、A/B OTA 包和 Bootloader 作为滚动 `preview` GitHub Release 发布。检出启用 Git LFS 和递归子模块；SDK 通过 LFS 保存 Xuantie V2.6.1 Linux 工具链压缩包及所需 Realtek 库。
 
 ```sh
 python3 -m venv .ci-venv
 . .ci-venv/bin/activate
 pip install -r .ci/requirements.txt
-bash .ci/build-firmware.sh gui
-# 另一个变体应使用独立的干净检出。
-bash .ci/build-firmware.sh headless
+bash .ci/build-firmware.sh
 ```
 
-Ubuntu 需要安装 `build-essential`、`patch`、`dosfstools`、`mtools`、`device-tree-compiler` 和 `u-boot-tools`。构建脚本首先从本仓库编译 `d21x_demo128-nand-carplay_baremetal_bootloader_defconfig`，并逐字节核对打包使用的 Bootloader 与新构建二进制一致，再应用所选 RT-Thread defconfig，生成完整 ArtInChip `.img` 容器。此流程不依赖预编译 Bootloader 或另一个 SDK 检出。上传前，`.ci/verify-image.py` 会核对容器边界、全部九个组件的 CRC32，以及必需的 DDR 升级器、Bootloader 和 OS 记录。
+Ubuntu 需要安装 `build-essential`、`patch`、`dosfstools`、`mtools`、`device-tree-compiler`、`u-boot-tools` 和 `cpio`。构建脚本首先从本仓库编译 `d21x_demo128-nand-carplay_baremetal_bootloader_defconfig`，并逐字节核对打包使用的 Bootloader 与新构建二进制一致，再应用 `d21x_demo128-nand_rt-thread_rtcarplay_defconfig`，生成完整 ArtInChip `.img` 容器。此流程不依赖预编译 Bootloader 或另一个 SDK 检出。上传前，`.ci/verify-image.py` 会核对容器边界、全部九个组件的 CRC32，以及必需的 DDR 升级器、Bootloader 和 OS 记录。
 
-产物包含 `d213-carplay-gui.img` 或 `d213-carplay-headless.img`、匹配的 Bootloader、固件配置、解析后的镜像布局、源码与子模块版本，以及 `SHA256SUMS`。下载并解压对应工作流产物，在使用开发板的 ArtInChip 工具烧录前执行 `sha256sum -c SHA256SUMS`。这些镜像对应 D213 `demo128-nand-carplay` 及现有 128 MiB SPI NAND 板卡与面板配置，使用时应选择正确变体和板卡。
+工作流将 `d213-carplay.img`、A/B OTA 包 `ota.cpio`、匹配的 Bootloader、`source-manifest.txt` 和 `SHA256SUMS` 发布到滚动 `preview` 预发布版本。从该 Release 下载后，在使用开发板的 ArtInChip 工具烧录前执行 `sha256sum -c SHA256SUMS`。这些镜像对应 D213 `demo128-nand-carplay` 及现有 128 MiB SPI NAND 板卡与面板配置。OTA 包在各次构建之间保持固定 URL。
 
-产物保留 14 天，失败时上传构建日志。工作流成功表示交叉编译和打包通过；实际 USB 升级、NAND 启动、面板、音频和 iPhone 验收需要另行上板，源码清单中记录为 `NOT_RUN`。
+失败时上传构建日志。工作流成功表示交叉编译和打包通过；实际 USB 升级、NAND 启动、面板、音频和 iPhone 验收需要另行上板，源码清单中记录为 `NOT_RUN`。
 
 ## CherryUSB 裸机集成
 
@@ -50,8 +48,8 @@ bash packages/third-party/cherryusb-luban/tests/run_control_probe.sh
 
 ## 视频显示回归
 
-CI 还执行 `make -C application/rt-thread/rtcarplay check-lubanlite-video SDK_ROOT="$PWD"`，覆盖实际 MPP Sink 和宿主 UI 策略，包括 SDK framebuffer 命令 ABI。已确认的命令不匹配和板端验收要求见 [视频交接修复](video-handoff-fix.md)，固件身份及更正后的用户反馈见 [迁移验证报告](repository-migration-verification.md)。
+修改视频链路时执行 `make -C application/rt-thread/rtcarplay check-lubanlite-video SDK_ROOT="$PWD"`，覆盖实际 MPP Sink 和宿主 UI 策略，包括 SDK framebuffer 命令 ABI。已确认的命令不匹配和板端验收要求见 [视频交接修复](video-handoff-fix.md)，固件身份及更正后的用户反馈见 [迁移验证报告](repository-migration-verification.md)。
 
 ## 宿主持有的平台回归测试集
 
-`host-regressions` CI Job 获取 SDK 固定版本的 mbedTLS 后，在 ASan/UBSan 下执行 `make -C application/rt-thread/rtcarplay -j8 check`，包括迁移的 Receiver、音频、配对测试，以及已有视频、触摸、启动页、Bond、USB DMA、Handoff、重连和能力测试。SDK 独立测试集不再编译板级源码。通用 SDK 开关只从其 Kconfig Source 一次，硬件选择与源码收集由应用负责。参见 SDK [迁移说明](../../../../../packages/third-party/rt-carplay/docs/zh-CN/luban-lite-migration.md)。这些验证使用 Host 设备、调度模型，不是实机验收。
+获取 SDK 固定版本的 mbedTLS 后，在 ASan/UBSan 下执行 `make -C application/rt-thread/rtcarplay -j8 check`，包括迁移的 Receiver、音频、配对测试，以及已有视频、触摸、启动页、Bond、USB DMA、Handoff、重连和能力测试。SDK 独立测试集不再编译板级源码。通用 SDK 开关只从其 Kconfig Source 一次，硬件选择与源码收集由应用负责。参见 SDK [迁移说明](../../../../../packages/third-party/rt-carplay/docs/zh-CN/luban-lite-migration.md)。这些验证使用 Host 设备、调度模型，不是实机验收。
