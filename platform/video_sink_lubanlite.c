@@ -71,6 +71,8 @@ typedef struct {
 
     struct mpp_frame held;
     bool have_frame;
+    struct mpp_frame pending_scanout;
+    bool have_pending_scanout; /* An attempted update has no confirmed latch. */
     atomic_bool display_reported;
 
     atomic_bool stop;
@@ -272,13 +274,14 @@ static void video_frame_owned(bool configuration, const uint8_t *annex_b,
 /* Decode and display                                                  */
 /* ------------------------------------------------------------------ */
 
-static void disable_video_layer(video_sink_t *sink)
+static bool disable_video_layer(video_sink_t *sink)
 {
     struct aicfb_layer_data layer;
     memset(&layer, 0, sizeof(layer));
     layer.layer_id = AICFB_LAYER_TYPE_VIDEO;
     layer.enable = 0;
-    (void)rt_device_control(sink->fb, AICFB_UPDATE_LAYER_CONFIG, &layer);
+    if (rt_device_control(sink->fb, AICFB_UPDATE_LAYER_CONFIG, &layer) < 0) return false;
+    return rt_device_control(sink->fb, AICFB_WAIT_FOR_VSYNC, NULL) >= 0;
 }
 
 static bool present_frame(video_sink_t *sink, const struct mpp_frame *frame)
@@ -321,11 +324,61 @@ static bool present_frame(video_sink_t *sink, const struct mpp_frame *frame)
         ++sink->decode_errors;
         return false;
     }
-    return rt_device_control(sink->fb, AICFB_WAIT_FOR_VSYNC, &layer) >= 0;
+    if (rt_device_control(sink->fb, AICFB_WAIT_FOR_VSYNC, &layer) >= 0) return true;
+    ++sink->decode_errors;
+    return false;
+}
+
+/* Include retries in presentation timings; these are wall-clock stage costs. */
+static bool present_timed(video_sink_t *sink, const struct mpp_frame *frame)
+{
+    uint32_t start=sink_now_ms();
+    bool presented=present_frame(sink,frame);
+    uint32_t elapsed=sink_now_ms()-start;
+    ++sink->present_calls; sink->present_ms+=elapsed;
+    if (elapsed > sink->present_max_ms) sink->present_max_ms=elapsed;
+    return presented;
+}
+
+static void commit_scanout(video_sink_t *sink, const struct mpp_frame *frame)
+{
+    if (sink->have_frame) (void)mpp_decoder_put_frame(sink->decoder,&sink->held);
+    sink->held=*frame; sink->have_frame=true;
+    if (!sink->display_reported) {
+        sink->display_reported=true;
+        if (s_display_observer) s_display_observer(true,s_display_context);
+    }
+}
+
+/* Release only after a confirmed layer-disable fence, including reset/stop. */
+static bool retire_scanout(video_sink_t *sink)
+{
+    if (sink->fb && !disable_video_layer(sink)) {
+        ++sink->decode_errors;
+        return false;
+    }
+    if (sink->have_pending_scanout) {
+        (void)mpp_decoder_put_frame(sink->decoder,&sink->pending_scanout);
+        sink->have_pending_scanout=false;
+    }
+    if (sink->have_frame) {
+        (void)mpp_decoder_put_frame(sink->decoder,&sink->held);
+        sink->have_frame=false;
+    }
+    return true;
 }
 
 static unsigned drain_frames(video_sink_t *sink)
 {
+    /* A failed update/vsync leaves hardware ownership uncertain. Retain both
+     * old and attempted scanouts and retry the same frame before taking more
+     * MPP frames. This bounds retained scanouts at two and avoids recycling a
+     * buffer the DE may still read. Also retries with no new decoded output. */
+    if (sink->have_pending_scanout) {
+        if (sink->stop || !present_timed(sink,&sink->pending_scanout)) return 0;
+        commit_scanout(sink,&sink->pending_scanout);
+        sink->have_pending_scanout=false;
+    }
     unsigned drained = 0U;
     struct mpp_frame newest;
     bool have_newest = false;
@@ -352,24 +405,10 @@ static unsigned drain_frames(video_sink_t *sink)
         ++drained;
     }
     if (have_newest) {
-        uint32_t present_start = sink_now_ms();
-        bool presented = present_frame(sink, &newest);
-        uint32_t present_elapsed = sink_now_ms() - present_start;
-        if (presented && !sink->display_reported) {
-            sink->display_reported = true;
-            if (s_display_observer != NULL)
-                s_display_observer(true, s_display_context);
-        }
-        ++sink->present_calls;
-        sink->present_ms += present_elapsed;
-        if (present_elapsed > sink->present_max_ms)
-            sink->present_max_ms = present_elapsed;
+        bool presented = present_timed(sink, &newest);
         ++sink->frame_count;
-        if (sink->have_frame) {
-            (void)mpp_decoder_put_frame(sink->decoder, &sink->held);
-        }
-        sink->held = newest;
-        sink->have_frame = true;
+        if (presented) commit_scanout(sink,&newest);
+        else { sink->pending_scanout=newest; sink->have_pending_scanout=true; }
     }
     return drained;
 }
@@ -477,17 +516,9 @@ static int create_decoder(video_sink_t *sink)
 }
 
 /* Called from the sink thread only. */
-static void recreate_decoder(video_sink_t *sink)
+static bool recreate_decoder(video_sink_t *sink)
 {
-    /* Disable and latch the layer before releasing its scanout buffer. */
-    disable_video_layer(sink);
-    (void)rt_device_control(sink->fb, AICFB_WAIT_FOR_VSYNC, NULL);
-    if (sink->have_frame) {
-        if (sink->decoder != NULL) {
-            (void)mpp_decoder_put_frame(sink->decoder, &sink->held);
-        }
-        sink->have_frame = false;
-    }
+    if (!retire_scanout(sink)) return false;
     if (sink->decoder != NULL) mpp_decoder_destory(sink->decoder);
     sink->decoder = NULL;
     ++sink->decoder_resets;
@@ -497,6 +528,7 @@ static void recreate_decoder(video_sink_t *sink)
     } else {
         rt_kprintf("[" TAG "] decoder reset for a new stream\n");
     }
+    return sink->decoder != NULL;
 }
 
 /* Worker-owned state: no producer may mutate decoder/configuration lifetime. */
@@ -550,8 +582,7 @@ static bool prepare_picture(video_sink_t *sink, const nal_entry_t *nal)
             ++sink->waiting_nals;
             return false;
         }
-        recreate_decoder(sink);
-        if (sink->decoder == NULL) return false;
+        if (!recreate_decoder(sink)) return false;
         nal_entry_t config = {.data = sink->configuration,
                               .len = sink->configuration_len};
         /* Clear before pumping so any configuration failure re-arms recovery. */
@@ -607,12 +638,7 @@ static void sink_thread(void *argument)
     free(sink->configuration);
     sink->configuration = NULL;
     sink->configuration_len = 0;
-    if (sink->have_frame) {
-        if (sink->decoder != NULL) {
-            (void)mpp_decoder_put_frame(sink->decoder, &sink->held);
-        }
-        sink->have_frame = false;
-    }
+    /* The joined lifecycle owner fences the DE before returning scanouts. */
     rt_kprintf("[" TAG "] stopped: %u NALs, %u frames, %u dropped, %u errors, %u resets\n",
                sink->nal_count, sink->frame_count, sink->dropped_nals,
                sink->decode_errors, sink->decoder_resets);
@@ -717,6 +743,7 @@ static int video_stop_owned(void)
     for (unsigned waited = 0; sink->thread_running && waited < 3000U; waited += 10U)
         rt_thread_mdelay(10);
     if (sink->thread_running) return RTCP_ETIMEDOUT;
+    if (!retire_scanout(sink)) return RTCP_EIO;
 
     while (sink->tail != sink->head) {
         free(sink->queue[sink->tail].data);
@@ -726,10 +753,6 @@ static int video_stop_owned(void)
     if (sink->decoder != NULL) {
         mpp_decoder_destory(sink->decoder);
         sink->decoder = NULL;
-    }
-
-    if (sink->fb != NULL) {
-        disable_video_layer(sink);
     }
 
     if (sink->wake != NULL) {

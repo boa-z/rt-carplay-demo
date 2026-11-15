@@ -15,7 +15,8 @@ static bool reference_mode, reference_active, fail_next;
 static unsigned packet_type;
 static unsigned render_remaining, render_id, returned[16], return_count;
 static unsigned updates, vsyncs, displayed_id;
-static bool fail_present, fail_vsync, lifecycle, fail_startup, worker_pending;
+static bool hardware_reads, disable_queued;
+static bool fail_present, fail_vsync, fail_disable, lifecycle, fail_startup, worker_pending;
 static bool hold_worker, self_worker, reader_pending, check_display_reentry;
 static unsigned visible_events, stopped_events, thread_deletes;
 static uint8_t packet_data[1024];
@@ -58,12 +59,14 @@ int rt_device_control(rt_device_t d, int cmd, void *arg) {
            (unsigned)cmd != AICFB_UPDATE_ALPHA_CONFIG);
     if (cmd == AICFB_UPDATE_LAYER_CONFIG) {
         struct aicfb_layer_data *layer = arg;
-        if (fail_present && layer->enable) return -1;
-        if (layer->enable) { ++updates; displayed_id = layer->buf.phy_addr[0]; }
+        if ((fail_present && layer->enable) || (fail_disable && !layer->enable)) return -1;
+        if (layer->enable) { ++updates; displayed_id = layer->buf.phy_addr[0]; hardware_reads=true; disable_queued=false; }
+        else disable_queued=true;
     }
     if (cmd == AICFB_WAIT_FOR_VSYNC) {
         if (fail_vsync) return -1;
         ++vsyncs;
+        if (disable_queued) { hardware_reads=false; disable_queued=false; }
     }
     if ((unsigned)cmd == AICFB_GET_SCREENINFO) {
         struct aicfb_screeninfo *screen = arg;
@@ -75,7 +78,7 @@ struct mpp_decoder *mpp_decoder_create(enum mpp_codec_type t) {
     (void)t; return (struct mpp_decoder *)(uintptr_t)1;
 }
 void mpp_decoder_destory(struct mpp_decoder *d) {
-    (void)d; ++destroyed; slots = 0; reference_active = false;
+    (void)d; assert(!hardware_reads); ++destroyed; slots = 0; reference_active = false;
 }
 int mpp_decoder_init(struct mpp_decoder *d, struct decode_config *c) {
     (void)d; assert(c->packet_count == 2); return 0;
@@ -178,14 +181,15 @@ static void display_event(bool active, void *context) {
 static void reset(void) {
     memset(&s_sink, 0, sizeof(s_sink));
     s_sink.running = true;
+    s_sink.fb = (rt_device_t)(uintptr_t)1;
     s_sink.lock = (rt_mutex_t)(uintptr_t)1;
     s_sink.decoder = (struct mpp_decoder *)(uintptr_t)1;
     slots = decoded = destroyed = delays = last_config_size = 0;
-    pressure = false;
+    pressure = false; hardware_reads=false; disable_queued=false;
     reference_mode = reference_active = fail_next = false;
     render_remaining = return_count = updates = vsyncs = displayed_id = 0;
     render_id = 1;
-    fail_present = fail_vsync = lifecycle = fail_startup = worker_pending = false;
+    fail_disable = fail_present = fail_vsync = lifecycle = fail_startup = worker_pending = false;
     visible_events = stopped_events = thread_deletes = 0;
     s_display_observer = NULL; s_display_context = NULL;
 }
@@ -299,7 +303,8 @@ int main(int argc, char **argv) {
     assert(drain_frames(&s_sink) == 1 && visible_events == 0);
     assert(s_sink.frame_count > 0 && !carplay_video_sink_has_presented());
     render_remaining = 1; fail_present = false; fail_vsync = true;
-    assert(drain_frames(&s_sink) == 1 && visible_events == 0);
+    assert(drain_frames(&s_sink) == 0 && visible_events == 0);
+    assert(render_remaining == 1 && return_count == 0 && s_sink.have_pending_scanout);
     assert(s_sink.frame_count > 0 && !carplay_video_sink_has_presented());
     render_remaining = 1; fail_vsync = false;
     assert(drain_frames(&s_sink) == 1 && visible_events == 1);
@@ -308,6 +313,22 @@ int main(int argc, char **argv) {
     assert(drain_frames(&s_sink) == 1 && visible_events == 1);
     assert(carplay_video_sink_has_presented());
     assert(carplay_video_sink_set_display_observer(NULL, NULL) == RTCP_ESTATE);
+
+    reset(); /* Failed swap keeps both scanouts until the same update latches. */
+    s_sink.have_frame=true; s_sink.held.id=88;
+    render_remaining=1; fail_vsync=true;
+    assert(drain_frames(&s_sink) == 1 && return_count == 0);
+    assert(s_sink.held.id == 88 && s_sink.have_pending_scanout);
+    assert(drain_frames(&s_sink) == 0 && return_count == 0);
+    fail_vsync=false;
+    assert(drain_frames(&s_sink) == 0 && return_count == 1 && returned[0] == 88);
+    assert(s_sink.have_frame && !s_sink.have_pending_scanout && s_sink.held.id == 1);
+    /* Reset may not destroy a decoder still read by the DE. */
+    fail_vsync=true;
+    assert(!recreate_decoder(&s_sink) && !destroyed && return_count == 1);
+    assert(s_sink.have_frame && s_sink.held.id == 1);
+    fail_vsync=false;
+    assert(recreate_decoder(&s_sink) && destroyed == 1 && return_count == 2);
 
     reset(); /* Immediate stop must join a worker not yet scheduled. */
     memset(&s_sink, 0, sizeof(s_sink)); lifecycle = true;
@@ -343,6 +364,24 @@ int main(int argc, char **argv) {
     assert(carplay_video_sink_stop() == RTCP_OK);
     assert(destroyed == before_destroy + 1 && stopped_events == before_stopped + 1);
     assert(carplay_video_sink_stop() == RTCP_OK);
+
+    delays = 0;
+    assert(carplay_video_sink_start(1024,600) == RTCP_OK);
+    s_sink.have_frame=true; s_sink.held.id=88;
+    render_remaining=1; fail_vsync=true;
+    assert(drain_frames(&s_sink) == 1 && s_sink.have_pending_scanout);
+    unsigned held_returns=return_count, held_destroyed=destroyed, held_stopped=stopped_events;
+    assert(carplay_video_sink_stop() == RTCP_EIO);
+    assert(!s_sink.thread_running && s_sink.decoder && s_sink.lock && s_sink.wake);
+    assert(s_sink.have_frame && s_sink.have_pending_scanout && return_count == held_returns);
+    assert(destroyed == held_destroyed && stopped_events == held_stopped);
+    assert(carplay_video_sink_start(1024,600) == RTCP_ESTATE);
+    assert(carplay_video_sink_set_display_observer(NULL,NULL) == RTCP_ESTATE);
+    fail_vsync=false; fail_disable=true;
+    assert(carplay_video_sink_stop() == RTCP_EIO && return_count == held_returns && destroyed == held_destroyed);
+    fail_disable=false;
+    assert(carplay_video_sink_stop() == RTCP_OK);
+    assert(return_count == held_returns+2 && destroyed == held_destroyed+1 && stopped_events == held_stopped+1);
 
     delays = 0;
     assert(carplay_video_sink_start(1024, 600) == RTCP_OK);

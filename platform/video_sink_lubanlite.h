@@ -31,7 +31,8 @@ int carplay_video_sink_set_display_observer(carplay_video_display_cb_t, void *);
 /* Ordinary-thread lifecycle calls serialize with a nonblocking gate. Contention
  * or worker self-join returns RTCP_ESTATE. Stop retires accepted queue/query
  * calls, then waits up to three seconds for the decoder. RTCP_ETIMEDOUT retains
- * all decoder/frame/display resources; retry stop before restart or releasing
+ * all decoder/frame/display resources. RTCP_EIO retains those resources when
+ * layer disable/vsync fails; retry stop before restart or releasing
  * the observer context. Success disables video and notifies host policy.
  * Lifecycle calls must not run from device/display callbacks. */
 int carplay_video_sink_stop(void);
