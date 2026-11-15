@@ -142,3 +142,13 @@ SDK 3d10a1e1f3b141acdbcfb570ebea49ab10817507 的[两项 SDK CI 均通过](https:
 三个集成产物均已下载。两份固件清单的集成/SDK 版本与上述版本完全一致，源码工作区记录均为空。每份固件产物的六项 SHA256 全部通过，每份完整镜像的九个组件边界/CRC32 检查通过。GUI 镜像 SHA256：3d055d00f507cb2ae290bf1a96652702577121b4889e761361a46c79d7b5e901。Headless 镜像 SHA256：0b9bcdcfd56e413d7ce1aee8c8139f3605cef28170907c11707f5b2ade5a991f。后续仅文档提交不会改变这些产物身份。
 
 本次下载镜像尚未刷写，已连接开发板仍运行先前记录的 1b96d3f8 镜像，没有新增自动重连、物理融合/触摸或真实 iPhone Ultra 验收结论。L0 源码研究保持 PASS，完整协议范围的 L1 仍为 PARTIAL，L2-L5 仍为 NOT_RUN。滚动 Preview Release 已跳过，本批里程碑没有发布 Release。
+
+## 单 Main Display UI Sync 实验能力门控
+
+SDK a25c0cb99553492bc6d65d5f84fddceb25cfebe6 增加[显式 UI Sync 实验能力协商](../../../../packages/third-party/rt-carplay/docs/zh-CN/ui-sync-capabilities.md)。/info 生成器仅在已绑定复制目录，且显示 UUID、像素/物理尺寸与 Main Display 一致时接受模型，输出空 uiSyncInfo 和唯一真实 displayPanels 项，引用原点为零的单个 Type 110 流，不新增虚拟仪表、显示插件、Type 111、altScreen 或 HEVC。
+
+Receiver 的 negotiate_ui_sync 独立检查接入处理器、已绑定目录、匹配的初始/刷新元数据及手机提议，然后才加入 enabledFeatures。默认 Classic 响应字节不变。刷新 UI 元数据无效时，即使 Vehicle 元数据仍然有效，也拒绝新控制器。不可变 /info 快照可在 SETUP 前提供显式 UI 元数据，而 LIVI 的 uiSyncInfo 在接受提议后按条件提供；这条窄范围实验路径的真实手机接受情况仍为 NOT_RUN。宿主需实现真实资产/渲染器/呈现契约，接入期间目录保持不可变；元数据门控不验证这些实现。
+
+完整 SDK Make 检查通过，CMake 在 ASan/UBSan 下通过 66/66 项。独立 plistlib 覆盖 65 项元数据及四种 Vehicle/UI SETUP 能力组合。加密 Receiver 场景验证已启用能力、UI/Vehicle 交互、仅刷新 UI 元数据无效时的拒绝、重连/无提议状态和不变的 Classic 媒体。在手工链接的能力测试中补齐真实 UI 模型/值写入器源码后，完整集成 Host 套件通过。该测试还确认现有各 D213 能力配置均保持单 Type 110，且没有 UI/HEVC/面板声明。
+
+D213 仍未接入这两个处理器，两个协商开关均未启用。LVGL 融合仪表不满足渲染器/资产/呈现契约，仍为独立应用演示。本里程碑未刷写固件。L0 保持 PASS，完整范围的 L1 为 PARTIAL，L2-L5 为 NOT_RUN。

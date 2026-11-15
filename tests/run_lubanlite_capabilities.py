@@ -197,6 +197,8 @@ with tempfile.TemporaryDirectory(prefix="rtcp-capabilities-") as directory:
                     str(rtcp / "core/airplay/airplay_bplist.c"),
                     str(rtcp / "core/airplay/airplay_info_plist.c"),
                     str(rtcp / "core/airplay/airplay_vehicle.c"),
+                    str(rtcp / "core/airplay/airplay_ui_sync.c"),
+                    str(rtcp / "core/airplay/airplay_bplist_value.c"),
                     str(rtcp / "core/airplay/airplay_opack.c"),
                     str(rtcp / "core/media/display.c"),
                     str(rtcp / "core/airplay/airplay_hid_descriptor.c"),
@@ -208,6 +210,8 @@ with tempfile.TemporaryDirectory(prefix="rtcp-capabilities-") as directory:
         assert explicit.pop("features") == expected
         assert legacy.pop("features") & expected == expected
         assert explicit == legacy, "profile changed something other than Features"
+        assert not {"uiSyncInfo", "displayPanels", "hevcInfo"} & explicit.keys()
+        assert len(explicit["displays"]) == 1 and explicit["displays"][0]["type"] == 110
         formats = explicit.get("audioFormats", [])
         assert len(formats) == (0 if mode == 0 else 8 if mode == 1 else 9)
         if mode < 3:
