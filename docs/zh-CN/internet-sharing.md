@@ -74,7 +74,7 @@ ctest --test-dir build/internet-share --output-on-failure
 | 检查 | 必需证据 | 当前状态 |
 | --- | --- | --- |
 | Ethernet | PHY/链路、DHCP 租约/地址/网关/DNS，以及绑定出口的成功检测 | PARTIAL：用户确认 [PHY 修复](ethernet-phy-verification.md)后网口灯亮、车机联网正常；DHCP 详情和原始检测日志尚未记录 |
-| iPhone 互联网路由 | 准确镜像 SHA256、iPhone/iOS 版本、关闭蜂窝、访问受控公网服务器的唯一请求随机标识、服务端响应/日志，以及显示开发板 WAN 源地址和回程流量的 Ethernet 抓包 | NOT_RUN |
+| iPhone 互联网路由 | 准确镜像 SHA256、iPhone/iOS 版本、关闭蜂窝、访问受控公网服务器的唯一请求随机标识、服务端响应/日志，以及显示开发板 WAN 源地址和回程流量的 Ethernet 抓包 | 功能 PASS（用户反馈）：iPhone 可以通过车机网络使用网络服务；详细路由、蜂窝设置和抓包证据尚未记录，参见[实机反馈](ethernet-phy-verification.md)。 |
 | 无线兼容 | 同时运行 CarPlay 音视频/触摸和互联网流量、重连、长时运行及 LAN/WAN 计数 | NOT_RUN |
 | 恢复 | 拔插网线、DHCP 地址变化、链路保持时网关断网、DNS 失败、检测恢复和租约续期观察 | NOT_RUN |
 | 有线回归 | 有线投屏、既有卡顿/音质基线、USB 路由隔离和自动单会话行为 | 本次源码为 NOT_RUN |

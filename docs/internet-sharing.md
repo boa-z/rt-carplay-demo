@@ -74,7 +74,7 @@ The supervisor test compiles the actual application source with real lwIP state 
 | Check | Required evidence | Current status |
 | --- | --- | --- |
 | Ethernet | PHY/link, DHCP lease/address/gateway/DNS and a successful bound probe | PARTIAL: user confirmed LEDs and board connectivity after the [PHY fix](ethernet-phy-verification.md); DHCP details and raw probe logs remain unrecorded |
-| iPhone Internet route | Exact image SHA256, iPhone/iOS version, cellular disabled, unique request nonce to a controlled public server, server response/log and Ethernet packet capture showing the board's WAN source and return traffic | NOT_RUN |
+| iPhone Internet route | Exact image SHA256, iPhone/iOS version, cellular disabled, unique request nonce to a controlled public server, server response/log and Ethernet packet capture showing the board's WAN source and return traffic | Functional PASS (user report): iPhone can use Internet services through the vehicle network; detailed route/cellular/capture evidence remains unrecorded. See [hardware feedback](ethernet-phy-verification.md). |
 | Wireless compatibility | Concurrent CarPlay video/audio/touch and traffic, reconnect, prolonged use and LAN/WAN counters | NOT_RUN |
 | Recovery | Cable removal/reinsertion, DHCP address change, gateway outage with link up, DNS failure, restored probe and observed lease renewal | NOT_RUN |
 | Wired regression | Wired projection, existing stutter/poor audio baseline, USB route isolation and automatic single-session behavior | NOT_RUN for this source |

@@ -4,7 +4,7 @@
 
 ## 反馈与原因
 
-用户反馈网线和路由器已确认正常，但网口灯不亮，Launcher 显示 Cable disconnected。[Launcher Ethernet 验证](launcher-network-verification.md)中的上一版 GUI 镜像启用了 GMAC0，却关闭了 CLK_OUT2。刷入下方替换镜像后，用户确认网口灯已亮，车机联网正常。这确认了用户开发板上的原始故障现象已经恢复；尚未提供原始日志、DHCP 详情或 iPhone 路由证据。
+用户反馈网线和路由器已确认正常，但网口灯不亮，Launcher 显示 Cable disconnected。[Launcher Ethernet 验证](launcher-network-verification.md)中的上一版 GUI 镜像启用了 GMAC0，却关闭了 CLK_OUT2。刷入下方替换镜像后，用户确认网口灯已亮，车机联网正常。随后用户进一步实测确认，iPhone 可以通过车机网络使用网络服务。这两项功能结果均记录为用户实测通过；尚未提供原始日志、DHCP 详情、蜂窝数据设置或抓包。
 
 本地 D213EC-DEMO V4.0 原理图第 1、2、8 页标明 U15 为 RTL8201F，PE6 为复位，PE10/CLK_OUT2 为 EPHY0-25M，PE3 为 MAC0_REFCLK。第 8 页将 25 MHz 参考时钟连接到 PHY，通过电阻配置 RMII 模式、PHY 地址 1 和 TXC 输出。PHY 向 MAC 提供另一条 50 MHz RMII 时钟。仅选择外部 RMII 时钟输入不会启用 PHY 参考时钟输出。已有板级 sys_clk.c 和 pinmux.c 只有在配置 CLK_OUT2 时才会启用 PE10 参考时钟。硬件文档保留为本地参考资料，不复制进公开源码树。
 
@@ -23,12 +23,13 @@
 | 实际 LVGL 渲染和事件 | PASS | 12 张预览及既有网络、设置、设备、音频、配对事件检查，网络数值使用模型。 |
 | 网口灯与车机联网 | PASS（用户反馈） | 用户烧录替换 GUI 镜像后确认网口灯亮、联网正常；没有 Agent 独立测量或原始日志。 |
 | DHCP 详情与网线恢复 | NOT_RUN | 用户尚未单独记录，当前主机未枚举到串口。 |
-| 有线/无线 CarPlay 和 iPhone 上网 | NOT_RUN | 软件回归不能证明物理或手机互操作性。 |
-| 远端 CI | NOT_RUN | 未执行远端操作。 |
+| iPhone 通过车机网络使用互联网服务 | PASS（用户反馈） | 用户确认功能可用；关闭蜂窝数据的路由证据、手机/iOS 身份和抓包尚未记录。 |
+| CarPlay 并发负载与网络恢复 | NOT_RUN | 当前镜像的长时间音视频/触摸负载、网线/WAN 恢复和有线回归尚未单独反馈。 |
+| 远端 CI | NOT_RUN | 此处为本地验证记录，发布后的远端 CI 结果单独跟踪。 |
 
 ## 产物身份
 
-替换 GUI 镜像为 output/ethernet-phy-validation/gui/d213-carplay-gui.img，SHA256 为 `5002e942799e8aaf5b3fe3ff827b9d67abd7e8db7f8afa9384517b69cd4d0468`。Headless 镜像 SHA256 为 `1110fe5b33c64c323cbefb2cea665755809055458d039518b158a0bc82b5af6b`。目录包含配置、Bootloader、镜像布局、固件符号、日志、本地源码快照和校验和。镜像在用户随后授权提交之前，使用已记录的未提交源码快照构建；后续文档更新记录了用户实机反馈。未创建或切换分支、创建 PR 或推送。
+替换 GUI 镜像为 output/ethernet-phy-validation/gui/d213-carplay-gui.img，SHA256 为 `5002e942799e8aaf5b3fe3ff827b9d67abd7e8db7f8afa9384517b69cd4d0468`。Headless 镜像 SHA256 为 `1110fe5b33c64c323cbefb2cea665755809055458d039518b158a0bc82b5af6b`。目录包含配置、Bootloader、镜像布局、固件符号、日志、本地源码快照和校验和。镜像在授权提交之前使用已记录的未提交源码快照构建。实现提交 dcb9a339 记录该源码、空白清理和首次实机反馈；本次后续文档更新记录用户的 iPhone 测试成功，以及授权在现有 carplay-oss 分支提交和推送。不涉及创建或切换分支、创建 PR。
 
 ## 开发板复测
 

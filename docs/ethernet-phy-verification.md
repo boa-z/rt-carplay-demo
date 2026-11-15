@@ -4,7 +4,7 @@
 
 ## Report and cause
 
-The user reported a known-good cable and router but dark Ethernet LEDs and Launcher showing Cable disconnected. The previous GUI image in [Launcher Ethernet verification](launcher-network-verification.md) had GMAC0 enabled but CLK_OUT2 disabled. After flashing the replacement image below, the user confirmed that Ethernet LEDs illuminate and board Internet access works. This confirms recovery of the reported symptom on the user's board; no raw logs, DHCP details or iPhone routing evidence were supplied.
+The user reported a known-good cable and router but dark Ethernet LEDs and Launcher showing Cable disconnected. The previous GUI image in [Launcher Ethernet verification](launcher-network-verification.md) had GMAC0 enabled but CLK_OUT2 disabled. After flashing the replacement image below, the user confirmed that Ethernet LEDs illuminate and board Internet access works. In a subsequent test, the user also confirmed that an iPhone can use Internet services through the vehicle network. Both functional results are recorded as user-reported passes; no raw logs, DHCP details, cellular settings or packet captures were supplied.
 
 The local D213EC-DEMO V4.0 schematic, sheets 1, 2 and 8, identifies U15 as RTL8201F, PE6 as reset, PE10/CLK_OUT2 as EPHY0-25M, and PE3 as MAC0_REFCLK. Sheet 8 connects the 25 MHz reference to the PHY, straps RMII mode and PHY address 1, and selects TXC output. The PHY supplies the separate 50 MHz RMII clock to the MAC. Selecting external RMII clock input alone does not enable the PHY reference output. The existing board sys_clk.c and pinmux.c enable the PE10 reference only when CLK_OUT2 is configured. Hardware documents remain local reference material and are not copied into the public source tree.
 
@@ -23,12 +23,13 @@ The existing GUI defconfig explicitly enables CLK_OUT2 at 25000000 Hz, RMII, ext
 | Actual LVGL renderer and events | PASS | Twelve previews and existing network/settings/device/audio/pairing event checks; modeled network values. |
 | Ethernet LEDs and board Internet | PASS (user report) | User flashed the replacement GUI image and confirmed illuminated LEDs and working connectivity. No independent agent measurement or raw logs. |
 | DHCP details and cable recovery | NOT_RUN | Not separately documented by the user; no serial port was enumerated on this host. |
-| Wired/wireless CarPlay and iPhone Internet | NOT_RUN | Software regressions do not establish physical or phone interoperability. |
-| Remote CI | NOT_RUN | No remote operation was performed. |
+| iPhone Internet services through the vehicle network | PASS (user report) | User confirmed functional access. Cellular-disabled routing evidence, phone/iOS identity and packet captures remain unrecorded. |
+| Concurrent CarPlay load and network recovery | NOT_RUN | Prolonged audio/video/touch load, cable/WAN recovery and wired regression have not been separately reported for this image. |
+| Remote CI | NOT_RUN | Local validation record; remote CI results are tracked separately after publication. |
 
 ## Artifact identity
 
-The replacement GUI image is output/ethernet-phy-validation/gui/d213-carplay-gui.img. Its SHA256 is `5002e942799e8aaf5b3fe3ff827b9d67abd7e8db7f8afa9384517b69cd4d0468`. The Headless image SHA256 is `1110fe5b33c64c323cbefb2cea665755809055458d039518b158a0bc82b5af6b`. The directory contains configurations, Bootloader, image layout, firmware symbols, logs, a local source snapshot and checksums. The images were built from the recorded uncommitted source snapshot before the user's subsequent commit authorization; the later documentation update records the user's hardware feedback. No branch creation/switch, PR or push was performed.
+The replacement GUI image is output/ethernet-phy-validation/gui/d213-carplay-gui.img. Its SHA256 is `5002e942799e8aaf5b3fe3ff827b9d67abd7e8db7f8afa9384517b69cd4d0468`. The Headless image SHA256 is `1110fe5b33c64c323cbefb2cea665755809055458d039518b158a0bc82b5af6b`. The directory contains configurations, Bootloader, image layout, firmware symbols, logs, a local source snapshot and checksums. The images were built from the recorded uncommitted source snapshot before commit authorization. Implementation commit dcb9a339 records that source with whitespace cleanup and the first hardware feedback; this subsequent documentation update records the user's iPhone success and authorization to commit and push the existing carplay-oss branch. No branch creation/switch or PR is involved.
 
 ## Board retest
 
