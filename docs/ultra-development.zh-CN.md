@@ -226,3 +226,5 @@ SDK d0a15bbd4312df82dca208ef3cb2b519cc91c357 为已有 Vehicle State 处理器�
 本地完整 SDK Make、启用 RTCP_SANITIZE 的 CMake 72/72 项、完整集成 Host 套件及双语文档检查（32 对、一个明确例外）通过。独立 Python OPACK/plistlib 检查验证输入、响应、服务元数据及重排/不匹配目录拒绝。加密公共 Receiver 场景在 Normal/HIGH 执行 Control，拒绝含后续畸形命令的批次且不提交前一个命令，保持 HIGH 读取、新 seed 重开及 Classic 媒体/重连回归。合成命令执行不能证明真实 iPhone 或执行器动作，L0 PASS、完整范围 L1 PARTIAL、L2–L5 NOT_RUN 不变。
 
 新的只读设备检查发现 COM9 仍注册，一次 aiburn 命令返回缓冲运行文本，但没有确认的 shell 提示符或有效显示状态；后续正确的 carplay_display status 查询没有运行输出，升级接口未发现 USB 升级设备。这些观察不能确认板卡健康状态或 shell 不可用原因。原始输出存放于 Git 外的私有设备目录，没有进入升级模式、刷写、复位、修改配对文件或进行手机交互。实机验收仍需先确认调试通道，并在刷写前重新备份和核对配对文件。
+
+[CI 与 D213 刷写检查点](evidence/d213-vehicle-controls-flash-20261115.md)记录精确固件哈希、SDK 纯测试后续提交、新配对备份及恢复校验，以及尚待完成的实机验收。
