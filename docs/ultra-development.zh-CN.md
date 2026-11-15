@@ -30,7 +30,7 @@ D213 已有应用融合所需的 MPP H.264 与 DE 硬件图层路径，但这不
 | ui_sync.rs | OPACK 内嵌 binary plist，包含 type/ssn/psn/asn、reset、版本协商至 2、reset 完成、command 和 ACK；支持布局/调色板/外观/焦点、错误 session 过滤及 reopen。不能据此证明完整逐帧合成器、重传队列或序号窗口/超时策略。 |
 | native/crates/livi-core/src/projection/theme_catalog.rs | 解析目录/包元数据、package.json/theme.json、ZIP、显示/布局/调色板/zones 并缓存。JWT payload 提取和元数据解析不能单独证明完整资产真实性校验。 |
 
-2026-11-15，在 Ubuntu 24.04/WSL、Rust/Cargo 1.100.0 及 OpenSSL 3.0.13 下执行 cargo test --locked -p livi-cp --lib，原始 LIVI 的全部 179 个测试通过，包括 15 个 info、27 个 Vehicle State、一个 UI Sync 综合测试及四个 iAP 隧道测试，覆盖元数据、配置/读/订阅/写/通知、reset/版本/布局/ACK/焦点/session/reopen 及双向封包。[选取的原始测试输出](../../../../packages/third-party/rt-carplay/docs/evidence/livi-cp-host-20261115.txt)记录精确参考版本和环境，源码与 Cargo.lock 未改动。Windows 无法编译 livi-base 的 Unix 文件权限 API，因此没有执行参考测试。命令不包含 livi-core 的 theme_catalog 测试，后者保持 NOT_RUN。这些属于参考项目 Host 结果，不是 iPhone 或开发板证据。
+2026-11-15，在 Ubuntu 24.04/WSL、Rust/Cargo 1.100.0 及 OpenSSL 3.0.13 下执行 cargo test --locked -p livi-cp --lib，原始 LIVI 的全部 179 个测试通过，包括 15 个 info、27 个 Vehicle State、一个 UI Sync 综合测试及四个 iAP 隧道测试，覆盖元数据、配置/读/订阅/写/通知、reset/版本/布局/ACK/焦点/session/reopen 及双向封包。[选取的原始测试输出](../../../../packages/third-party/rt-carplay/docs/evidence/livi-cp-host-20261115.txt)记录精确参考版本和环境，源码与 Cargo.lock 未改动。Windows 无法编译 livi-base 的 Unix 文件权限 API，因此没有执行参考测试。后续独立命令通过六个 livi-core theme_catalog 测试及一个 livi-ui-model 仪表布局测试，见[补充源码研究](../../../../packages/third-party/rt-carplay/docs/zh-CN/livi-theme-review.md)及[原始输出](../../../../packages/third-party/rt-carplay/docs/evidence/livi-theme-host-20261115.txt)。该模型对未知厂商布局采用通用仪表回退，元数据选择不能证明完整官方主题渲染。这些属于参考项目 Host 结果，不是 iPhone 或开发板证据。
 
 ## SDK 里程碑与后续协议工作
 
@@ -118,3 +118,13 @@ D213 配置仍未接入这两个处理器，negotiate_vehicle 保持 false。UI 
 解码恢复和停止均先关闭 DE 视频层并等待 VSYNC，再归还扫描帧及销毁解码器。解码工作线程退出时，将扫描帧留给完成线程等待的生命周期所有者。关闭图层或 VSYNC 失败时，stop 返回 RTCP_EIO，并保留解码器、帧及同步资源；调用者必须重试停止，成功后才能重启或更换观察者。现有应用关闭所有者已对停止失败进行重试。工作线程退出超时仍按原有约定保留资源。
 
 实际源码 Host 测试模拟扫描帧归属不确定的情况，并断言硬件仍可能读取帧时不得销毁解码器。覆盖替换失败与重试、恢复失败、图层关闭失败、停止等待失败、保留资源后重试、观察者顺序，以及既有包队列、恢复及重复生命周期。2026-11-15 的完整集成 Host 测试及 Windows 原生 Ultra GUI/Headless 构建通过，两种镜像的九个组件均通过边界与 CRC 校验。真实 D213 故障注入及融合显示验收仍为 NOT_RUN。本项前置修复尚未实现 FULLSCREEN/FUSION/LOCAL 切换或官方 Ultra 渲染。
+
+## UI Sync 目录复制里程碑
+
+SDK 27de06565aadb460fb10520812b4ebf8c3521209 增加可选的宿主目录复制：主题/面板/显示标识、像素/物理尺寸，以及支持的布局和各自调色板、区域/组件候选。不支持的宿主或手机选择会在状态及 ACK 提交前拒绝，目录跨通道重置保留。Receiver 使用独立 last_rejection 保存具体拒绝原因，避免被后续通道关闭的通用错误覆盖。这是后续真实宿主能力组合的便携契约，不是渲染器，也不会隐式声明 uiSync/displayPanels。
+
+SDK Make、ASan/UBSan 下 CMake 65/65 及完整集成 Host 测试通过。Python 独立消息生成/解析覆盖 35 条 UI Sync 输出；加密 Receiver 测试仅关闭收到未知布局的 UI 通道，车辆读取继续，具体原因保留，重开后接受支持的选择。D213 仍未绑定目录或 UI Sync 处理器，不声明新的 UI 能力，既有融合配置未改变。
+
+原版 LIVI 的追加测试通过六个主题目录测试及一个仪表布局测试，使用模拟 JSON/ZIP/目录和本地缓存，没有抓取或复制 Apple 主题资产。参考代码提取 ID、调色板和地图区域，未知厂商布局回退到通用仪表，不能证明完整官方 Local UI 渲染。SDK 中英双语报告记录了源码与测试的确切边界。
+
+当前板端仍为此前刷入的 1b96d3f8，不是本次 SDK 版本。再次通过 COM9 观察到请求 FUSION、实际 LOCAL、video=0、显示错误为零，USB 已在 CarPlay 配置中连接，但 Lockdown 仍在收到视频前建连失败。私有配对文件已核对恢复，不能据此推定自动回连成功。L1 仍为 PARTIAL，完整 L2 及 L3-L5 均保持 NOT_RUN。本里程碑没有再次刷写固件。
