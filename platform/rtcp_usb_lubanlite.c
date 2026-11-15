@@ -39,6 +39,10 @@
 
 #ifdef LPKG_RT_CARPLAY_LUBANLITE_USB
 
+#if defined(RTCARPLAY_NATIVE_NCM) && (defined(LPKG_USING_CHERRYUSB_IPHETH) || defined(LPKG_CHERRYUSB_HOST_NCM))
+#error "Native CarPlay NCM must be the only USB network class"
+#endif
+
 #include <string.h>
 #include <stdatomic.h>
 
@@ -171,6 +175,7 @@ bool rtcp_usb_lubanlite_host_ready(uint32_t generation, bool ready)
     size_t flags = usb_osal_enter_critical_section();
     bool current = s_usb.present && s_usb.hport &&
                    !(generation & 1U) && s_usb.sequence == generation;
+#ifndef RTCARPLAY_NATIVE_NCM
     if (current && usbh_ipheth_host_ready)
         usbh_ipheth_host_ready(s_usb.hport, ready);
     /* CarKit TLS is established on this attachment. Enable the USB network
@@ -178,6 +183,11 @@ bool rtcp_usb_lubanlite_host_ready(uint32_t generation, bool ready)
      * lwIP still performs ordinary DAD before an endpoint is advertised. */
     if (current && usbh_ipheth_session_link)
         usbh_ipheth_session_link(s_usb.hport, ready);
+#else
+    /* CarKit readiness belongs to the selected NCM function. Never activate
+     * a second tethering function, even if an optional provider is linked. */
+    (void)ready;
+#endif
     usb_osal_leave_critical_section(flags);
     return current;
 }
@@ -538,7 +548,11 @@ static bool find_carplay_configuration(struct usbh_hubport *hport,
             rtcp_usb_configuration_kind(&probe);
         rtcp_usb_functions_t functions;
         rtcp_usb_classify_configuration(&probe, &functions);
-#ifndef LPKG_CHERRYUSB_HOST_NCM
+#if defined(RTCARPLAY_NATIVE_NCM)
+        /* Native NCM owns the data path. Apple Ethernet descriptors do not
+         * make its unbuilt driver a usable fallback. */
+        if (kind != RTCP_USB_CONFIG_NCM) continue;
+#elif !defined(LPKG_CHERRYUSB_HOST_NCM)
         /* Descriptors alone do not install a CDC-NCM driver. The retained
          * target uses its independent Apple Ethernet class and i0 adapter. */
         if (!functions.apple_ethernet) continue;

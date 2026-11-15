@@ -131,8 +131,38 @@ config RTCARPLAY_WIRED_NETIF
     string "Wired Ethernet device name (two characters)"
     default "i0"
     help
-      RT-Thread Ethernet device used for wired IPv6, e.g. i0 for external
-      cherryusb-ipheth or u1 for CDC-NCM. No private driver API is required.
+      RT-Thread Ethernet device used for wired IPv6, n0 for the application
+      CDC-NCM adapter or i0 for optional cherryusb-ipheth.
+
+config RTCARPLAY_NATIVE_NCM
+    bool "Use the application CDC-NCM adapter for wired CarPlay"
+    depends on RTCARPLAY_USB_HOST && RT_USING_LWIP
+    depends on !LPKG_CHERRYUSB_HOST_NCM
+    depends on !LPKG_USING_CHERRYUSB_IPHETH
+    default n
+    help
+      Bind the first Apple CDC-NCM control/data function rather than the
+      vendor Apple Ethernet function. Set RTCARPLAY_WIRED_NETIF to n0.
+      Disable LPKG_USING_CHERRYUSB_IPHETH: only this network function may
+      be activated on the phone. Do not also enable the upstream singleton
+      NCM driver. The maintained D213 GUI profile enables this adapter.
+
+config RTCARPLAY_NCM_TRACE
+    bool "Record bounded native NCM network header diagnostics"
+    depends on RTCARPLAY_NATIVE_NCM
+    default n
+    help
+      Record NS/NA targets, TCP endpoints and two other IPv6 headers per
+      direction. carplay_usb net drains up to 24 metadata records. No media
+      payloads are retained and USB completion callbacks do not print.
+
+config RTCARPLAY_WIRED_PROTOCOL_TRACE
+    bool "Observe wired iAP2 availability and startup fields"
+    depends on RTCARPLAY_USB_HOST
+    default n
+    help
+      Report bounded 0x4300 raw fields and outgoing identification, power
+      and startup parameter lengths. No authentication keys are logged.
 
 config RTCARPLAY_WIRED_REINVITE_DELAY_MS
     int "One wired startup invitation retry delay (ms, 0 disables)"

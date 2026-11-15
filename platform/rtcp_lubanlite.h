@@ -40,6 +40,10 @@ extern const rtcp_usb_t rtcp_usb_lubanlite;
  */
 bool rtcp_lubanlite_wired_net_up(void);
 bool rtcp_lubanlite_wired_ipv6(char *address, size_t capacity, bool *valid);
+/* Copy the selected up/link-up interface's six-byte unicast MAC under the
+ * core lock. Native NCM sets local link readiness before observed carrier
+ * or DAD. False clears the output; no fallback to WAN/WLAN is performed. */
+bool rtcp_lubanlite_wired_mac(uint8_t mac[6]);
 
 /*
  * Print every USB configuration descriptor the attached iPhone reports and

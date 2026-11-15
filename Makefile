@@ -8,6 +8,12 @@ RTCP_ROOT ?= $(SDK_ROOT)/packages/third-party/rt-carplay
 CHERRYUSB_ROOT ?= $(SDK_ROOT)/packages/third-party/cherryusb
 BUILD ?= build
 
+.PHONY: check-native-ncm
+check-native-ncm: | $(BUILD)
+	$(CC) $(CFLAGS) -Iplatform tests/unit/test_native_ncm.c platform/native_ncm_codec.c -o $(BUILD)/test_native_ncm
+	$(BUILD)/test_native_ncm
+	python3 tests/run_native_ncm_worker.py
+
 .PHONY: check-usb-file-sync
 check-usb-file-sync: | $(BUILD)
 	$(CC) $(CFLAGS) -Itests/usb_file_sync -I$(CHERRYUSB_ROOT)/common -I$(CHERRYUSB_ROOT)/class/adb tests/usb_file_sync/test_sync.c $(CHERRYUSB_ROOT)/class/adb/usbd_adb_sync.c -o $(BUILD)/test_usb_file_sync
@@ -29,9 +35,9 @@ sdk-libraries:
 	$(MAKE) -C $(RTCP_ROOT) $(patsubst $(RTCP_ROOT)/%,%,$(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS))
 $(BOARD_BINS): | sdk-libraries $(BUILD)
 $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS): sdk-libraries
-check: $(BOARD_BINS) check-auto-connections check-internet-share check-udp-burst check-usb-file-sync check-ota
+check: $(BOARD_BINS) check-auto-connections check-internet-share check-udp-burst check-usb-file-sync check-ota check-native-ncm
 	@set -e; for t in $(BOARD_BINS); do ./$$t; done
-	$(MAKE) check-lubanlite-video check-lubanlite-touch check-lubanlite-demo check-lubanlite-bonds check-lubanlite-usb check-lubanlite-handoff check-lubanlite-reconnect check-lubanlite-capabilities check-iap2-endpoints check-usb-iap2-worker check-wireless-iap2-worker
+	$(MAKE) check-lubanlite-video check-lubanlite-touch check-lubanlite-demo check-lubanlite-bonds check-lubanlite-usb check-lubanlite-handoff check-lubanlite-reconnect check-lubanlite-capabilities check-wired-identity check-wired-trace check-iap2-endpoints check-usb-iap2-worker check-wireless-iap2-worker
 
 .PHONY: check-internet-share
 check-internet-share:
@@ -62,11 +68,23 @@ check-lubanlite-usb:
 	  -I$(CHERRYUSB_ROOT)/class/hub -ffunction-sections -fdata-sections \
 	  tests/unit/test_lubanlite_usb_dma.c $(RTCP_ROOT)/core/usb/usb_device.c -Wl,--gc-sections -o $(BUILD)/test_lubanlite_usb_boot
 	$(BUILD)/test_lubanlite_usb_boot
+	$(CC) $(CFLAGS) $(CPPFLAGS) -DLPKG_RT_CARPLAY_LUBANLITE_USB -DRTCARPLAY_AUTO_CONNECT -DRTCARPLAY_NATIVE_NCM \
+	  -Itests/support/lubanlite_usb -Iplatform \
+	  -I$(CHERRYUSB_ROOT)/core -I$(CHERRYUSB_ROOT)/common \
+	  -I$(CHERRYUSB_ROOT)/class/hub -ffunction-sections -fdata-sections \
+	  tests/unit/test_lubanlite_usb_dma.c $(RTCP_ROOT)/core/usb/usb_device.c -Wl,--gc-sections -o $(BUILD)/test_lubanlite_usb_native
+	$(BUILD)/test_lubanlite_usb_native
 
 # Actual RT-Thread composition with Linux protocol ports and modeled scheduling.
-.PHONY: check-rtthread-app
+.PHONY: check-rtthread-app check-wired-identity
 check-rtthread-app: $(BUILD)/test_rtthread_app
 	$(BUILD)/test_rtthread_app
+
+check-wired-identity: check-rtthread-app | $(BUILD)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -Itests/wired_identity -Itests/internet_share -I$(SDK_ROOT)/kernel/rt-thread/components/net/lwip/lwip-2.1.2/src/include -ffunction-sections -fdata-sections tests/unit/test_wired_identity.c -Wl,--gc-sections -o $(BUILD)/test_wired_identity
+	$(BUILD)/test_wired_identity
+	$(CC) $(CFLAGS) $(CPPFLAGS) -DTEST_LEGACY_WIRED_IDENTITY -Itests/support/rtthread_app -Iplatform -Wno-unused-function -ffunction-sections -fdata-sections tests/unit/test_rtthread_app.c $(BUILD)/rtthread-app/os.o $(BUILD)/rtthread-app/net.o $(LIB) $(MBEDTLS_LIB) $(LDLIBS) -pthread -Wl,--gc-sections -o $(BUILD)/test_rtthread_app_legacy
+	$(BUILD)/test_rtthread_app_legacy
 
 $(BUILD)/test_rtthread_app: tests/unit/test_rtthread_app.c app/carplay_app.c \
     app/carplay_app.h app/pairing_files.c \
@@ -172,6 +190,10 @@ check-lubanlite-capabilities:
 .PHONY: check-iap2-endpoints
 check-iap2-endpoints:
 	python3 tests/run_iap2_endpoint_ownership.py
+
+.PHONY: check-wired-trace
+check-wired-trace:
+	python3 tests/run_wired_trace.py
 
 # Offline speaker/microphone test worker against virtual devices.
 $(BUILD)/test_audio_diagnostics: tests/unit/test_audio_diagnostics.c platform/audio_test_lubanlite.c platform/audio_test_fixture.h $(LIB) $(MBEDTLS_LIB)

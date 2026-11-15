@@ -99,6 +99,7 @@ The host suite runs actual sources with ASan/UBSan and modeled scheduling/device
 | Document | Scope |
 | --- | --- |
 | [Wired startup and pairing](docs/wired-startup.md) | Concurrent CarKit/network startup, deferred invitation, RSA optimization and board checks |
+| [Native wired NCM integration](docs/wired-native-ncm.md) | Exclusive network ownership, module boundaries, three-phone acceptance and regression limits |
 | [EHCI completion recovery](docs/ehci-completion-recovery.md) | Reproduced async-advance reclamation defect, wired crash evidence and validation limits |
 | [Wired video receive progress](docs/wired-video-recovery.md) | RX/TX lock isolation, queued lwIP input and board performance comparison |
 | [mbedTLS 4.x assessment](docs/mbedtls-upgrade-assessment.md) | Measured MPI evidence, migration costs and performance limits |

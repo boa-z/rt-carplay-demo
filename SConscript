@@ -129,6 +129,11 @@ if GetDepend('RTCARPLAY_MICROPHONE'):
 # only added to this group (the stack builds its own copy with its own paths).
 if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_USB'):
     src += Glob('platform/rtcp_usb_lubanlite.c')
+    if GetDepend('RTCARPLAY_NATIVE_NCM'):
+        if GetDepend('LPKG_USING_CHERRYUSB_IPHETH') or GetDepend('LPKG_CHERRYUSB_HOST_NCM'):
+            raise RuntimeError('Native CarPlay NCM requires exclusive USB network ownership; disable IPHETH and upstream NCM')
+        src += Glob('platform/native_ncm_codec.c')
+        src += Glob('platform/native_ncm_lubanlite.c')
 
     # NCM netdev helpers; the CherryUSB NCM class needs lwIP.
     if GetDepend('RT_USING_LWIP'):

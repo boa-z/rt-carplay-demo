@@ -1026,6 +1026,13 @@ static bool format_device_id_from_seed(app_state_t *app,
 static int build_identity(app_state_t *app, const char *pair_code,
                           const char *seed_path)
 {
+#if defined(RTCARPLAY_NATIVE_NCM)
+    uint8_t wired_mac[6];
+    if (app->wired && !rtcp_lubanlite_wired_mac(wired_mac)) {
+        APP_LOG("wired identity: selected NCM MAC is unavailable");
+        return RTCP_ENOENT;
+    }
+#endif
     uint8_t seed[AIRPLAY_ED25519_SEED_BYTES];
     bool loaded = load_seed(seed_path, seed);
     if (!loaded) {
@@ -1050,6 +1057,20 @@ static int build_identity(app_state_t *app, const char *pair_code,
     if (ok) ok = format_device_id_from_seed(app, seed);
     memset(seed, 0, sizeof(seed));
     if (!ok) return RTCP_EIO;
+
+#if defined(RTCARPLAY_NATIVE_NCM)
+    if (app->wired) {
+        /* Bind identity before /info, pairing and the receiver are built.
+         * Do not patch only the later iAP2 invitation or mutate a live
+         * receiver. The native function's descriptor MAC is available
+         * before carrier/DAD, avoiding a dependency on phone activation. */
+        rt_snprintf(app->device_id, sizeof(app->device_id),
+                    "%02X:%02X:%02X:%02X:%02X:%02X", wired_mac[0], wired_mac[1],
+                    wired_mac[2], wired_mac[3], wired_mac[4], wired_mac[5]);
+        rt_snprintf(app->host_name, sizeof(app->host_name), "rtcp-%02x%02x%02x",
+                    wired_mac[3], wired_mac[4], wired_mac[5]);
+    }
+#endif
 
     app->accessory_identifier_len = strlen(app->device_id);
     memcpy(app->accessory_identifier, app->device_id,

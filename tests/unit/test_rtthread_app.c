@@ -11,6 +11,9 @@
  * and protocol dependencies; only RT-Thread scheduling/locks are modeled. */
 #define LPKG_RT_CARPLAY_LUBANLITE_USB 1
 #define RT_USING_LWIP 1
+#ifndef TEST_LEGACY_WIRED_IDENTITY
+#define RTCARPLAY_NATIVE_NCM 1
+#endif
 #define RTCARPLAY_BT 1
 #include "../../app/carplay_app.c"
 #include "../../app/pairing_files.c"
@@ -24,6 +27,8 @@ static bool fail_create, fail_startup, hold_bt_worker;
 static bool check_input_reentry;
 static bool ipv6_valid = true;
 static unsigned ipv6_queries;
+static bool wired_mac_available = true;
+static uint8_t wired_mac[6] = {0x9e, 0xc3, 0x94, 0x0c, 0x19, 0xdd};
 static pthread_barrier_t snapshot_barrier;
 static atomic_bool release_snapshot = ATOMIC_VAR_INIT(false);
 static unsigned snapshot_waits;
@@ -51,6 +56,13 @@ bool rtcp_lubanlite_wired_ipv6(char *address, size_t capacity, bool *valid)
     ++ipv6_queries;
     snprintf(address, capacity, "fe80::1234");
     *valid = ipv6_valid;
+    return true;
+}
+
+bool rtcp_lubanlite_wired_mac(uint8_t mac[6])
+{
+    if (!wired_mac_available) { memset(mac, 0, 6); return false; }
+    memcpy(mac, wired_mac, 6);
     return true;
 }
 
@@ -351,6 +363,14 @@ int main(void)
     config.wired = true; config.seed_path = seed; config.store_path = store;
     config.width_pixels = 1024; config.height_pixels = 600;
 
+#ifdef RTCARPLAY_NATIVE_NCM
+    wired_mac_available = false;
+    assert(carplay_app_start(&config) == RTCP_ENOENT);
+    assert(!carplay_app_is_running() && !pending && !live_mutexes);
+    assert(access(seed, F_OK) != 0); /* No key generation before net readiness. */
+    wired_mac_available = true;
+#endif
+
     fail_startup = true;
     assert(carplay_app_start(&config) == RTCP_EIO);
     assert(!carplay_app_is_running() && !pending && live_mutexes == 0);
@@ -362,9 +382,44 @@ int main(void)
     assert(!carplay_app_is_running() && !pending && live_mutexes == 0);
     fail_create = false;
 
+    app_state_t wireless_identity = {0};
+    wireless_identity.os = rtcp_os_rtthread;
+    assert(build_identity(&wireless_identity, "3939", seed) == RTCP_OK);
+    assert(!strncmp(wireless_identity.device_id, "02:", 3));
+
     for (unsigned cycle = 0; cycle < 32; ++cycle) {
         assert(carplay_app_start(&config) == RTCP_OK);
         assert(carplay_app_is_running() && pending && live_mutexes == 1);
+#ifdef RTCARPLAY_NATIVE_NCM
+        char expected_id[18];
+        snprintf(expected_id, sizeof(expected_id), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 wired_mac[0], wired_mac[1], wired_mac[2], wired_mac[3],
+                 wired_mac[4], wired_mac[5]);
+        assert(!strcmp(s_app.device_id, expected_id));
+#else
+        assert(!strncmp(s_app.device_id, "02:", 3));
+#endif
+        /* Check the bytes exposed by /info and both pairing methods, not
+         * only the local string subsequently copied into StartSession. */
+        airplay_bplist_doc_t doc;
+        airplay_bplist_object_t root, object;
+        char encoded_id[32];
+        size_t encoded_id_len;
+        assert(airplay_bplist_open(s_app.info_plist, s_app.info_plist_len, &doc) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_dict_get(&doc, root, "deviceID", &object) == AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_get_string(&doc, object, encoded_id, sizeof(encoded_id), &encoded_id_len) == AIRPLAY_BPLIST_OK);
+        assert(!strcmp(encoded_id, s_app.device_id));
+        assert(encoded_id_len == strlen(encoded_id));
+        assert(!memcmp(&s_app.keypair, &wireless_identity.keypair, sizeof(s_app.keypair)));
+        rtcp_pairing_provider_t pairing;
+        fill_pairing(&s_app, &pairing);
+        assert(pairing.pair_setup.accessory_identifier_len == strlen(encoded_id));
+        assert(!memcmp(pairing.pair_setup.accessory_identifier, encoded_id, strlen(encoded_id)));
+        assert(pairing.pair_verify.accessory_identifier_len == strlen(encoded_id));
+        assert(!memcmp(pairing.pair_verify.accessory_identifier, encoded_id, strlen(encoded_id)));
+        airplay_ed25519_keypair_t persisted_key = s_app.keypair;
+        wired_mac[5] ^= 1U; /* A later platform change cannot rewrite live identity. */
         assert(carplay_app_start(&config) == RTCP_ESTATE);
         carplay_app_display_info_t display;
         assert(carplay_app_display_info(&display) == RTCP_OK);
@@ -386,6 +441,8 @@ int main(void)
         assert(carplay_app_wired_info(&wired) == RTCP_OK);
         assert(!strcmp(wired.ipv6, "fe80::1234"));
         assert(!strcmp(wired.device_id, s_app.device_id));
+        assert(!strcmp(wired.device_id, encoded_id));
+        assert(!memcmp(&s_app.keypair, &persisted_key, sizeof(persisted_key)));
         assert(wired.device_id != s_app.device_id);
         /* Exercise wireless snapshot ownership without claiming radio behavior. */
         s_app.wired = false;

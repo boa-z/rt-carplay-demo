@@ -45,6 +45,26 @@ static bool wired_netif_is_up(struct netif *netif)
     return netif != NULL && netif_is_up(netif) && netif_is_link_up(netif);
 }
 
+bool rtcp_lubanlite_wired_mac(uint8_t mac[6])
+{
+    if (mac == NULL) return false;
+    memset(mac, 0, 6);
+    bool found = false;
+    LOCK_TCPIP_CORE();
+    struct netif *netif = wired_netif();
+    if (wired_netif_is_up(netif) && netif->hwaddr_len == 6U &&
+        (netif->hwaddr[0] & 1U) == 0U) {
+        uint8_t nonzero = 0;
+        for (unsigned i = 0; i < 6U; ++i) nonzero |= netif->hwaddr[i];
+        if (nonzero != 0U) {
+            memcpy(mac, netif->hwaddr, 6);
+            found = true;
+        }
+    }
+    UNLOCK_TCPIP_CORE();
+    return found;
+}
+
 bool rtcp_lubanlite_wired_net_up(void)
 {
     bool up;
@@ -84,6 +104,12 @@ bool rtcp_lubanlite_wired_ipv6(char *address, size_t capacity, bool *valid)
 }
 
 #else /* no lwIP IPv6 in this build */
+
+bool rtcp_lubanlite_wired_mac(uint8_t mac[6])
+{
+    if (mac != NULL) memset(mac, 0, 6);
+    return false;
+}
 
 bool rtcp_lubanlite_wired_net_up(void)
 {

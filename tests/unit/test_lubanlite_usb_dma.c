@@ -200,7 +200,11 @@ static void test_enumeration_activation(void)
         printf("enumeration scenario=%u selected_index=%u mode_requests=%u configs=%u\n",
                scenario, selected, enum_activations, port.device_desc.bNumConfigurations);
         fflush(stdout);
+#ifdef RTCARPLAY_NATIVE_NCM
+        assert(selected == (scenario < 2 ? 5 : 0));
+#else
         assert(selected == (scenario < 2 ? 5 : scenario == 5 ? 0 : 3));
+#endif
         assert(enum_activations == (scenario == 1 ? 0 : 1));
         assert(port.device_desc.bNumConfigurations == (scenario < 2 ? 6 : 4));
         if (scenario == 4) assert(probe_clock - started >= CARPLAY_CONFIG_ACTIVATE_TIMEOUT_MS);
@@ -257,6 +261,18 @@ int main(void)
     struct usbh_hubport h = {0}; h.mutex = &h;
     s_usb.present = true; s_usb.hport = &h;
     uint32_t epoch = rtcp_usb_lubanlite_generation();
+#ifdef RTCARPLAY_NATIVE_NCM
+    assert(rtcp_usb_lubanlite_host_ready(epoch, true));
+    assert(!activation_calls && !session_link_calls);
+    snapshot_write_begin(); snapshot_write_end();
+    assert(!rtcp_usb_lubanlite_host_ready(epoch, true));
+    epoch = rtcp_usb_lubanlite_generation();
+    assert(rtcp_usb_lubanlite_host_ready(epoch, false));
+    s_usb.present = false;
+    assert(!rtcp_usb_lubanlite_host_ready(epoch, true));
+    assert(!activation_calls && !session_link_calls);
+    puts("native NCM: CarKit cannot activate IPHETH; stale generations rejected");
+#else
     assert(rtcp_usb_lubanlite_host_ready(epoch, true));
     assert(activation_calls == 1 && activation_ready && activation_port == &h);
     assert(session_link_calls == 1 && session_link_ready);
@@ -272,6 +288,7 @@ int main(void)
     assert(!rtcp_usb_lubanlite_host_ready(epoch, true));
     assert(activation_calls == 2);
     assert(session_link_calls == 2);
+#endif
     s_usb.hport = NULL;
     pipe.mutex = &pipe;
     struct usb_endpoint_descriptor ep = {.bEndpointAddress = 0x85};

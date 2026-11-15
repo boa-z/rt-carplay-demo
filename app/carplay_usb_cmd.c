@@ -48,6 +48,9 @@
 #include "rtcp/stream.h"
 #include "rtcp/usb.h"
 #include "usbmux_host.h"
+#ifdef RTCARPLAY_NATIVE_NCM
+#include "native_ncm.h"
+#endif
 
 #ifdef LPKG_RT_CARPLAY_LUBANLITE_USB
 
@@ -584,8 +587,13 @@ static int cmd_pair(void)
         return 0;
     }
     bool current = rtcp_usb_lubanlite_host_ready(s_network_generation, true);
+#ifdef RTCARPLAY_NATIVE_NCM
+    rt_kprintf("[carplay_usb] host_session=%s wired_network=ncm-exclusive; IPHETH inactive\n",
+               current ? "ready" : "stale");
+#else
     rt_kprintf("[carplay_usb] network activation: host_session=%s policy=usb-session-v1; Carrier/RX remain observed\n",
                current ? "ready" : "stale");
+#endif
     if (!cacheable) cacheable = pair_cache_path(cache_path, sizeof(cache_path));
     if (cacheable && !config.resume_pairing) {
         int saved = carplay_usb_pair_cache_save(cache_path, &s_pair_record);
@@ -624,6 +632,7 @@ typedef struct {
     bool identified;
     bool authenticated;
     unsigned events;
+    unsigned protocol_records;
     bool airplay_unavailable_logged;
     char ip_address[64];
     carplay_app_wired_info_t endpoint;
@@ -652,6 +661,7 @@ static void iap2_usb_reset(unsigned stop_generation)
     s_iap2_usb.identified = false;
     s_iap2_usb.authenticated = false;
     s_iap2_usb.events = 0U;
+    s_iap2_usb.protocol_records = 0U;
     s_iap2_usb.airplay_unavailable_logged = false;
     memset(s_iap2_usb.ip_address, 0, sizeof(s_iap2_usb.ip_address));
     memset(&s_iap2_usb.endpoint, 0, sizeof(s_iap2_usb.endpoint));
@@ -722,6 +732,69 @@ static bool iap2_usb_get_airplay(iap2_session_airplay_t *out, void *context)
                link->ip_address, (unsigned)info->airplay_port);
     return true;
 }
+
+#ifdef RTCARPLAY_WIRED_PROTOCOL_TRACE
+#include "iap2_parameter.h"
+static void iap2_usb_trace_bytes(const char *label, const uint8_t *body, size_t length)
+{
+    /* Keep every print below RT_CONSOLEBUF_SIZE=128. Capture the complete
+     * ordinary availability message, but bound unusual peer values. */
+    size_t count = length > 128 ? 128 : length;
+    static const char digits[] = "0123456789abcdef";
+    rt_kprintf("[wired-csm] %s bytes=%u captured=%u truncated=%u\n", label,
+        (unsigned)length, (unsigned)count, length > count);
+    for (size_t offset = 0; offset < count; offset += 16) {
+        char hex[33];
+        size_t chunk = count - offset;
+        if (chunk > 16) chunk = 16;
+        for (size_t i = 0; i < chunk; ++i) {
+            hex[2*i] = digits[body[offset+i] >> 4];
+            hex[2*i+1] = digits[body[offset+i] & 15];
+        }
+        hex[2*chunk] = 0;
+        rt_kprintf("[wired-csm] %s offset=%u hex=%s\n", label,
+            (unsigned)offset, hex);
+    }
+}
+static void iap2_usb_observe(bool outgoing, uint16_t id,
+                              const uint8_t *body, size_t length, void *context)
+{
+    iap2_usb_link_t *link = context;
+    if (outgoing ? (id != 0x1d01 && id != 0xae03 && id != 0x4301)
+                 : (id != 0x4300 && id != 0x4e0e)) return;
+    if (link->protocol_records++ >= 16) return;
+    if (!body && length) return;
+    bool valid = iap2_param_validate(body, length);
+    rt_kprintf("[wired-csm] %s id=%04x bytes=%u tlv_valid=%u\n",
+        outgoing ? "queued" : "RX", id, (unsigned)length, valid);
+    if (!outgoing) {
+        /* Raw peer values are evidence; no invented fields or policy gates. */
+        iap2_usb_trace_bytes("raw", body, length);
+    }
+    if (!valid) return;
+    const uint8_t *group, *value; size_t group_len, size;
+    if (id == 0x4300 && iap2_param_find_single(body, length, 0, &group, &group_len)) {
+        if (iap2_param_find_single(group, group_len, 0, &value, &size) && size == 1)
+            rt_kprintf("[wired-csm] wired_available_raw=%u\n", value[0]);
+        if (iap2_param_find_single(group, group_len, 1, &value, &size))
+            iap2_usb_trace_bytes("wired_identifier_hex", value, size);
+    }
+    if (id == 0x1d01 && iap2_param_find_single(body, length, 16, &group, &group_len) &&
+        iap2_param_find_single(group, group_len, 3, &value, &size) && size == 1)
+        rt_kprintf("[wired-csm] identification_ncm_interface=%u\n", value[0]);
+    if (id == 0xae03) {
+        if (iap2_param_find_single(body, length, 0, &value, &size) && size == 2)
+            rt_kprintf("[wired-csm] available_current_ma=%u\n", ((unsigned)value[0] << 8) | value[1]);
+        if (iap2_param_find_single(body, length, 1, &value, &size) && size == 1)
+            rt_kprintf("[wired-csm] battery_should_charge=%u\n", value[0]);
+    }
+    if (id == 0x4301) {
+        for (unsigned field = 0; field <= 8; ++field)
+            if (iap2_param_find_single(body, length, field, &value, &size))
+                rt_kprintf("[wired-csm] startup_field=%u bytes=%u\n", field, (unsigned)size);
+    }
+}
+#endif
 
 static void iap2_usb_event(iap2_session_event_t event, void *context)
 {
@@ -905,6 +978,13 @@ static int cmd_iap2(void)
         return 0;
     }
     int interface_number = rtcp_usb_carplay_interface_number(&device);
+#ifdef RTCARPLAY_NATIVE_NCM
+    /* Native NCM is usable only when identity and network binding agree. */
+    if (carplay_native_ncm_interface() != interface_number || interface_number < 0) {
+        rt_kprintf("[carplay_usb] iap2: native NCM binding unavailable/mismatched\n");
+        return RTCP_ESTATE;
+    }
+#endif
     if (interface_number < 0) {
         rt_kprintf("[carplay_usb] iap2: the active configuration has no "
                    "NCM control or Apple Ethernet interface; replug the "
@@ -935,6 +1015,9 @@ static int cmd_iap2(void)
     config.wired_reinvite_delay_ms = RTCARPLAY_WIRED_REINVITE_DELAY_MS;
 #endif
     config.on_event = iap2_usb_event;
+#ifdef RTCARPLAY_WIRED_PROTOCOL_TRACE
+    config.observe_message = iap2_usb_observe;
+#endif
     config.context = &s_iap2_usb;
     config.transport = IAP2_SESSION_TRANSPORT_WIRED_USB;
     config.car_play_interface_number = (uint8_t)interface_number;
@@ -1044,6 +1127,11 @@ static int cmd_net(void)
                "apple_ethernet=%s\n",
                up ? "up" : "down", route, ncm_link ? "yes" : "no",
                apple_ethernet ? "present" : "absent");
+    rt_kprintf("[carplay_usb] net: selected_device=%s (route above describes USB configuration)\n",
+               RTCARPLAY_WIRED_NETIF);
+#ifdef RTCARPLAY_NATIVE_NCM
+    carplay_native_ncm_status();
+#endif
     if (found) {
         rt_kprintf("[carplay_usb] net: ipv6=%s (%s)\n", address,
                    valid ? "valid" : "tentative");
