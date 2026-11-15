@@ -520,6 +520,10 @@ static void demo_worker(void *argument)
                                       carplay_usb_iap2_running() && !mode_changed(); wait += 100U) {
                 carplay_app_wired_info_t endpoint;
                 if (carplay_app_wired_info(&endpoint) == RTCP_OK) { ret = RTCP_OK; break; }
+                if (wait == 5000U || wait == 10000U) {
+                    rt_kprintf("[connection] wired network waiting %u ms (before cleanup)\n", wait);
+                    carplay_usb_network_status();
+                }
                 sample_debug(); rt_thread_mdelay(100);
             }
         }

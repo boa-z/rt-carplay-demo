@@ -119,6 +119,13 @@ static void clean(void) { assert(!allocations && !semaphores && !locked); }
 static unsigned activation_calls;
 static bool activation_ready;
 static struct usbh_hubport *activation_port;
+static unsigned session_link_calls;
+static bool session_link_ready;
+void usbh_ipheth_session_link(struct usbh_hubport *hport, bool ready)
+{
+    assert(hport == activation_port);
+    ++session_link_calls; session_link_ready = ready;
+}
 void usbh_ipheth_host_ready(struct usbh_hubport *hport, bool ready)
 {
     ++activation_calls; activation_port = hport; activation_ready = ready;
@@ -159,15 +166,19 @@ int main(void)
     uint32_t epoch = rtcp_usb_lubanlite_generation();
     assert(rtcp_usb_lubanlite_host_ready(epoch, true));
     assert(activation_calls == 1 && activation_ready && activation_port == &h);
+    assert(session_link_calls == 1 && session_link_ready);
     snapshot_write_begin(); snapshot_write_end();
     assert(!rtcp_usb_lubanlite_host_ready(epoch, true));
     assert(activation_calls == 1);
+    assert(session_link_calls == 1);
     epoch = rtcp_usb_lubanlite_generation();
     assert(rtcp_usb_lubanlite_host_ready(epoch, false));
     assert(activation_calls == 2 && !activation_ready);
+    assert(session_link_calls == 2 && !session_link_ready);
     s_usb.present = false;
     assert(!rtcp_usb_lubanlite_host_ready(epoch, true));
     assert(activation_calls == 2);
+    assert(session_link_calls == 2);
     s_usb.hport = NULL;
     pipe.mutex = &pipe;
     struct usb_endpoint_descriptor ep = {.bEndpointAddress = 0x85};

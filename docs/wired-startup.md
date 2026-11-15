@@ -2,6 +2,8 @@
 
 # Wired startup and pairing performance
 
+Latest follow-up: both controlled IRQ-order images failed with status `03 03 03 00` and no first RX. See [USB session link policy](wired-session-link.md) for the separate application-owned transport policy, timeout-budget repair and pending board checks. Earlier observations below remain historical evidence.
+
 ## Observed boundary
 
 The supplied board log reports successful RSA pair-record generation in 6933 ms, followed by successful Pair, StartSession and CarKit StartService. It stops at stage 3, the application's network wait. This establishes successful trust/TLS setup; it does not establish IPHETH readiness, valid IPv6, iAP2 identification, MFi authentication or video. Earlier logs timed out at the same network stage. The excerpt does not prove which underlying network condition is absent.
@@ -67,3 +69,23 @@ A later board run reaches MFi authentication, identification and CarPlayAvailabi
 After successful Lockdown/CarKit session open, the application now publishes an optional `usbh_ipheth_host_ready` notification through its board USB adapter. The adapter captures the attachment generation before pairing and rejects stale publication after detach/rebind. This permits actual Carrier polling once RX has been submitted without inventing a first completion. Before the first RX, sends still require positive Carrier and armed RX; `rx_ready` remains observed only. Closing the session revokes the hint after the iAP2 owner has stopped. Failed owner stop retains live resources. Physical reconnect clears it. This local compatibility policy differs from Linux's default first-RX heuristic and is not asserted to be an Apple requirement or the confirmed cause of this phone's behavior. The existing 15-second network wait, IPv6 DAD, invitation pacing, single-session ownership and video pipeline remain unchanged.
 
 The host-only regression checks silent NCM/Legacy activation, Carrier down/errors, rejected RX submission, revocation during Carrier, reconnect reset and stale attachment generations. New-board acceptance remains pending. Capture startup through first picture with `ipheth_status`, `carplay_usb net`, `carplay_connection status` and `usb_ehci_status 1` if the link still stalls. The new `Activation` line reports host-session evidence, pending RX and cumulative Carrier queries separately; do not interpret it as received data. Preserve the phone unlock/trust state and avoid deleting pair records just to retry.
+
+
+## Carrier-down capture after host activation
+
+The 2026-11-14 board log confirms a reused Lockdown session, successful CarKit TLS, the host activation marker, MFi authentication, identification and CarPlayAvailability. It still reports zero RX completions, tentative IPv6 and a successful four-byte Carrier transaction decoded as down. This disproves the sufficiency of the preceding activation change; it does not identify the raw status bytes or establish a controller fault. The supplied file ends before the network timeout and subsequent Carrier samples.
+
+Startup diagnostics now print a bounded eight-byte Carrier reply with its captured length, actual control result and independently decoded status. Network status also collects read-only EHCI snapshots at initial startup, at 5 and 10 seconds while IPv6 remains unavailable, and before timeout cleanup. These diagnostics neither force carrier nor bypass IPv6 DAD, change the selected alternate/NCM mode, reset USB, or alter invitation/audio/video behavior. Save the complete output through the first `wired exit` and cleanup. Compare Carrier replies and endpoint 86 progress across snapshots. Active descriptors alone cannot distinguish a silent/NAKing phone from all controller faults; a USB capture may still be needed. This is a diagnostic candidate, not a board-verified connection repair.
+
+
+## Regression range against the accepted image
+
+The retained `output/wired-invite-recovery/gui/d213-carplay-gui.img` hashes to `a1efd44e3e714d7a9ab106a2263284105c1f3994726e66924eb24083ed0e2b51`. Its build-time source overlay matches the published parent `9da89901` for the connection owner and EHCI patch, and driver `ed797d2` for the CherryUSB class and RT-Thread adapter. Its successful log already shows RX=7/TX=9 before MFi completes; the latest failure has no initial RX completion. Fourteen SDK C/header overlay files are unchanged and the published SDK gitlink remains `894575c161ffcfaa5862a06858bb254bf2c03776`.
+
+| Later revision | Actual change | Relationship to this failure |
+| --- | --- | --- |
+| Parent `7784b996` | Retire old EHCI IAA before scanning new INT/ERR completions | Changes the controller completion lifecycle and belongs in the regression range; Host reproduction proves a lifetime defect in the older order, not that the new order works on this board. |
+| Parent `6e950099`, driver `efc664b` | Switch lwIP input from direct to queued; remove normal RX acquisition of the TX mutex | First-RX submission timing and USB/lwIP scheduling change. Queued protocol dispatch happens after USB completion, so it does not directly explain zero completions; interactions still need board isolation. |
+| Parent `fa9439c0`, driver `c117dcd` | Opt-in host-session activation before first RX, observed Carrier remains required | Added after the first no-RX failure and cannot have introduced that earlier failure. Latest log proves it did not restore the link. |
+
+The separate Carrier worker, first-RX readiness guard, concurrent iAP2/network startup and supplementary invitation policy were already present in the accepted source snapshot. They are not new regressions in this range. No board test has isolated an individual bad commit; none is declared the root cause. The proper next experiment is a same-phone/cable/power-state confirmation with the retained accepted image, followed by isolated transport changes, rather than another speculative protocol capability or forced-link change. The accepted image has separately reported music-crash/stutter issues and is a startup comparison baseline, not a stable release recommendation.

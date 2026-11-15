@@ -38,6 +38,7 @@ print('actual lwIP direct input: expected RX-context assertion reproduced')
 PY
 
 python3 "$here/check_config.py"
+python3 "$here/check_timeouts.py"
 
 cc -std=c11 -Wall -Wextra -Werror -Wno-unused-function -g \
  -fsanitize=address,undefined -fno-pie -no-pie -ffunction-sections -fdata-sections \

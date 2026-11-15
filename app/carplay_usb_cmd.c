@@ -584,7 +584,7 @@ static int cmd_pair(void)
         return 0;
     }
     bool current = rtcp_usb_lubanlite_host_ready(s_network_generation, true);
-    rt_kprintf("[carplay_usb] network activation: host_session=%s; Carrier/RX remain observed\n",
+    rt_kprintf("[carplay_usb] network activation: host_session=%s policy=usb-session-v1; Carrier/RX remain observed\n",
                current ? "ready" : "stale");
     if (!cacheable) cacheable = pair_cache_path(cache_path, sizeof(cache_path));
     if (cacheable && !config.resume_pairing) {
@@ -1088,11 +1088,13 @@ bool carplay_usb_iap2_running(void) { return s_iap2_usb.running; }
 /* Optional RT-Thread IPHETH diagnostic provider; CDC-NCM builds do not
  * need to link the Apple Ethernet class. */
 extern void ipheth_status(void) __attribute__((weak));
+extern void usbh_ehci_network_snapshot(void) __attribute__((weak));
 void carplay_usb_network_status(void)
 {
     if (!usb_call_enter()) return;
     (void)cmd_net();
     if (ipheth_status != NULL) ipheth_status();
+    if (usbh_ehci_network_snapshot != NULL) usbh_ehci_network_snapshot();
     usb_call_leave();
 }
 

@@ -7,9 +7,10 @@
 #include RTCP_CONNECTION_SOURCE
 
 enum { USB_AFTER_IDLE, WIRELESS_RESERVATION, USB_RETRY, RADIO_FAILURE,
-       ENUM_RETRY, NO_PICTURE, EVENT_LOSS, USB_START_FAILURE };
+       ENUM_RETRY, NO_PICTURE, EVENT_LOSS, USB_START_FAILURE, NO_NETWORK };
 static unsigned scenario, now, boot, radio_at, pairs, opens, starts, closes;
 static unsigned radio_starts, radio_stops, first_pair_at;
+static unsigned network_samples;
 static bool receiver, wired, radio, usb_session, seen_live;
 static jmp_buf done;
 static unsigned elapsed(void) { return now - boot; }
@@ -73,12 +74,25 @@ int carplay_usb_pair(void)
         assert(seen_live && closes && now - first_pair_at >= 1000);
         longjmp(done, 1); /* Reconnect while USB remains physically attached. */
     }
+    if (scenario == NO_NETWORK && pairs == 2) {
+        assert(!seen_live && closes && now - first_pair_at >= 15000);
+        assert(network_samples == 4); /* initial, 5s, 10s, pre-cleanup */
+        assert(status.last_error == RTCP_ETIMEDOUT);
+        longjmp(done, 1);
+    }
     usb_session = true;
     return RTCP_OK;
 }
 int carplay_usb_start_iap2(void) { assert(usb_session && !radio); return RTCP_OK; }
 bool carplay_usb_iap2_running(void) { return usb_session; }
-void carplay_usb_network_status(void) {}
+void carplay_usb_network_status(void)
+{
+    if (scenario == NO_NETWORK) {
+        static const unsigned ages[] = {0, 5000, 10000, 15000};
+        assert(network_samples < 4 && now - first_pair_at == ages[network_samples]);
+        ++network_samples;
+    }
+}
 int carplay_usb_close_session(void) { usb_session = false; ++closes; return RTCP_OK; }
 int carplay_app_autostart(void)
 {
@@ -130,7 +144,7 @@ int carplay_app_iap2_info(carplay_app_iap2_info_t *s)
 int carplay_app_wired_info(carplay_app_wired_info_t *s)
 {
     memset(s, 0, sizeof(*s)); strcpy(s->ipv6, "fe80::1234");
-    return receiver && wired ? RTCP_OK : RTCP_ESTATE;
+    return receiver && wired && scenario != NO_NETWORK ? RTCP_OK : RTCP_ESTATE;
 }
 int carplay_app_display_info(carplay_app_display_info_t *s)
 { memset(s, 0, sizeof(*s)); return RTCP_OK; }
@@ -167,12 +181,13 @@ int rtcp_bt_lubanlite_forget_bonds(void) { return RTCP_OK; }
 int main(void)
 {
     for (unsigned cycle = 0; cycle < 32; ++cycle) {
-        for (scenario = USB_AFTER_IDLE; scenario <= USB_START_FAILURE; ++scenario) {
+        for (scenario = USB_AFTER_IDLE; scenario <= NO_NETWORK; ++scenario) {
 #if !defined(RTCARPLAY_VIDEO)
             if (scenario == NO_PICTURE) continue; /* Headless has no display gate. */
 #endif
             now = boot = cycle & 1 ? UINT32_MAX - 1000U : 0;
             pairs = opens = starts = closes = radio_starts = radio_stops = 0;
+            network_samples = 0;
             receiver = radio = usb_session = seen_live = false;
             memset(&status, 0, sizeof(status));
             memset(failures, 0, sizeof(failures));

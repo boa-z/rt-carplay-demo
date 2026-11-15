@@ -157,6 +157,8 @@ static bool snapshot_read(rtcp_usb_device_t *device)
  * prevents a late pairing result from activating a replacement attachment. */
 extern void usbh_ipheth_host_ready(struct usbh_hubport *, bool)
     __attribute__((weak));
+extern void usbh_ipheth_session_link(struct usbh_hubport *, bool)
+    __attribute__((weak));
 uint32_t rtcp_usb_lubanlite_generation(void)
 {
     size_t flags = usb_osal_enter_critical_section();
@@ -171,6 +173,11 @@ bool rtcp_usb_lubanlite_host_ready(uint32_t generation, bool ready)
                    !(generation & 1U) && s_usb.sequence == generation;
     if (current && usbh_ipheth_host_ready)
         usbh_ipheth_host_ready(s_usb.hport, ready);
+    /* CarKit TLS is established on this attachment. Enable the USB network
+     * transport independently of the phone's tethering Carrier status.
+     * lwIP still performs ordinary DAD before an endpoint is advertised. */
+    if (current && usbh_ipheth_session_link)
+        usbh_ipheth_session_link(s_usb.hport, ready);
     usb_osal_leave_critical_section(flags);
     return current;
 }
