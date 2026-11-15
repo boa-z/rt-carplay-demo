@@ -134,3 +134,11 @@ SDK Make、ASan/UBSan 下 CMake 65/65 及完整集成 Host 测试通过。Python
 SDK 3d10a1e1f3b141acdbcfb570ebea49ab10817507 为手机布局/调色板的四个标识字段补充独立内嵌 NUL 消息。现有解析以 EINVAL 拒绝完整字符串，保持手机选择及序号/ACK 状态不变且没有输出。本地完整 SDK 检查通过，包含 35 条独立解码的 UI Sync 输出。这是拒绝路径覆盖补充，没有修改协议实现。
 
 [D213 编解码/图形研究](d213-ultra-feasibility.zh-CN.md)记录了实际 MPP 工厂/构建与 GE 接口、公开架构要求及待确认的硅片/运行时条件。当前路径没有 HEVC 解码入口，但不能据此证明硅片无法通过其他厂商实现支持。
+
+## 目录里程碑 CI 修正与产物核验
+
+SDK 3d10a1e1f3b141acdbcfb570ebea49ab10817507 的[两项 SDK CI 均通过](https://github.com/boa-z/rt-carplay/actions/runs/43758862128)。集成 538a7a8fa8fcda1de1c4c3a91a8fd327dcce21cf 的 [Host、GUI、Headless CI 均通过](https://github.com/boa-z/luban-lite-carplay/actions/runs/43758941951)。成功运行已取代最初失败的双语文档门禁结果，原失败不是 sanitizer 或线协议失败。
+
+三个集成产物均已下载。两份固件清单的集成/SDK 版本与上述版本完全一致，源码工作区记录均为空。每份固件产物的六项 SHA256 全部通过，每份完整镜像的九个组件边界/CRC32 检查通过。GUI 镜像 SHA256：3d055d00f507cb2ae290bf1a96652702577121b4889e761361a46c79d7b5e901。Headless 镜像 SHA256：0b9bcdcfd56e413d7ce1aee8c8139f3605cef28170907c11707f5b2ade5a991f。后续仅文档提交不会改变这些产物身份。
+
+本次下载镜像尚未刷写，已连接开发板仍运行先前记录的 1b96d3f8 镜像，没有新增自动重连、物理融合/触摸或真实 iPhone Ultra 验收结论。L0 源码研究保持 PASS，完整协议范围的 L1 仍为 PARTIAL，L2-L5 仍为 NOT_RUN。滚动 Preview Release 已跳过，本批里程碑没有发布 Release。

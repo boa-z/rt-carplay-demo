@@ -134,3 +134,11 @@ The initial inventory CI stopped at the bilingual documentation gate: the new re
 SDK 3d10a1e1f3b141acdbcfb570ebea49ab10817507 adds independent embedded-NUL fixtures for all four phone layout/palette identifier fields. Existing parsing refuses the complete strings with EINVAL, preserving phone choices and sequence/ACK state without output. The full local SDK check passed, including 35 independently decoded UI Sync outputs. This is additional rejection coverage, not a protocol implementation change.
 
 The [D213 codec/graphics review](d213-ultra-feasibility.md) records the actual MPP factory/build and GE interface evidence, the public architecture requirements and the remaining silicon/runtime questions. The current path has no HEVC decoder entry; this does not prove the silicon cannot support another vendor implementation.
+
+## Inventory CI correction and verified artifacts
+
+SDK 3d10a1e1f3b141acdbcfb570ebea49ab10817507 passed [both SDK CI jobs](https://github.com/boa-z/rt-carplay/actions/runs/43758862128). Integration 538a7a8fa8fcda1de1c4c3a91a8fd327dcce21cf passed [Host, GUI and Headless CI](https://github.com/boa-z/luban-lite-carplay/actions/runs/43758941951). These successful runs supersede the initial failed bilingual-document gate; the failure was not a sanitizer or wire-protocol failure.
+
+All three integration artifacts were downloaded. Both firmware manifests matched the exact integration/SDK revisions above and recorded clean source inventories. All six SHA256 entries per firmware artifact passed; each complete image passed nine component bounds/CRC32 checks. GUI image SHA256: 3d055d00f507cb2ae290bf1a96652702577121b4889e761361a46c79d7b5e901. Headless image SHA256: 0b9bcdcfd56e413d7ce1aee8c8139f3605cef28170907c11707f5b2ade5a991f. Documentation-only follow-up commits do not change those artifact identities.
+
+These downloaded images have not been flashed. The connected board remains on the previously recorded 1b96d3f8 image; no new automatic-reconnect, physical fusion/touch or real-iPhone Ultra result is claimed. L0 source research remains PASS, L1 remains PARTIAL for the full protocol scope, and L2-L5 remain NOT_RUN. The rolling Preview Release was skipped; no Release was published for these milestones.
