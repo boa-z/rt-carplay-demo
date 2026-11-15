@@ -182,3 +182,13 @@ GUI 镜像 SHA256：324226e2a572111d7943e743227960fecc10bc1097c4e64c2321999f29a3
 专用 Ultra 配置接入车辆侧拥有的三项内燃机模拟模型，声明匹配的 /info 目录，并显式选择手机提议的 vehicleStateProtocol。应用在 Receiver 所有者上更新模型，每次新控制器接入前刷新当前初值，先销毁 Receiver 再释放模型。carplay_status 发布复制后的模拟/协议/交付观察值。不会从发动机模型推断车速、挡位、电池 SOC、UI Sync、显示面板、HEVC 或备用视频流，参见[模型、源码映射及实机步骤](vehicle-protocol-demo.zh-CN.md)。
 
 本地完整集成 Host 套件通过，包含开启/关闭选项的实际应用启停、元数据刷新、处理器生命周期、订阅/HIGH 通知、拒绝写入，以及独立 plistlib 对目录和缺省未支持声明的验证。专用镜像 CI 检查两份固件 ELF 中实际模型/协议符号，并在验收清单记录模拟数据源。本里程碑没有新增开发板或手机验收，L0 PASS、完整范围 L1 PARTIAL、L2-L5 NOT_RUN 不变。
+
+## Vehicle State 应用 CI 与设备准备
+
+集成 aa4b325ee1dd23ee39d1a5f2b3c2ad94a07660dc，沿用 SDK d6ab43aef99f39c31bcffaab317b0352cef35136，[Host、GUI、Headless CI 全部通过](https://github.com/boa-z/luban-lite-carplay/actions/runs/43765510252)。三个产物均已下载。两份固件清单精确匹配上述版本，SDK/集成工作区记录为空，并标明 SIMULATED_ENGINE_RPM、PHONE_OFFER_REQUIRED 及 UI Sync 关闭。每份固件六项 SHA256、完整镜像九个组件边界/CRC32 检查全部通过。下载后的 ELF/config 组合也在本地通过有线配置检查器，包含实际模拟模型和协议符号。
+
+GUI 镜像 SHA256：0b4f74869c5a7d5beaf5ce8ba34d5cf40877d32376f217c1d8a68c47f3c5d269。Headless 镜像 SHA256：3b2927be7ffb8d8d15822985d5e61392944c23823f651b3b84d5daf8ea5b1b1a。没有发布 Release，滚动固件工作流已跳过；随后的仅文档提交不会改变这些镜像身份。
+
+2026-11-15 设备准备发现一个可用 ADB 文件同步设备。两次新的独立 /data 回读均得到 6 个身份/配对文件，共 51,252 字节，各文件 SHA256 相互一致，也与先前已验证备份一致。原始文件、清单和日志保留在 Git 外的受限私有设备目录。传输完成后仍未退出的客户端分别终止，没有停止 ADB 服务或串口 monitor。备份没有蓝牙 settings 文件，因此不能证明 bond 持久化或自动回连。
+
+aiburn 串口命令返回成功，但没有提供运行输出，另一次 readlog 返回没有可用串口日志，故本检查点尚未确认 Shell 可达。未执行 aicupg、刷写、重启或恢复，模拟模型尚未在 D213 上运行，开发板保留先前记录的固件。L0 PASS、完整范围 L1 PARTIAL、L2-L5 NOT_RUN 不变；进入升级模式前需要确认调试通道，设备状态变化后应重新备份。
