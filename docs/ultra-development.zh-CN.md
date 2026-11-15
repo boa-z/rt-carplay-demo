@@ -209,6 +209,6 @@ GUI 镜像 SHA256：fc31e995d7e2d793019031f535343c281297de16adaaa8e5379f259c92de
 
 ## 实验性独立备用视频传输
 
-SDK 35ac6da36ad8f433d781caaf407fb723bfa7ed78 新增公共 Receiver 显式 experimental_alt_video 开关、独立 Type 111 H.264 TCP 监听、按连接派生的密钥/nonce 周期、独立媒体回调或明确的 Null Sink，以及所有者线程状态/统计查询。备用套接字/认证失败只退役自身端点，共享已消费 ID 台账继续保留；Main 丢失保持完整控制器清理。默认 Classic 路径和专用 D213 Ultra 配置均保持开关关闭，不声明第二显示 /info、altScreen、HEVC、第二路硬解或官方渲染能力。[SDK 契约](../../../../packages/third-party/rt-carplay/docs/zh-CN/video-stream-session.md) 说明接口和剩余能力门控。
+SDK 344ce0c2a03dd545961bb11ccaa2d2805efa6954 新增公共 Receiver 显式 experimental_alt_video 开关、独立 Type 111 H.264 TCP 监听、按连接派生的密钥/nonce 周期、独立媒体回调或明确的 Null Sink，以及所有者线程状态/统计查询。备用套接字/认证失败只退役自身端点，共享已消费 ID 台账继续保留；Main 丢失保持完整控制器清理。默认 Classic 路径和专用 D213 Ultra 配置均保持开关关闭，不声明第二显示 /info、altScreen、HEVC、第二路硬解或官方渲染能力。[SDK 契约](../../../../packages/third-party/rt-carplay/docs/zh-CN/video-stream-session.md) 说明接口和剩余能力门控。
 
-本地完整 SDK Make、启用 RTCP_SANITIZE 的 CMake 69/69 项和完整集成 Host 套件通过。新增公共 Receiver 场景使用真实 Pair-Setup/Pair-Verify、加密 RTSP 及分别加密且交错发送的 Main/备用 TCP 帧，覆盖认证/初始 SETUP 门控、独立端口/Sink/计数器、Null Sink、ID 复用拒绝、过期清理、监听失败、错误密钥/认证标签/EOF 隔离、新 ID 恢复、Main 丢失清理和 stop/start 重置，随后继续 Classic 媒体/重连回归。双语文档检查通过 31 对及一个明确例外。这些属于合成 Host 传输结果，L0 PASS、完整范围 L1 PARTIAL、L2–L5 NOT_RUN 不变，本里程碑没有新增刷写或真实手机交互。
+本地完整 SDK Make、启用 RTCP_SANITIZE 的 CMake 69/69 项和完整集成 Host 套件通过。新增公共 Receiver 场景使用真实 Pair-Setup/Pair-Verify、加密 RTSP 及分别加密且交错发送的 Main/备用 TCP 帧，覆盖认证/初始 SETUP 门控、独立端口/Sink/计数器、Null Sink、ID 复用拒绝、过期清理、监听失败、仅错误就绪时避免阻塞 accept/recv、错误密钥/认证标签/EOF 隔离、新 ID 恢复、Main 丢失清理和 stop/start 重置，随后继续 Classic 媒体/重连回归。双语文档检查通过 31 对及一个明确例外。这些属于合成 Host 传输结果，L0 PASS、完整范围 L1 PARTIAL、L2–L5 NOT_RUN 不变，本里程碑没有新增刷写或真实手机交互。
