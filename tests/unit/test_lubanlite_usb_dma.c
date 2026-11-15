@@ -2,10 +2,14 @@
 #define _POSIX_C_SOURCE 200809L
 #define RTCP_USB_TRACE_IN_TIMEOUTS 1
 /* Compile the actual SDK port, including its private DMA submission helpers. */
-#include "../../platform/rtcp_usb_lubanlite.c"
+#ifndef RTCP_USB_PORT_SOURCE
+#define RTCP_USB_PORT_SOURCE "../../platform/rtcp_usb_lubanlite.c"
+#endif
+#include RTCP_USB_PORT_SOURCE
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
+int rt_kprintf(const char *format, ...) { (void)format; return 0; }
 static int submit_bulk(struct usbh_hubport *hport,
                        struct usb_endpoint_descriptor *endpoint, void *data,
                        size_t length, uint32_t timeout_ms,
@@ -27,6 +31,68 @@ static int simulate_pid, disconnect_in_submit;
 static unsigned last_pid;
 static int diagnostic_completes, diagnostic_length, diagnostic_error, diagnostic_disconnect;
 static int kill_completes;
+static bool enumeration_test, enum_expanded, enum_initial_expanded;
+static int enum_activation_result = 1;
+static unsigned enum_activations;
+static bool enum_publish, enum_reads_fail;
+static const uint8_t enum_ethernet[] = {
+    9,2,64,0,2,4,0,0x80,50,
+    9,4,0,0,2,0xff,0xfe,2,0,
+    7,5,4,2,0,2,0, 7,5,0x85,2,0,2,0,
+    9,4,2,0,0,0xff,0xfd,1,0,
+    9,4,2,1,2,0xff,0xfd,1,0,
+    7,5,5,2,0,2,0, 7,5,0x86,2,0,2,0
+};
+/* The post-transition fixture is synthetic: it represents a complete standard
+ * NCM function plus Apple Ethernet, not a captured/official Apple descriptor. */
+static const uint8_t enum_carplay[] = {
+    9,2,103,0,4,6,0,0x80,50,
+    9,4,0,0,2,0xff,0xfe,2,0,
+    7,5,4,2,0,2,0, 7,5,0x85,2,0,2,0,
+    9,4,1,0,1,2,0x0d,0,0,
+    7,5,0x86,3,16,0,9,
+    9,4,2,0,0,0x0a,0,0,0,
+    9,4,2,1,2,0x0a,0,0,0,
+    7,5,7,2,0,2,0, 7,5,0x88,2,0,2,0,
+    9,4,3,0,2,0xff,0xfd,1,0,
+    7,5,9,2,0,2,0, 7,5,0x8a,2,0,2,0
+};
+static int enum_submit(struct usbh_urb *u)
+{
+    const struct usb_setup_packet *s = u->setup;
+    assert(s && locked);
+    const uint8_t *source = NULL;
+    size_t length = 0;
+    uint8_t response[18] = {18,1};
+    if (s->bRequest == APPLE_REQUEST_CARPLAY_CONFIGS) {
+        assert(s->bmRequestType == 0xc0 && s->wIndex == 4 && s->wLength == 1);
+        ++enum_activations;
+        if (enum_activation_result < 0) return enum_activation_result;
+        if (enum_activation_result == 1 && enum_publish) enum_expanded = true;
+        length = (size_t)enum_activation_result; source = response;
+    } else {
+        assert(s->bRequest == USB_REQUEST_GET_DESCRIPTOR);
+        if ((s->wValue >> 8) == USB_DESCRIPTOR_TYPE_DEVICE) {
+            if (enum_reads_fail && enum_activations) return -USB_ERR_IO;
+            response[17] = enum_expanded ? 6 : 4;
+            source = response; length = sizeof(response);
+        } else {
+            assert((s->wValue >> 8) == USB_DESCRIPTOR_TYPE_CONFIGURATION);
+            unsigned index = s->wValue & 255;
+            static const uint8_t other[] = {9,2,9,0,0,1,0,0x80,50};
+            source = other; length = sizeof(other);
+            if (index == 3) { source = enum_ethernet; length = sizeof(enum_ethernet); }
+            if (index == 5 && enum_expanded) { source = enum_carplay; length = sizeof(enum_carplay); }
+        }
+    }
+    if (length > u->transfer_buffer_length) length = u->transfer_buffer_length;
+    if (length) memcpy(u->transfer_buffer, source, length);
+    u->actual_length = (uint32_t)length + 8;
+    u->errorcode = 0;
+    u->complete(u->arg, (int)u->actual_length);
+    return 0;
+}
+void usb_osal_msleep(uint32_t ms) { probe_clock += ms; }
 void usbh_ehci_transfer_snapshot(struct usbh_urb *u, int reason)
 {
     assert(reason == -USB_ERR_TIMEOUT && u == pending);
@@ -68,6 +134,7 @@ int usb_osal_mutex_give(usb_osal_mutex_t m)
 { assert(m && locked); locked = 0; return 0; }
 int usbh_submit_urb(struct usbh_urb *u)
 {
+    if (enumeration_test) return enum_submit(u);
     assert(locked);
     assert((uintptr_t)u->setup % 64 == 0);
     assert((uintptr_t)u->transfer_buffer % 64 == 0);
@@ -116,6 +183,35 @@ int usbh_kill_urb(struct usbh_urb *u)
     u->complete(u->arg, -USB_ERR_SHUTDOWN); return 0;
 }
 static void clean(void) { assert(!allocations && !semaphores && !locked); }
+static void test_enumeration_activation(void)
+{
+    assert(sizeof(enum_ethernet) == 64 && sizeof(enum_carplay) == 103);
+    struct usbh_bus bus = {0};
+    struct usbh_hubport port = {0};
+    port.bus = &bus; port.mutex = &port; port.connected = true;
+    port.device_desc.idVendor = APPLE_USB_VENDOR_ID;
+    s_usb.enabled = true; enumeration_test = true;
+    for (unsigned scenario = 0; scenario < 6; ++scenario) {
+        enum_initial_expanded = scenario == 1;
+        enum_expanded = enum_initial_expanded; enum_activations = 0;
+        enum_publish = scenario != 4;
+        enum_reads_fail = scenario == 5;
+        enum_activation_result = scenario == 2 ? -USB_ERR_STALL : scenario == 3 ? 0 : 1;
+        port.device_desc.bNumConfigurations = enum_expanded ? 6 : 4;
+        uint32_t started = probe_clock;
+        uint8_t selected = usbh_get_hport_active_config_index(&port);
+        printf("enumeration scenario=%u selected_index=%u mode_requests=%u configs=%u\n",
+               scenario, selected, enum_activations, port.device_desc.bNumConfigurations);
+        fflush(stdout);
+        assert(selected == (scenario < 2 ? 5 : scenario == 5 ? 0 : 3));
+        assert(enum_activations == (scenario == 1 ? 0 : 1));
+        assert(port.device_desc.bNumConfigurations == (scenario < 2 ? 6 : 4));
+        if (scenario == 4) assert(probe_clock - started >= CARPLAY_CONFIG_ACTIVATE_TIMEOUT_MS);
+        clean();
+    }
+    enumeration_test = false;
+    puts("actual enumeration: mode request before tethering fallback, fresh descriptors, existing mode, rejected/short requests, unchanged mode and lost device passed");
+}
 static unsigned activation_calls;
 static bool activation_ready;
 static struct usbh_hubport *activation_port;
@@ -320,5 +416,6 @@ int main(void)
     assert(s_usb_probe.shorts == 1 && s_usb_probe.errors == 1);
     assert(s_usb_probe.last_ep == 4 && s_usb_probe.last_actual == 8);
     clean();
+    test_enumeration_activation();
     puts("Luban-Lite DMA alignment, copy bounds and cancellation tests passed");
 }

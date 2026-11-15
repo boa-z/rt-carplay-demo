@@ -498,7 +498,8 @@ static void descriptor_emit(void *user, const char *line)
  * (ff/fd/01) is the fallback and needs its own host driver. */
 static bool find_carplay_configuration(struct usbh_hubport *hport,
                                        uint8_t configuration_count,
-                                       uint8_t *selected_index, bool dump)
+                                       uint8_t *selected_index, bool *mode_present,
+                                       bool dump)
 {
     uint8_t bus = hport->bus->busid;
     if (bus >= CONFIG_USBHOST_MAX_BUS) {
@@ -507,6 +508,8 @@ static bool find_carplay_configuration(struct usbh_hubport *hport,
     uint8_t *buffer = s_config_desc[bus];
     uint8_t best_index = 0U;
     rtcp_usb_configuration_kind_t best_kind = RTCP_USB_CONFIG_OTHER;
+    unsigned best_rank = 0U;
+    bool best_mode = false;
 
     for (uint8_t index = 0U;
          index < configuration_count && index < CARPLAY_CONFIG_SCAN_MAX;
@@ -535,14 +538,29 @@ static bool find_carplay_configuration(struct usbh_hubport *hport,
         }
         rtcp_usb_configuration_kind_t kind =
             rtcp_usb_configuration_kind(&probe);
-        if (kind > best_kind) {
+        rtcp_usb_functions_t functions;
+        rtcp_usb_classify_configuration(&probe, &functions);
+#ifndef LPKG_CHERRYUSB_HOST_NCM
+        /* Descriptors alone do not install a CDC-NCM driver. The retained
+         * target uses its independent Apple Ethernet class and i0 adapter. */
+        if (!functions.apple_ethernet) continue;
+#endif
+        /* Community implementations distinguish a full NCM + Apple Ethernet
+         * personality from a usable tethering interface. Keep the SDK's
+         * generic classification separate from this application policy. */
+        bool mode = kind == RTCP_USB_CONFIG_NCM && functions.apple_ethernet;
+        unsigned rank = (mode ? 4U : 0U) + (unsigned)kind;
+        if (kind != RTCP_USB_CONFIG_OTHER && rank > best_rank) {
             best_kind = kind;
             best_index = index;
+            best_rank = rank;
+            best_mode = mode;
         }
     }
 
     if (best_kind != RTCP_USB_CONFIG_OTHER) {
         *selected_index = best_index;
+        if (mode_present) *mode_present = best_mode;
         return true;
     }
     return false;
@@ -566,7 +584,7 @@ static uint8_t read_configuration_count(struct usbh_hubport *hport)
     return descriptor[17];
 }
 
-static void request_carplay_configurations(struct usbh_hubport *hport)
+static int request_carplay_configurations(struct usbh_hubport *hport)
 {
     uint8_t response = 0U;
     int ret = control_transfer_timeout(
@@ -577,6 +595,9 @@ static void request_carplay_configurations(struct usbh_hubport *hport)
     if (ret < 0) {
         USB_LOG_WRN("CarPlay config request failed:%d\r\n", ret);
     }
+    USB_LOG_INFO("CarPlay mode request 0x52: data_bytes=%d response=%02x\r\n",
+                 ret, response);
+    return ret;
 }
 
 /*
@@ -593,18 +614,33 @@ uint8_t usbh_get_hport_active_config_index(struct usbh_hubport *hport)
 
     uint8_t selected = 0U;
     uint8_t count = hport->device_desc.bNumConfigurations;
+    bool mode_present = false;
     /* Enumeration still reads all candidates; full descriptor rendering is
      * available through 'carplay_usb desc' instead of every reconnect. */
-    if (find_carplay_configuration(hport, count, &selected, false)) {
-        USB_LOG_INFO("CarPlay configuration already present: index %u\r\n",
+    bool fallback = find_carplay_configuration(hport, count, &selected,
+                                                &mode_present, false);
+    if (fallback && mode_present) {
+        USB_LOG_INFO("CarPlay composite mode already present: index %u\r\n",
                      selected);
         s_usb.last_configuration_index = selected;
         return selected;
     }
 
-    USB_LOG_INFO("Apple device reports %u configurations, requesting CarPlay\r\n",
-                 count);
-    request_carplay_configurations(hport);
+    USB_LOG_INFO("Apple device reports %u configurations; wired_fallback=%u, "
+                 "requesting CarPlay mode before class bind\r\n", count, fallback);
+    int activation = request_carplay_configurations(hport);
+    if (activation != 1) {
+        /* Old/locked phones can reject the community mode request. Retain
+         * a usable descriptor-backed path; no guessed configuration number. */
+        if (fallback && hport->connected) {
+            s_usb.last_configuration_index = selected;
+            USB_LOG_WRN("CarPlay mode request not accepted; trying wired fallback index %u\r\n",
+                        selected);
+            return selected;
+        }
+        s_usb.last_configuration_index = 0U;
+        return 0U;
+    }
 
     unsigned failures = 0U;
     for (uint32_t elapsed = 0U;
@@ -616,23 +652,33 @@ uint8_t usbh_get_hport_active_config_index(struct usbh_hubport *hport)
             if (++failures >= CARPLAY_READ_FAILURE_LIMIT) {
                 USB_LOG_WRN("Device stopped answering while waiting for "
                             "CarPlay configurations\r\n");
+                fallback = false;
                 break;
             }
             continue;
         }
         failures = 0U;
         count = refreshed;
-        if (find_carplay_configuration(hport, count, &selected, false)) {
+        hport->device_desc.bNumConfigurations = count;
+        fallback = find_carplay_configuration(hport, count, &selected,
+                                               &mode_present, false);
+        if (fallback && mode_present) {
             /* Keep the enumeration record consistent with what the phone now
              * reports; the log and later users see the updated count. */
             hport->device_desc.bNumConfigurations = count;
-            USB_LOG_INFO("CarPlay configuration index %u selected\r\n",
+            USB_LOG_INFO("CarPlay activated configuration index %u selected\r\n",
                          selected);
             s_usb.last_configuration_index = selected;
             return selected;
         }
     }
 
+    if (fallback && hport->connected) {
+        s_usb.last_configuration_index = selected;
+        USB_LOG_WRN("CarPlay composite mode not observed; trying refreshed wired fallback index %u\r\n",
+                    selected);
+        return selected;
+    }
     USB_LOG_WRN("CarPlay configuration did not appear; using config 0\r\n");
     s_usb.last_configuration_index = 0U;
     return 0U;
