@@ -78,12 +78,13 @@ ipheth_status
 | `RTCARPLAY_BT` / `RTCARPLAY_IAP2` | Bluetooth RFCOMM 和无线 iAP2 |
 | `RTCARPLAY_MFI` | 板级 MFi 2.0C Provider |
 | `RTCARPLAY_VIDEO` | MPP H.264 和宿主持有的显示策略 |
-| `RTCARPLAY_AUDIO` | 既有 sound0 输出，音频行为冻结 |
-| `RTCARPLAY_MICROPHONE` | dmic0 上行，仍需物理麦克风验证 |
+| `RTCARPLAY_AUDIO` | sound0 输出，含媒体缓冲和共享时钟保护 |
+| `RTCARPLAY_MICROPHONE` | dmic0 上行，需要装机声学验证 |
+| `RTCARPLAY_MIC_AEC` | GUI 启用队列对齐的 AEC，支持运行时对比/校准 |
 | `RTCARPLAY_TOUCH_PANEL` | 独占面板 Reader 和 CarPlay HID 路由 |
 | `RTCARPLAY_SCREEN_WIDTH/HEIGHT` | 1024 / 600，与面板一致 |
 
-Pinmux、时钟和分区布局归属[板级目录](../../../target/d21x/demo128-nand-carplay/)。修改媒体或输入时同时核对板级和应用配置。Launcher V2 未改变协议协商、Jitter、Mixer/Direct、加密麦克风上行和 AEC 行为，音频路由问题有独立 SDK 交接。
+Pinmux、时钟和分区布局归属[板级目录](../../../target/d21x/demo128-nand-carplay/)。修改媒体或输入时同时核对板级和应用配置。Launcher V2 保留了此前音频行为，后续[音频恢复](docs/zh-CN/audio-recovery.md)修改应用缓冲、时钟保护及 AEC 集成，不改变可移植 SDK 协议或编解码行为。
 
 ## 测试与文档
 
@@ -96,6 +97,10 @@ Host 测试在 ASan/UBSan 下运行实际源码，调度和设备边界使用模
 
 | 文档 | 范围 |
 | --- | --- |
+| [有线启动与配对](docs/zh-CN/wired-startup.md) | CarKit 与网络同时启动、延迟邀请、RSA 优化及实机检查 |
+| [mbedTLS 4.x 评估](docs/zh-CN/mbedtls-upgrade-assessment.md) | MPI 测量证据、迁移成本及性能边界 |
+| [媒体与传输修复](docs/zh-CN/media-transport-repair.md) | 替换的音乐、回声与有线传输修改及验收边界 |
+| [音频恢复](docs/zh-CN/audio-recovery.md) | 通话回声、音乐调度、运行时诊断和实机验收 |
 | [Ethernet 互联网共享](docs/zh-CN/internet-sharing.md) | 可选 IPv4 网关、协议证据、恢复和必需的 iPhone 验收 |
 | [V2 验证](docs/zh-CN/v2-verification.md) | 已验证版本、CI、IMG 校验值和剩余实机验收 |
 | [连接管理器](docs/zh-CN/connection-manager.md) | 仲裁、重试、设置、所有权和 Headless 行为 |

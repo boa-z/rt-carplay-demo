@@ -6,9 +6,18 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
+static int submit_bulk(struct usbh_hubport *hport,
+                       struct usb_endpoint_descriptor *endpoint, void *data,
+                       size_t length, uint32_t timeout_ms,
+                       struct usb_bulk_state *state)
+{
+    return dma_transfer(hport,endpoint,NULL,data,length,timeout_ms,state,
+                         state ? state->generation : 0U);
+}
 static uint32_t probe_clock, lock_delay;
 uint32_t rt_tick_get_millisecond(void) { return probe_clock; }
 static int allocations, semaphores, locked, fail_alloc, fail_sem;
+static usb_osal_mutex_t last_mutex;
 static int submit_error, timeout, kill_error, short_by, extra, kills;
 static struct usbh_urb *pending;
 static struct usb_dma_transfer *allocation;
@@ -32,6 +41,7 @@ void usbh_ehci_transfer_snapshot(struct usbh_urb *u, int reason)
 }
 
 static int critical;
+usb_osal_mutex_t usb_osal_mutex_create(void) { static int locks[2]; static unsigned n; return &locks[n++%2]; }
 size_t usb_osal_enter_critical_section(void) { assert(!critical); critical = 1; return 0; }
 void usb_osal_leave_critical_section(size_t flags) { (void)flags; assert(critical); critical = 0; }
 void *rt_malloc_align(size_t n, size_t align)
@@ -53,7 +63,7 @@ int usb_osal_sem_give(usb_osal_sem_t s) { *(int *)s = 1; return 0; }
 int usb_osal_sem_take(usb_osal_sem_t s, uint32_t ms)
 { assert(ms); if (!*(int *)s) probe_clock += ms; return *(int *)s ? 0 : -USB_ERR_TIMEOUT; }
 int usb_osal_mutex_take(usb_osal_mutex_t m)
-{ assert(m && !locked); probe_clock += lock_delay; locked = 1; return 0; }
+{ assert(m && !locked); last_mutex=m; probe_clock += lock_delay; locked = 1; return 0; }
 int usb_osal_mutex_give(usb_osal_mutex_t m)
 { assert(m && locked); locked = 0; return 0; }
 int usbh_submit_urb(struct usbh_urb *u)
@@ -138,6 +148,7 @@ int main(void)
     assert(!s_usb.enabled); /* Manual bring-up retains its opt-in behavior. */
 #endif
     struct usbh_hubport h = {0}; h.mutex = &h;
+    pipe.mutex = &pipe;
     struct usb_endpoint_descriptor ep = {.bEndpointAddress = 0x85};
     uint8_t bytes[200]; uint8_t *unaligned = bytes + 1;
     memset(bytes, 0x37, sizeof(bytes));
@@ -188,7 +199,7 @@ int main(void)
     }
     /* IN and OUT maintain separate state. Repeated IN short replies carry
      * the HCD's returned toggle into the next allocated URB too. */
-    struct usb_bulk_state in_pipe = {0};
+    struct usb_bulk_state in_pipe = {.mutex = &in_pipe};
     ep.bEndpointAddress = 0x85;
     for (unsigned i = 0; i < 2; ++i) {
         assert(submit_bulk(&h, &ep, unaligned, 20, 100, &in_pipe) == 20);
@@ -253,11 +264,17 @@ int main(void)
     kill_completes = 0; timeout = 0;
     /* Public USBMUX IN operation follows usbmuxd's 16 KiB USB_MRU. */
     s_usb.present = true; s_usb.hport = &h; s_usb.mux_in = 0x85;
+    if (!s_usb.mux_in_state.mutex) s_usb.mux_in_state.mutex = usb_osal_mutex_create();
     s_usb.mux_in_desc = ep; s_usb.mux_in_desc.bEndpointAddress = 0x85;
     static uint8_t large[32768]; memset(large, 0x37, sizeof(large));
     simulate_pid = 0;
     assert(lubanlite_bulk_transfer(NULL, 0x85, large, sizeof(large), 100) == 16384);
     assert(large[16383] == 0xa5 && large[16384] == 0x37); clean();
+    assert(last_mutex==s_usb.mux_in_state.mutex && last_mutex!=h.mutex);
+    uint32_t old_generation=s_usb.mux_in_state.generation++;
+    assert(dma_transfer(&h,&s_usb.mux_in_desc,NULL,large,20,100,
+                         &s_usb.mux_in_state,old_generation)==RTCP_ESTATE);
+    clean(); /* Reused port address cannot revive an old queued request. */
     /* Distinguish waiting for the shared mutex from holding it across idle
      * Bulk IN. Counters must not change delivery, cancellation or ownership. */
     memset(&s_usb_probe, 0, sizeof(s_usb_probe));

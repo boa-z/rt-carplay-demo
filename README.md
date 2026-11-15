@@ -78,12 +78,13 @@ The `rt-carplay application` menu owns board options; generic SDK options have o
 | `RTCARPLAY_BT` / `RTCARPLAY_IAP2` | Bluetooth RFCOMM and wireless iAP2 |
 | `RTCARPLAY_MFI` | Board MFi 2.0C provider |
 | `RTCARPLAY_VIDEO` | MPP H.264 and host-owned display policy |
-| `RTCARPLAY_AUDIO` | Existing sound0 output, with frozen audio behavior |
-| `RTCARPLAY_MICROPHONE` | dmic0 uplink; physical microphone verification still required |
+| `RTCARPLAY_AUDIO` | sound0 output with media buffering and shared-clock protection |
+| `RTCARPLAY_MICROPHONE` | dmic0 uplink; installed acoustic verification required |
+| `RTCARPLAY_MIC_AEC` | GUI enables queue-aligned AEC with runtime comparison/calibration |
 | `RTCARPLAY_TOUCH_PANEL` | Exclusive panel reader and CarPlay HID routing |
 | `RTCARPLAY_SCREEN_WIDTH/HEIGHT` | 1024 / 600, matching the panel |
 
-Pinmux, clocks and partition layout belong to [the board](../../../target/d21x/demo128-nand-carplay/). Verify board and application configuration together when changing media or input. Protocol negotiation, jitter, Mixer/Direct, encrypted microphone uplink and AEC behavior were not changed for Launcher V2; audio-routing issues have their own SDK handoff.
+Pinmux, clocks and partition layout belong to [the board](../../../target/d21x/demo128-nand-carplay/). Verify board and application configuration together when changing media or input. Launcher V2 preserved the prior audio behavior. The subsequent [audio recovery](docs/audio-recovery.md) changes application buffering, clock protection and AEC integration; portable SDK protocol and codec behavior remain unchanged.
 
 ## Test and documentation
 
@@ -96,6 +97,10 @@ The host suite runs actual sources with ASan/UBSan and modeled scheduling/device
 
 | Document | Scope |
 | --- | --- |
+| [Wired startup and pairing](docs/wired-startup.md) | Concurrent CarKit/network startup, deferred invitation, RSA optimization and board checks |
+| [mbedTLS 4.x assessment](docs/mbedtls-upgrade-assessment.md) | Measured MPI evidence, migration costs and performance limits |
+| [Media and transport repair](docs/media-transport-repair.md) | Replacement music, echo and wired transport changes; acceptance boundaries |
+| [Audio recovery](docs/audio-recovery.md) | Call echo, music scheduling, runtime diagnostics and board acceptance |
 | [Ethernet Internet sharing](docs/internet-sharing.md) | Optional IPv4 gateway, protocol evidence, recovery and required iPhone acceptance |
 | [V2 verification](docs/v2-verification.md) | Verified revisions, CI, IMG checksums and remaining board acceptance |
 | [Connection manager](docs/connection-manager.md) | Arbitration, retry, settings, ownership and Headless behavior |

@@ -15,7 +15,7 @@ AUDIO_LIBS := $(RTCP_BUILD)/audio-deps/librtcp_faad.a $(RTCP_BUILD)/audio-deps/l
 LDLIBS := $(AUDIO_LIBS) -lm
 CPPFLAGS += $(addprefix -I$(RTCP_ROOT)/,include core core/mfi core/iap2/include core/airplay/include core/crypto/include core/media/include core/input/include core/discovery/include core/usb/include core/audio/include port/rtthread/include third_party/ed25519 port/linux/include third_party/mbedtls/include config) -Iapp -Iplatform
 CPPFLAGS += -DRTCP_AUDIO_CODECS -DMBEDTLS_CONFIG_FILE='"mbedtls_rtcp_host.h"'
-BOARD_BINS := $(addprefix $(BUILD)/,test_audio_diagnostics test_audio_input test_audio_sink test_pairing_files test_rtthread_app)
+BOARD_BINS := $(addprefix $(BUILD)/,test_audio_diagnostics test_audio_capture test_audio_input test_audio_input_aec test_audio_sink test_pairing_files test_rtthread_app)
 export RTCP_ROOT
 $(BUILD):
 	@mkdir -p $@
@@ -24,7 +24,7 @@ sdk-libraries:
 	$(MAKE) -C $(RTCP_ROOT) $(patsubst $(RTCP_ROOT)/%,%,$(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS))
 $(BOARD_BINS): | sdk-libraries $(BUILD)
 $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS): sdk-libraries
-check: $(BOARD_BINS) check-auto-connections check-internet-share
+check: $(BOARD_BINS) check-auto-connections check-internet-share check-udp-burst
 	@set -e; for t in $(BOARD_BINS); do ./$$t; done
 	$(MAKE) check-lubanlite-video check-lubanlite-touch check-lubanlite-demo check-lubanlite-bonds check-lubanlite-usb check-lubanlite-handoff check-lubanlite-reconnect check-lubanlite-capabilities check-iap2-endpoints check-usb-iap2-worker check-wireless-iap2-worker
 
@@ -173,11 +173,17 @@ $(BUILD)/test_audio_diagnostics: tests/unit/test_audio_diagnostics.c platform/au
 	$(CC) $(CFLAGS) $(CPPFLAGS) -DRTCARPLAY_MICROPHONE -Itests/support/lubanlite_audio -Iplatform -o $@ $< $(LIB) $(MBEDTLS_LIB) $(LDLIBS) -lpthread
 
 # Actual board sink with a pthread-backed RT-Thread/device seam.
+$(BUILD)/test_audio_capture: tests/unit/test_audio_capture.c platform/rtcp_audio_capture_lubanlite.c | $(BUILD)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -Itests/support/lubanlite_audio -o $@ $<
+
 $(BUILD)/test_audio_sink: tests/unit/test_audio_sink.c platform/audio_sink_lubanlite.c tests/support/lubanlite_audio/rtthread_host.c $(LIB) $(MBEDTLS_LIB)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -Itests/support/lubanlite_audio -o $@ $< tests/support/lubanlite_audio/rtthread_host.c $(LIB) $(MBEDTLS_LIB) $(LDLIBS) -lpthread
+	$(CC) $(CFLAGS) $(CPPFLAGS) -DRTCARPLAY_MICROPHONE -Itests/support/lubanlite_audio -o $@ $< tests/support/lubanlite_audio/rtthread_host.c $(LIB) $(MBEDTLS_LIB) $(LDLIBS) -lpthread
 
 $(BUILD)/test_audio_input: tests/unit/test_audio_input.c platform/audio_input_lubanlite.c tests/support/lubanlite_audio/rtthread_host.c $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -Itests/support/lubanlite_audio -Iplatform -o $@ $< tests/support/lubanlite_audio/rtthread_host.c $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(LDLIBS) -lpthread
+
+$(BUILD)/test_audio_input_aec: tests/unit/test_audio_input.c platform/audio_input_lubanlite.c platform/audio_echo_reference.h tests/support/lubanlite_audio/rtthread_host.c $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -DRTCARPLAY_MIC_AEC -DRTCARPLAY_MIC_AEC_DELAY_MS=0 -Itests/support/lubanlite_audio -Iplatform -o $@ $< tests/support/lubanlite_audio/rtthread_host.c $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(LDLIBS) -lpthread
 
 
 -include $(wildcard $(BUILD)/*.d)
@@ -189,3 +195,7 @@ check-usb-iap2-worker: sdk-libraries
 .PHONY: check-wireless-iap2-worker
 check-wireless-iap2-worker: sdk-libraries
 	python3 tests/run_wireless_iap2_worker.py
+
+.PHONY: check-udp-burst
+check-udp-burst:
+	sh tests/udp_burst/run.sh $(abspath $(BUILD))/udp-burst

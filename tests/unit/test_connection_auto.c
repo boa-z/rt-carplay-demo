@@ -78,6 +78,7 @@ int carplay_usb_pair(void)
 }
 int carplay_usb_start_iap2(void) { assert(usb_session && !radio); return RTCP_OK; }
 bool carplay_usb_iap2_running(void) { return usb_session; }
+void carplay_usb_network_status(void) {}
 int carplay_usb_close_session(void) { usb_session = false; ++closes; return RTCP_OK; }
 int carplay_app_autostart(void)
 {

@@ -67,6 +67,8 @@
 struct usb_bulk_state {
     uint8_t data_toggle;
     uint32_t generation;
+    /* Persistent across attachment generations; never shares the EP0 lock. */
+    usb_osal_mutex_t mutex;
 };
 
 typedef struct {
@@ -260,22 +262,33 @@ static int dma_transfer(struct usbh_hubport *hport,
                         const struct usb_endpoint_descriptor *endpoint,
                         const struct usb_setup_packet *setup, void *data,
                         size_t length, uint32_t timeout_ms,
-                        struct usb_bulk_state *pipe)
+                        struct usb_bulk_state *pipe, uint32_t generation)
 {
     if (!hport || (!endpoint && !setup) || (length && !data))
         return RTCP_EINVAL;
     if (length > INT32_MAX ||
         length > SIZE_MAX - sizeof(struct usb_dma_transfer) -
                      (CONFIG_USB_ALIGN_SIZE - 1U)) return RTCP_EINVAL;
-    uint32_t generation = pipe ? pipe->generation : 0U;
+    usb_osal_mutex_t mutex = pipe ? pipe->mutex : hport->mutex;
+    if (!mutex) return RTCP_ESTATE;
+    uint32_t probe_start = usbh_control_probe_now_ms();
+    usb_osal_mutex_take(mutex);
+    uint32_t probe_locked = usbh_control_probe_now_ms();
+    /* Disconnect first withdraws publication, then drains both pipe locks
+     * before CherryUSB may destroy the port. A queued old caller must not
+     * dereference a released port after acquiring its persistent pipe lock. */
+    if ((pipe == &s_usb.mux_in_state || pipe == &s_usb.mux_out_state) &&
+        (!s_usb.present || s_usb.hport != hport || pipe->generation != generation)) {
+        usb_osal_mutex_give(mutex); return RTCP_ESTATE;
+    }
     size_t padded = (length + CONFIG_USB_ALIGN_SIZE - 1U) &
                     ~(size_t)(CONFIG_USB_ALIGN_SIZE - 1U);
     struct usb_dma_transfer *t = rt_malloc_align(sizeof(*t) + padded,
                                                 CONFIG_USB_ALIGN_SIZE);
-    if (!t) return RTCP_ENOMEM;
+    if (!t) { usb_osal_mutex_give(mutex); return RTCP_ENOMEM; }
     memset(t, 0, sizeof(*t) + padded);
     t->done = usb_osal_sem_create(0U);
-    if (!t->done) { rt_free_align(t); return RTCP_ENOMEM; }
+    if (!t->done) { rt_free_align(t); usb_osal_mutex_give(mutex); return RTCP_ENOMEM; }
     bool input = endpoint ? (endpoint->bEndpointAddress & USB_REQUEST_DIR_IN) != 0U
                           : (setup->bmRequestType & USB_REQUEST_DIR_IN) != 0U;
     if (length && !input) memcpy(t->data, data, length);
@@ -292,9 +305,6 @@ static int dma_transfer(struct usbh_hubport *hport,
         t->endpoint = *t->urb.ep;
         t->urb.ep = &t->endpoint;
     }
-    uint32_t probe_start = usbh_control_probe_now_ms();
-    usb_osal_mutex_take(hport->mutex);
-    uint32_t probe_locked = usbh_control_probe_now_ms();
     /* Serialize read/submit/write of the endpoint toggle. Reject detected
      * generation changes and suppress stale toggle updates after reconnect. */
     size_t flags = usb_osal_enter_critical_section();
@@ -361,7 +371,7 @@ static int dma_transfer(struct usbh_hubport *hport,
     }
     if (pipe && pipe->generation != generation) ret = RTCP_ESTATE;
     uint32_t probe_end = usbh_control_probe_now_ms();
-    usb_osal_mutex_give(hport->mutex);
+    usb_osal_mutex_give(mutex);
     if (endpoint) {
         flags = usb_osal_enter_critical_section();
         usb_probe_add(input ? &s_usb_probe.in_wait : &s_usb_probe.out_wait,
@@ -403,7 +413,7 @@ static int control_transfer_timeout(struct usbh_hubport *hport,
     };
     return dma_transfer(hport, NULL, &setup, data, length,
                          timeout_ms ? timeout_ms :
-                         CONFIG_USBHOST_CONTROL_TRANSFER_TIMEOUT, NULL);
+                         CONFIG_USBHOST_CONTROL_TRANSFER_TIMEOUT, NULL, 0U);
 }
 
 static bool read_config_descriptor(struct usbh_hubport *hport, uint8_t index,
@@ -679,6 +689,11 @@ static bool endpoint_descriptor_from_info(const rtcp_usb_endpoint_t *info,
 
 static int carplay_usbmux_connect(struct usbh_hubport *hport, uint8_t intf)
 {
+    if (!s_usb.mux_in_state.mutex)
+        s_usb.mux_in_state.mutex = usb_osal_mutex_create();
+    if (!s_usb.mux_out_state.mutex)
+        s_usb.mux_out_state.mutex = usb_osal_mutex_create();
+    if (!s_usb.mux_in_state.mutex || !s_usb.mux_out_state.mutex) return -1;
     (void)intf;
     if (!s_usb.enabled || hport == NULL ||
         hport->device_desc.idVendor != APPLE_USB_VENDOR_ID ||
@@ -790,6 +805,15 @@ static int carplay_usbmux_disconnect(struct usbh_hubport *hport, uint8_t intf)
     snapshot_write_end();
 
     ++s_usb.detach_count;
+    /* The persistent locks drain DMA owners before core releases hport. */
+    if (s_usb.mux_in_state.mutex) {
+        usb_osal_mutex_take(s_usb.mux_in_state.mutex);
+        usb_osal_mutex_give(s_usb.mux_in_state.mutex);
+    }
+    if (s_usb.mux_out_state.mutex) {
+        usb_osal_mutex_take(s_usb.mux_out_state.mutex);
+        usb_osal_mutex_give(s_usb.mux_out_state.mutex);
+    }
     USB_LOG_INFO("CarPlay USB detached\r\n");
 
     rtcp_usb_event_cb_t callback = s_usb.callback;
@@ -861,49 +885,35 @@ static int lubanlite_control_transfer(void *context, uint8_t request_type,
                                     index, data, length, timeout_ms);
 }
 
-static int submit_bulk(struct usbh_hubport *hport,
-                       struct usb_endpoint_descriptor *endpoint, void *data,
-                       size_t length, uint32_t timeout_ms,
-                       struct usb_bulk_state *pipe)
-{
-    return dma_transfer(hport, endpoint, NULL, data, length,
-                         timeout_ms ? timeout_ms : 1000U, pipe);
-}
-
 static int lubanlite_bulk_transfer(void *context, uint8_t endpoint, void *data,
                                    size_t length, uint32_t timeout_ms)
 {
     (void)context;
-    if (!s_usb.present || s_usb.hport == NULL || data == NULL) {
-        return RTCP_ESTATE;
+    if (!data) return RTCP_ESTATE;
+    size_t flags = usb_osal_enter_critical_section();
+    if (!s_usb.present || !s_usb.hport) {
+        usb_osal_leave_critical_section(flags); return RTCP_ESTATE;
     }
-
-    if (endpoint == s_usb.mux_in) {
-        /* usbmuxd USB_MRU=16384: use packet-aligned bounded USB reads and
-         * let the mux reassembler join frames across transfers. */
-        if (length > 16384U) length = 16384U;
-        return submit_bulk(s_usb.hport, &s_usb.mux_in_desc, data, length,
-                           timeout_ms, &s_usb.mux_in_state);
+    bool input = endpoint == s_usb.mux_in;
+    if (!input && endpoint != s_usb.mux_out) {
+        usb_osal_leave_critical_section(flags); return RTCP_ENOTSUP;
     }
-    if (endpoint != s_usb.mux_out) {
-        return RTCP_ENOTSUP;
-    }
-
-    int ret = submit_bulk(s_usb.hport, &s_usb.mux_out_desc, data, length,
-                          timeout_ms, &s_usb.mux_out_state);
-    if (ret < 0) {
-        return ret;
-    }
-    /* A bulk OUT transfer that ends exactly on a packet boundary needs a
-     * zero-length packet, otherwise the device keeps waiting for the rest of
-     * the transfer (LIVI's UsbWriter does the same). */
-    if (length != 0U && s_usb.mux_out_packet_size != 0U &&
-        (length % s_usb.mux_out_packet_size) == 0U) {
-        int zlp = submit_bulk(s_usb.hport, &s_usb.mux_out_desc, NULL, 0U,
-                              timeout_ms, &s_usb.mux_out_state);
-        if (zlp < 0) {
-            return zlp;
-        }
+    struct usbh_hubport *hport = s_usb.hport;
+    struct usb_bulk_state *pipe = input ? &s_usb.mux_in_state : &s_usb.mux_out_state;
+    uint32_t generation = pipe->generation;
+    struct usb_endpoint_descriptor descriptor = input ? s_usb.mux_in_desc : s_usb.mux_out_desc;
+    uint16_t packet_size = s_usb.mux_out_packet_size;
+    usb_osal_leave_critical_section(flags);
+    /* Capture identity and descriptor together before waiting for ownership.
+     * A reused hport address is not proof of the same attachment generation. */
+    if (input && length > 16384U) length = 16384U;
+    int ret = dma_transfer(hport,&descriptor,NULL,data,length,
+                           timeout_ms ? timeout_ms : 1000U,pipe,generation);
+    if (ret < 0 || input) return ret;
+    if (length && packet_size && length % packet_size == 0) {
+        int zlp = dma_transfer(hport,&descriptor,NULL,NULL,0,
+                               timeout_ms ? timeout_ms : 1000U,pipe,generation);
+        if (zlp < 0) return zlp;
     }
     return ret;
 }

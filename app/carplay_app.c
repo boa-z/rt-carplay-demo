@@ -926,7 +926,7 @@ static void poll_thread(void *argument)
     while (!s_receiver_stop) {
         if (app->mdns != NULL) {
             int mdns_result = mdns_responder_poll_ex(
-                app->mdns, &rtcp_net_rtthread, 10, mdns_packet_sink, app);
+                app->mdns, &rtcp_net_rtthread, 0, mdns_packet_sink, app);
             if (mdns_result < 0 && app->mdns_errors < 3U) {
                 ++app->mdns_errors;
                 APP_LOG("mDNS poll failed rc=%d", mdns_result);
@@ -938,8 +938,8 @@ static void poll_thread(void *argument)
         /* In wired mode wait for socket readiness, not a fixed sleep before
          * each recv. Screen headers and bodies need separate readable polls;
          * pacing every fragment by 10 ms caps throughput and builds latency. */
-        (void)rtcp_receiver_poll(app->receiver,
-                                      app->mdns == NULL ? 10 : 0);
+        /* Wait on session sockets, never on an unrelated mDNS socket. */
+        (void)rtcp_receiver_poll(app->receiver, 10);
         /* Snapshot on the owner thread; the shell never dereferences a
          * screen server that the protocol loop may tear down. */
         uint32_t sample_ms = (uint32_t)app->os.now_ms();
@@ -1824,6 +1824,10 @@ static int carplay_status_owned(int argc, char **argv)
                (unsigned)timing.send_errors, (unsigned)timing.timeouts);
     rt_kprintf("carplay audio transport: streams=%u datagrams=%u auth_failures=%u\n",
                audio.active_streams,audio.datagrams,audio.auth_failures);
+    rt_kprintf("audio receive: delivered=%u sink_rejected=%u malformed=%u replay=%u\n",
+               audio.delivered,audio.sink_rejected,audio.malformed,audio.replay_drops);
+    rt_kprintf("audio receive: seq_missing=%u reordered=%u poll_gap_max_us=%u\n",
+               audio.sequence_missing,audio.sequence_reordered,audio.poll_gap_max_us);
     rt_kprintf("carplay audio modes: entity=%s%u call=%u speech=%d\n",
                modes.has_main_audio ? "" : "unknown/",modes.main_audio_entity,
                modes.call_active ? 1U : 0U,modes.has_speech ? modes.speech_mode : -1);
@@ -1832,6 +1836,9 @@ static int carplay_status_owned(int argc, char **argv)
                modes.has_screen ? "" : "unknown/", modes.screen_entity,
                modes.has_screen_permanent ? "" : "unknown/", modes.screen_permanent_entity);
     carplay_audio_sink_diagnostics();
+#if defined(RTCARPLAY_MICROPHONE)
+    carplay_audio_input_status();
+#endif
     int volume = carplay_audio_sink_volume_percent();
     if (volume >= 0) {
         rt_kprintf("carplay audio speaker volume: %d%%\n", volume);

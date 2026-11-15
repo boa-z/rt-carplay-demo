@@ -87,6 +87,16 @@ config RTCARPLAY_WIRED_NETIF
       RT-Thread Ethernet device used for wired IPv6, e.g. i0 for external
       cherryusb-ipheth or u1 for CDC-NCM. No private driver API is required.
 
+config RTCARPLAY_WIRED_REINVITE_DELAY_MS
+    int "One wired startup invitation retry delay (ms, 0 disables)"
+    default 10000
+    range 0 60000
+    depends on RTCARPLAY_USB_HOST
+    help
+      Application compatibility policy: send one additional StartSession
+      after this wait if no AirPlay TCP connection has been accepted.
+      Not an Apple protocol timeout. No periodic invitation loop is used.
+
 config RTCARPLAY_SCREEN_WIDTH
     int "AirPlay display width (must match the panel)"
     default 1024
@@ -144,17 +154,18 @@ config RTCARPLAY_MICROPHONE
       This does not claim tuned acoustic echo cancellation.
 
 config RTCARPLAY_MIC_AEC
-    bool "Experimental acoustic echo cancellation (requires delay calibration)"
+    bool "Call acoustic echo cancellation (verify installed acoustic path)"
     default n
     depends on RTCARPLAY_MICROPHONE && LPKG_RT_CARPLAY_AUDIO_CODECS
     help
-      SpeexDSP fixed-point AEC with the actual output mix as far-end reference.
-      Must be calibrated on the installed speaker/microphone path. Host tests
-      verify aligned synthetic echo attenuation, not acoustic performance.
+      SpeexDSP fixed-point AEC with queued DAC presentation and capture DMA
+      timestamps. Runtime carplay_mic aec on/off and delay commands allow
+      comparison and residual delay calibration. Verify installed acoustics;
+      Host tests do not establish vehicle echo performance.
 
 config RTCARPLAY_MIC_AEC_DELAY_MS
-    int "Speaker-to-microphone reference delay (ms)"
-    default 30
+    int "Residual acoustic reference delay after queue compensation (ms)"
+    default 0
     range 0 200
     depends on RTCARPLAY_MIC_AEC
 

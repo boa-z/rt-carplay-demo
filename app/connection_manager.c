@@ -508,8 +508,16 @@ static void demo_worker(void *argument)
         ret = carplay_usb_pair();
         if (ret == RTCP_OK) {
             publish(DEMO_NETWORK, 0);
+            /* CarKit iAP2 identification/MFi must run while USB networking
+             * comes up. Waiting for IPHETH/DAD before reading the CarKit
+             * stream can prevent the phone from progressing its transport. */
+            ret = carplay_usb_start_iap2();
+            carplay_usb_network_status();
+        }
+        if (ret == RTCP_OK && !mode_changed()) {
             ret = RTCP_ETIMEDOUT;
-            for (unsigned wait = 0; wait < 15000U && carplay_usb_attached() && !mode_changed(); wait += 100U) {
+            for (unsigned wait = 0; wait < 15000U && carplay_usb_attached() &&
+                                      carplay_usb_iap2_running() && !mode_changed(); wait += 100U) {
                 carplay_app_wired_info_t endpoint;
                 if (carplay_app_wired_info(&endpoint) == RTCP_OK) { ret = RTCP_OK; break; }
                 sample_debug(); rt_thread_mdelay(100);
@@ -517,13 +525,18 @@ static void demo_worker(void *argument)
         }
         if (ret == RTCP_OK && !mode_changed()) {
             publish(DEMO_CONNECT, 0);
-            ret = carplay_usb_start_iap2();
         }
         if (ret == RTCP_OK) {
             ret = RTCP_ETIMEDOUT;
             for (unsigned wait = 0; wait < 90000U && carplay_usb_attached() &&
                                       carplay_usb_iap2_running() && !mode_changed(); wait += 200U) {
                 sample_debug();
+                if (wait == 5000U || wait == 15000U || wait == 30000U) {
+                    rt_kprintf("[connection] wired waiting %u ms: TCP=%u authenticated=%u session=%u\n",
+                        wait, status.receiver.transport_connected,
+                        status.receiver.authenticated, status.receiver.session_established);
+                    carplay_usb_network_status();
+                }
                 if (carplay_app_pairing_storage_error() != RTCP_OK) { ret = RTCP_EIO; break; }
                 unsigned frames = displayed_frames();
                 if (frames != 0U) { ret = RTCP_OK; break; }
@@ -543,6 +556,9 @@ static void demo_worker(void *argument)
                 sample_debug(); rt_thread_mdelay(250);
             }
         }
+        rt_kprintf("[connection] wired exit stage=%u rc=%d attached=%u mode_changed=%u\n",
+            (unsigned)status.stage, ret, carplay_usb_attached(), mode_changed());
+        if (ret != RTCP_OK) carplay_usb_network_status();
         sample_debug();
         close_session();
         if (mode_changed()) continue;

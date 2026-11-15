@@ -64,10 +64,12 @@ int carplay_usb_pair(void) {
     return mode == 1 ? RTCP_EIO : RTCP_OK;
 }
 int carplay_usb_start_iap2(void) {
-    assert(net_checks >= 2 && status.stage == DEMO_CONNECT);
+    /* Simulate a phone that starts Ethernet only after CarKit is serviced. */
+    assert(net_checks == 0 && status.stage == DEMO_NETWORK);
     return 0;
 }
 bool carplay_usb_iap2_running(void) { return true; }
+void carplay_usb_network_status(void) {}
 int carplay_usb_close_session(void) {
     ++closes;
     if (mode == 2 && closes == 1) return RTCP_ETIMEDOUT;

@@ -43,6 +43,12 @@ typedef struct {
 static carplay_app_iap2_info_t wireless;
 static carplay_app_wired_info_t wired;
 static bool available = true;
+static bool tcp_connected, state_available = true;
+int carplay_app_session_state(rtcp_receiver_state_t *out) {
+    memset(out, 0, sizeof(*out));
+    out->transport_connected = tcp_connected;
+    return state_available ? RTCP_OK : RTCP_ESTATE;
+}
 int carplay_app_iap2_info(carplay_app_iap2_info_t *out) {
     memset(out, 0, sizeof(*out));
     if (!available) return RTCP_ESTATE;
@@ -84,6 +90,13 @@ int main(void) {
     assert(usb_airplay.device_identifier == usb.endpoint.device_id);
     assert(usb_airplay.public_key == usb.endpoint.public_key_hex);
     assert(usb_airplay.ip_address == usb.ip_address);
+    assert(!usb_airplay.transport_connected);
+    tcp_connected = true;
+    assert(iap2_usb_get_airplay(&usb_airplay, &usb));
+    assert(usb_airplay.transport_connected);
+    state_available = false;
+    assert(!iap2_usb_get_airplay(&usb_airplay, &usb));
+    state_available = true;
     /* Retained pointers must survive provider return and source retirement. */
     memset(&wireless, 0, sizeof(wireless)); memset(&wired, 0, sizeof(wired));
     assert(!strcmp(wifi.ssid, "ownership-fixture"));

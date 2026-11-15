@@ -12,6 +12,8 @@ bool carplay_usb_attached(void);
 int carplay_usb_pair(void);
 int carplay_usb_start_iap2(void);
 bool carplay_usb_iap2_running(void);
+/* Read-only USB network diagnostics in an ordinary worker thread. */
+void carplay_usb_network_status(void);
 int carplay_usb_close_session(void);
 
 int carplay_usb_trust_cache_status(void);

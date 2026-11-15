@@ -8,4 +8,5 @@
 #define AUDIO_CTL_STOP 6
 #define AUDIO_TYPE_MIXER 7
 #define AUDIO_MIXER_VOLUME 8
+#define AUDIO_CTL_GETAVAIL 9
 struct rt_audio_caps { int main_type, sub_type; union { struct { unsigned samplerate,channels,samplebits; } config; int value; } udata; };

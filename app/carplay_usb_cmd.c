@@ -531,6 +531,7 @@ static int cmd_pair(void)
     config.open_connection = lockdown_open_connection;
     config.close_connection = lockdown_close_connection;
     config.sleep_ms = lockdown_sleep;
+    config.now_ms = lockdown_now_ms;
     config.rng = lockdown_rng;
     config.label = "rt-carplay";
     config.record = &s_pair_record;
@@ -675,8 +676,8 @@ static bool iap2_usb_tx(const uint8_t *bytes, size_t length, void *context)
  * 'carplay_start wired': its IPv6 listener is up, and the address advertised
  * here is the NCM netif's link-local.  The receiver owns the address query,
  * so the iAP2 session never talks to lwIP.  When the receiver is not running
- * (or DAD has not completed) the invite is withheld once rather than claiming
- * an unreachable endpoint; identification and MFi still complete.
+ * (or DAD has not completed) the pending invite waits for a valid endpoint;
+ * identification and MFi still complete while the SDK retries that invite.
  */
 static bool iap2_usb_get_airplay(iap2_session_airplay_t *out, void *context)
 {
@@ -686,9 +687,8 @@ static bool iap2_usb_get_airplay(iap2_session_airplay_t *out, void *context)
     if (carplay_app_wired_info(&snapshot) != RTCP_OK) {
         if (!link->airplay_unavailable_logged) {
             link->airplay_unavailable_logged = true;
-            rt_kprintf("[carplay_usb] iap2: no wired AirPlay endpoint yet; "
-                       "run 'carplay_start wired' and check 'carplay_usb "
-                       "net'. 0x4301 is not sent\n");
+            rt_kprintf("[carplay_usb] iap2: waiting for valid wired IPv6; "
+                       "0x4301 deferred, identification/MFi continue\n");
         }
         return false;
     }
@@ -710,6 +710,9 @@ static bool iap2_usb_get_airplay(iap2_session_airplay_t *out, void *context)
     /* Wired sessions ignore mdns_ready; keep the field meaningful anyway. */
     out->mdns_ready = true;
     out->event_connected = info->airplay_connected;
+    rtcp_receiver_state_t state;
+    if (carplay_app_session_state(&state) != RTCP_OK) return false;
+    out->transport_connected = state.transport_connected;
     rt_kprintf("[carplay_usb] iap2: wired AirPlay endpoint [%s]:%u\n",
                link->ip_address, (unsigned)info->airplay_port);
     return true;
@@ -743,6 +746,15 @@ static void iap2_usb_event(iap2_session_event_t event, void *context)
             break;
         case IAP2_SESSION_EVENT_CARPLAY_INVITE_SENT:
             rt_kprintf("[carplay_usb] iap2: CarPlayStartSession sent\n");
+            break;
+        case IAP2_SESSION_EVENT_CARPLAY_REINVITE_SENT:
+            rt_kprintf("[carplay_usb] iap2: CarPlayStartSession startup retry sent (no TCP)\n");
+            break;
+        case IAP2_SESSION_EVENT_CARPLAY_INVITE_ACKED:
+            rt_kprintf("[carplay_usb] iap2: CarPlayStartSession link ACK (not AirPlay acceptance)\n");
+            break;
+        case IAP2_SESSION_EVENT_CARPLAY_AVAILABILITY_RECEIVED:
+            rt_kprintf("[carplay_usb] iap2: CarPlayAvailability received\n");
             break;
         case IAP2_SESSION_EVENT_LINK_READY:
             rt_kprintf("[carplay_usb] iap2: link ready\n");
@@ -901,6 +913,9 @@ static int cmd_iap2(void)
     }
     config.tx = iap2_usb_tx;
     config.get_airplay = iap2_usb_get_airplay;
+#ifdef RTCARPLAY_WIRED_REINVITE_DELAY_MS
+    config.wired_reinvite_delay_ms = RTCARPLAY_WIRED_REINVITE_DELAY_MS;
+#endif
     config.on_event = iap2_usb_event;
     config.context = &s_iap2_usb;
     config.transport = IAP2_SESSION_TRANSPORT_WIRED_USB;
@@ -1063,6 +1078,17 @@ int carplay_usb_start_iap2(void)
 }
 
 bool carplay_usb_iap2_running(void) { return s_iap2_usb.running; }
+
+/* Optional RT-Thread IPHETH diagnostic provider; CDC-NCM builds do not
+ * need to link the Apple Ethernet class. */
+extern void ipheth_status(void) __attribute__((weak));
+void carplay_usb_network_status(void)
+{
+    if (!usb_call_enter()) return;
+    (void)cmd_net();
+    if (ipheth_status != NULL) ipheth_status();
+    usb_call_leave();
+}
 
 int carplay_usb_close_session(void)
 {
