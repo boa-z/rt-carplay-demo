@@ -218,3 +218,11 @@ SDK 344ce0c2a03dd545961bb11ccaa2d2805efa6954 新增公共 Receiver 显式 experi
 SDK 344ce0c2a03dd545961bb11ccaa2d2805efa6954 通过 [sanitizer Host 及双语文档 CI](https://github.com/boa-z/rt-carplay/actions/runs/43771017888)，集成 b15c1c9c2acae83003f618f7c5eb573556518d48 通过 [Host、GUI 和 Headless CI](https://github.com/boa-z/luban-lite-carplay/actions/runs/43771086125)。三份产物全部下载，两份固件清单与准确源码版本、干净源码清单匹配；每份固件的 6 项 SHA256 和完整镜像 9 个组件的边界/CRC32 检查均通过。两组下载的 ELF/config 在本地通过有线配置及模拟模型检查。下载的 Host 日志确认两种加密备用视频场景均执行成功。
 
 GUI 镜像 SHA256：cef23d88e9f745603f342320517df6b8ea0f23dde899c5b7d3c36f1cfd709ddc。Headless 镜像 SHA256：e9b8b1430161c72a8460742b7948230b2f891f6559d22f5697ed852040a0c8f1。清单继续标记 SIMULATED_ENGINE_RPM、PHONE_OFFER_REQUIRED 和 UI Sync 禁用，应用未启用实验性备用视频。两份镜像均未刷写，滚动 Preview Release 已跳过。此纯文档补充不改变镜像身份，L0 PASS、完整范围 L1 PARTIAL、L2–L5 NOT_RUN 不变。
+
+## 可选 Vehicle State 服务级 Control
+
+SDK d0a15bbd4312df82dca208ef3cb2b519cc91c357 为已有 Vehicle State 处理器增加[具类型的服务级 Control](../../../../packages/third-party/rt-carplay/docs/zh-CN/vehicle-controls.md)。宿主显式提供命令 IID/type、已有服务、请求/响应模式及纯准备/编码后提交回调。模型复制目录和参数，畸形批次在准备前拒绝，未知 IID 沿用参考值 -6735，仅在完整响应编码成功后调用执行回调，响应保留/重试复用现有 Receiver 交付路径。不推测真实车辆映射、执行器、图像包或命令，D213 模拟发动机配置仍不注册 Control。
+
+本地完整 SDK Make、启用 RTCP_SANITIZE 的 CMake 72/72 项、完整集成 Host 套件及双语文档检查（32 对、一个明确例外）通过。独立 Python OPACK/plistlib 检查验证输入、响应、服务元数据及重排/不匹配目录拒绝。加密公共 Receiver 场景在 Normal/HIGH 执行 Control，拒绝含后续畸形命令的批次且不提交前一个命令，保持 HIGH 读取、新 seed 重开及 Classic 媒体/重连回归。合成命令执行不能证明真实 iPhone 或执行器动作，L0 PASS、完整范围 L1 PARTIAL、L2–L5 NOT_RUN 不变。
+
+新的只读设备检查发现 COM9 仍注册，一次 aiburn 命令返回缓冲运行文本，但没有确认的 shell 提示符或有效显示状态；后续正确的 carplay_display status 查询没有运行输出，升级接口未发现 USB 升级设备。这些观察不能确认板卡健康状态或 shell 不可用原因。原始输出存放于 Git 外的私有设备目录，没有进入升级模式、刷写、复位、修改配对文件或进行手机交互。实机验收仍需先确认调试通道，并在刷写前重新备份和核对配对文件。
