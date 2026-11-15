@@ -30,7 +30,7 @@ D213 已有应用融合所需的 MPP H.264 与 DE 硬件图层路径，但这不
 | ui_sync.rs | OPACK 内嵌 binary plist，包含 type/ssn/psn/asn、reset、版本协商至 2、reset 完成、command 和 ACK；支持布局/调色板/外观/焦点、错误 session 过滤及 reopen。不能据此证明完整逐帧合成器、重传队列或序号窗口/超时策略。 |
 | native/crates/livi-core/src/projection/theme_catalog.rs | 解析目录/包元数据、package.json/theme.json、ZIP、显示/布局/调色板/zones 并缓存。JWT payload 提取和元数据解析不能单独证明完整资产真实性校验。 |
 
-静态检查发现 info.rs 有 15 个测试标记，vehicle_state/tests.rs 有 27 个，ui_sync.rs 有一个综合测试，覆盖元数据、配置/读/订阅/写/通知，以及 reset/版本/布局/ACK/焦点/session/reopen，另有隧道与合成主题测试。此处未执行 LIVI 测试，测试存在不代表 iPhone 或开发板实测通过。
+2026-11-15，在 Ubuntu 24.04/WSL、Rust/Cargo 1.100.0 及 OpenSSL 3.0.13 下执行 cargo test --locked -p livi-cp --lib，原始 LIVI 的全部 179 个测试通过，包括 15 个 info、27 个 Vehicle State、一个 UI Sync 综合测试及四个 iAP 隧道测试，覆盖元数据、配置/读/订阅/写/通知、reset/版本/布局/ACK/焦点/session/reopen 及双向封包。[选取的原始测试输出](../../../../packages/third-party/rt-carplay/docs/evidence/livi-cp-host-20261115.txt)记录精确参考版本和环境，源码与 Cargo.lock 未改动。Windows 无法编译 livi-base 的 Unix 文件权限 API，因此没有执行参考测试。命令不包含 livi-core 的 theme_catalog 测试，后者保持 NOT_RUN。这些属于参考项目 Host 结果，不是 iPhone 或开发板证据。
 
 ## SDK 里程碑与后续协议工作
 
@@ -41,6 +41,8 @@ Windows GUI 与 Headless 配置均已使用 SDK f67b10d 重新构建，编译、
 SDK 里程碑 83984a1165e1550d813d9edce6c0458bcc1c271c 新增公共 Receiver 传输注册/发送/状态 API，以及 Vehicle State 普通/高优先级和 UI Sync UUID 的 Type 130 路由，要求宿主显式注册、初始手机能力提议、完成 Pair-Verify 及加密控制连接。并行通道各自拥有独立端口、ID、方向密钥、队列及生命周期。监听失败也消耗 salt，已关闭的 salt 不能在同一会话的这些通道、屏幕、音频及 iAP 间复用。处理选择性/全部 Type 130 关闭及旧就绪事件，保留其他媒体。可移植 poll 容量为 24，可覆盖全部可选端点。边界和回调归属见 SDK 基础文档。
 
 独立加密 Host 控制器通过公共及兼容 Receiver 配置完成三通道 TCP 交互，覆盖能力/认证门控、重复 SETUP、跨类型/媒体 salt 冲突、监听失败消耗、新 seed 重开、错误认证标签隔离，以及重连时清理未连接监听器。SDK Make、应用 Host 回归及 59/59 个 CTest 用例通过；Windows GUI/Headless 编译、有线配置及完整镜像全部九个组件边界/CRC32 检查通过。这些属于模拟传输包体，不能作为真实 Vehicle State/UI Sync 应用交互或 iPhone 证据。
+
+SDK 路由里程碑通过了[对应 CI](https://github.com/boa-z/rt-carplay/actions/runs/43740826579)。集成版本 3a9e363d35040d9720df8d899028f78dc9c514c5 通过了 [Host 及两个固件任务](https://github.com/boa-z/luban-lite-carplay/actions/runs/43740941965)。下载的 GUI/Headless 产物通过全部 SHA256、源码身份/干净清单检查和九个完整镜像组件检查，Preview Release 任务已跳过。
 
 D213 配置仍不注册新增应用协议，使用原有仅接收 iAP 路径。Vehicle State 处理器尚未连接 Receiver 或 /info，UI Sync 尚未实现。后续为 Vehicle State 应用/通知集成、由完整处理器门控的能力声明及 UI Sync binary-plist 状态/ACK。开发开关不会增加 HEVC、displayPanels、altScreen 或未完成车辆/UI 能力。SDK 不依赖 LVGL、MPP、DE 或 D213。
 
