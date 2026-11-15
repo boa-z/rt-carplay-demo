@@ -44,7 +44,7 @@ SDK 里程碑 83984a1165e1550d813d9edce6c0458bcc1c271c 新增公共 Receiver 传
 
 SDK 路由里程碑通过了[对应 CI](https://github.com/boa-z/rt-carplay/actions/runs/43740826579)。集成版本 3a9e363d35040d9720df8d899028f78dc9c514c5 通过了 [Host 及两个固件任务](https://github.com/boa-z/luban-lite-carplay/actions/runs/43740941965)。下载的 GUI/Headless 产物通过全部 SHA256、源码身份/干净清单检查和九个完整镜像组件检查，Preview Release 任务已跳过。
 
-D213 配置仍不注册新增应用协议，使用原有仅接收 iAP 路径。Vehicle State 处理器尚未连接 Receiver 或 /info，UI Sync 尚未实现。后续为 Vehicle State 应用/通知集成、由完整处理器门控的能力声明及 UI Sync binary-plist 状态/ACK。开发开关不会增加 HEVC、displayPanels、altScreen 或未完成车辆/UI 能力。SDK 不依赖 LVGL、MPP、DE 或 D213。
+D213 配置仍不注册新增应用协议，使用原有仅接收 iAP 路径。SDK 已支持将 Vehicle State 处理器显式接入 Receiver，但尚未组合对应 /info 声明，UI Sync 尚未实现。后续为由完整处理器门控的能力声明及 UI Sync binary-plist 状态/ACK。开发开关不会增加 HEVC、displayPanels、altScreen 或未完成车辆/UI 能力。SDK 不依赖 LVGL、MPP、DE 或 D213。
 
 ## 专用开发配置与产物
 
@@ -85,10 +85,16 @@ FULLSCREEN 保留原有 Main Display。FUSION 将 MPP 视频直接由 DE 缩放�
 | 等级 | 状态 | 仍需证据 |
 | --- | --- | --- |
 | L0 | 初步源码研究 PASS | 本文区分代码、未运行参考测试和官方产品要求，后续协议研究继续。 |
-| L1 | PARTIAL | 显示/OPACK/Vehicle State/注册 Type 130 传输 Host 测试通过，尚缺 Vehicle State 应用集成和 UI Sync。 |
+| L1 | PARTIAL | 显示/OPACK/Vehicle State/注册 Type 130 传输 Host 测试通过；Vehicle State Receiver 集成已有加密 Host 覆盖，尚缺能力声明门控和 UI Sync。 |
 | L2 | NOT_RUN | 实现并实测 D213 FULLSCREEN/FUSION/LOCAL、输入、回连及性能。 |
 | L3 | NOT_RUN | 真实 iPhone Ultra 能力协商。 |
 | L4 | NOT_RUN | 真实 iPhone Vehicle State 和 UI Sync 交互。 |
 | L5 | NOT_RUN | 可选独立 Type 111 sink 及接收。 |
 
 完整官方 Ultra 产品验收保持 NOT_RUN。只有发现实际协议、授权或硬件限制才记为 BLOCKED。已有 Classic 实机检查单独限定范围，不据此提升任何 Ultra 等级。
+
+## Vehicle State 应用节点
+
+SDK 现可通过 Receiver 配置显式接入 Vehicle State 处理器，注册两条认证通道，管理响应/通知重试、选择性通道替换及认证边界订阅清理。加密模拟控制器场景验证 config/read/write/register、HIGH 通知及 Classic 媒体共存，独立原始 UI 后端仍可使用。专门故障测试覆盖队列耗尽与额外写入前拒绝；发送状态提供待发字节、重试及放弃计数。这是 Host 应用协议证据，不代表 L3/L4 或官方 Ultra 验收。D213 应用仍未接入车辆处理器，不声明新的 Vehicle State/UI Sync 能力。
+
+2026-11-15 验证通过：完整 SDK Make 测试、ASan/UBSan 下 CMake 61/61 测试、完整集成 Host 测试，以及原生 Windows GUI/Headless 镜像构建与九组件范围/CRC 校验。整数步长校验改用精确整数取模，消除当前 RISC-V 工具链缺少的 long-double libm 入口。SDK 版本 5c15c3699368585508d28dc284620dda988402f1 通过[对应 GitHub CI](https://github.com/boa-z/rt-carplay/actions/runs/43743788364)。本地提交前产物保留未提交源码清单，CI 生成与确定版本对应的干净产物。尚未刷写新镜像。
