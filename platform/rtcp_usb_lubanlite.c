@@ -152,6 +152,29 @@ static bool snapshot_read(rtcp_usb_device_t *device)
     return false;
 }
 
+/* Optional external driver policy, not an SDK protocol dependency. Keeping
+ * the epoch check and nonblocking publication under the OSAL critical section
+ * prevents a late pairing result from activating a replacement attachment. */
+extern void usbh_ipheth_host_ready(struct usbh_hubport *, bool)
+    __attribute__((weak));
+uint32_t rtcp_usb_lubanlite_generation(void)
+{
+    size_t flags = usb_osal_enter_critical_section();
+    uint32_t generation = s_usb.sequence;
+    usb_osal_leave_critical_section(flags);
+    return generation;
+}
+bool rtcp_usb_lubanlite_host_ready(uint32_t generation, bool ready)
+{
+    size_t flags = usb_osal_enter_critical_section();
+    bool current = s_usb.present && s_usb.hport &&
+                   !(generation & 1U) && s_usb.sequence == generation;
+    if (current && usbh_ipheth_host_ready)
+        usbh_ipheth_host_ready(s_usb.hport, ready);
+    usb_osal_leave_critical_section(flags);
+    return current;
+}
+
 static uint8_t map_speed(uint8_t cherryusb_speed)
 {
     switch (cherryusb_speed) {

@@ -475,6 +475,7 @@ static bool pair_cache_path(char *path, size_t capacity)
     return written > 0 && (size_t)written < capacity;
 }
 
+static uint32_t s_network_generation;
 static int cmd_pair(void)
 {
     static rtcp_usb_device_t device;
@@ -485,6 +486,7 @@ static int cmd_pair(void)
                    "'carplay_usb unpair' first\n");
         return 0;
     }
+    s_network_generation = rtcp_usb_lubanlite_generation();
     ret = rtcp_usb_lubanlite.ops->get_device(rtcp_usb_lubanlite.context,
                                              &device);
     if (ret != RTCP_OK) {
@@ -581,6 +583,9 @@ static int cmd_pair(void)
                    (unsigned)s_mux.reassembly_length);
         return 0;
     }
+    bool current = rtcp_usb_lubanlite_host_ready(s_network_generation, true);
+    rt_kprintf("[carplay_usb] network activation: host_session=%s; Carrier/RX remain observed\n",
+               current ? "ready" : "stale");
     if (!cacheable) cacheable = pair_cache_path(cache_path, sizeof(cache_path));
     if (cacheable && !config.resume_pairing) {
         int saved = carplay_usb_pair_cache_save(cache_path, &s_pair_record);
@@ -984,6 +989,7 @@ static int cmd_unpair(void)
                    "alive; retry 'carplay_usb iap2stop'\n");
         return 0;
     }
+    (void)rtcp_usb_lubanlite_host_ready(s_network_generation, false);
     rtcp_lockdown_session_close(&s_lockdown_session);
     memset(&s_lockdown_session, 0, sizeof(s_lockdown_session));
     rt_kprintf("[carplay_usb] unpair: session closed\n");
@@ -1097,6 +1103,7 @@ int carplay_usb_close_session(void)
         usb_call_leave();
         return RTCP_ETIMEDOUT;
     }
+    (void)rtcp_usb_lubanlite_host_ready(s_network_generation, false);
     rtcp_lockdown_session_close(&s_lockdown_session);
     memset(&s_lockdown_session, 0, sizeof(s_lockdown_session));
     usb_call_leave();

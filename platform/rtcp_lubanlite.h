@@ -51,6 +51,10 @@ bool rtcp_lubanlite_wired_ipv6(char *address, size_t capacity, bool *valid);
  * Runs from 'carplay_usb desc [request]'.
  */
 void rtcp_usb_lubanlite_dump_configurations(bool request_carplay);
+/* Board-only external activation hint, bound to the current USB epoch.
+ * Capture before opening Lockdown; a stale/detached epoch is rejected. */
+uint32_t rtcp_usb_lubanlite_generation(void);
+bool rtcp_usb_lubanlite_host_ready(uint32_t generation, bool ready);
 
 /*
  * Realtek RTL8733BS SoftAP through the Luban-Lite Wi-Fi API.  Vendor IE

@@ -116,6 +116,13 @@ int usbh_kill_urb(struct usbh_urb *u)
     u->complete(u->arg, -USB_ERR_SHUTDOWN); return 0;
 }
 static void clean(void) { assert(!allocations && !semaphores && !locked); }
+static unsigned activation_calls;
+static bool activation_ready;
+static struct usbh_hubport *activation_port;
+void usbh_ipheth_host_ready(struct usbh_hubport *hport, bool ready)
+{
+    ++activation_calls; activation_port = hport; activation_ready = ready;
+}
 int main(void)
 {
 #if defined(RTCARPLAY_AUTO_CONNECT)
@@ -148,6 +155,20 @@ int main(void)
     assert(!s_usb.enabled); /* Manual bring-up retains its opt-in behavior. */
 #endif
     struct usbh_hubport h = {0}; h.mutex = &h;
+    s_usb.present = true; s_usb.hport = &h;
+    uint32_t epoch = rtcp_usb_lubanlite_generation();
+    assert(rtcp_usb_lubanlite_host_ready(epoch, true));
+    assert(activation_calls == 1 && activation_ready && activation_port == &h);
+    snapshot_write_begin(); snapshot_write_end();
+    assert(!rtcp_usb_lubanlite_host_ready(epoch, true));
+    assert(activation_calls == 1);
+    epoch = rtcp_usb_lubanlite_generation();
+    assert(rtcp_usb_lubanlite_host_ready(epoch, false));
+    assert(activation_calls == 2 && !activation_ready);
+    s_usb.present = false;
+    assert(!rtcp_usb_lubanlite_host_ready(epoch, true));
+    assert(activation_calls == 2);
+    s_usb.hport = NULL;
     pipe.mutex = &pipe;
     struct usb_endpoint_descriptor ep = {.bEndpointAddress = 0x85};
     uint8_t bytes[200]; uint8_t *unaligned = bytes + 1;

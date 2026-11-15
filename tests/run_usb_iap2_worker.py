@@ -112,6 +112,12 @@ static const struct { void *context; const fake_usb_ops_t *ops; }
 static void usb_event(void) {}
 typedef struct { int closed; } fake_session_t;
 static fake_session_t s_lockdown_session;
+static uint32_t s_network_generation;
+static unsigned activation_revoked;
+static bool rtcp_usb_lubanlite_host_ready(uint32_t generation, bool ready) {
+    assert(generation == s_network_generation && !ready);
+    ++activation_revoked; return true;
+}
 static void rtcp_lockdown_session_close(fake_session_t *session) {
     assert(!s_iap2_usb.running); ++closes; session->closed = 1;
 }
@@ -185,10 +191,12 @@ int main(void) {
     hold_worker = true;
     assert(carplay_usb_close_session() == RTCP_ETIMEDOUT);
     assert(s_iap2_usb.running && s_iap2_usb.session && releases == 5 && !closes);
+    assert(!activation_revoked);
     assert(usb_call_enter()); usb_call_leave(); /* timeout releases gate only */
     hold_worker = false;
     assert(carplay_usb_close_session() == RTCP_OK);
     assert(!s_iap2_usb.running && releases == 6 && closes == 1);
+    assert(activation_revoked == 1);
 
     /* Real competing caller, while the first is blocked in modeled I/O. */
     pthread_t caller; assert(pthread_create(&caller, NULL, open_command, NULL) == 0);
