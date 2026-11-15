@@ -98,6 +98,7 @@ Host 测试在 ASan/UBSan 下运行实际源码，调度和设备边界使用模
 | 文档 | 范围 |
 | --- | --- |
 | [有线启动与配对](docs/zh-CN/wired-startup.md) | CarKit 与网络同时启动、延迟邀请、RSA 优化及实机检查 |
+| [EHCI 完成回收修复](docs/zh-CN/ehci-completion-recovery.md) | 已复现的异步推进回收缺陷、有线死机证据及验证边界 |
 | [mbedTLS 4.x 评估](docs/zh-CN/mbedtls-upgrade-assessment.md) | MPI 测量证据、迁移成本及性能边界 |
 | [媒体与传输修复](docs/zh-CN/media-transport-repair.md) | 替换的音乐、回声与有线传输修改及验收边界 |
 | [音频恢复](docs/zh-CN/audio-recovery.md) | 通话回声、音乐调度、运行时诊断和实机验收 |

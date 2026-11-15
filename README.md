@@ -98,6 +98,7 @@ The host suite runs actual sources with ASan/UBSan and modeled scheduling/device
 | Document | Scope |
 | --- | --- |
 | [Wired startup and pairing](docs/wired-startup.md) | Concurrent CarKit/network startup, deferred invitation, RSA optimization and board checks |
+| [EHCI completion recovery](docs/ehci-completion-recovery.md) | Reproduced async-advance reclamation defect, wired crash evidence and validation limits |
 | [mbedTLS 4.x assessment](docs/mbedtls-upgrade-assessment.md) | Measured MPI evidence, migration costs and performance limits |
 | [Media and transport repair](docs/media-transport-repair.md) | Replacement music, echo and wired transport changes; acceptance boundaries |
 | [Audio recovery](docs/audio-recovery.md) | Call echo, music scheduling, runtime diagnostics and board acceptance |
