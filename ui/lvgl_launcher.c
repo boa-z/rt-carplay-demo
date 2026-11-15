@@ -714,7 +714,9 @@ void carplay_demo_launcher_init(void)
     lv_obj_remove_flag(modal_scrim, LV_OBJ_FLAG_SCROLLABLE);
     settings_panel = panel(screen, 30, 25, width - 60, height - 50);
     label(settings_panel, "SETTINGS", 10, 0, 700, 0xF2F7FF, true);
-    settings_note = label(settings_panel, "Settings apply now and reset at reboot.", 10, 42, width - 140, 0x8FA5BF, false);
+    settings_note = label(settings_panel,
+        "Settings apply now and reset at reboot.",
+        10, 42, width - 140, 0x8FA5BF, false);
     wireless_setting = button(settings_panel, "Wireless discovery: ON", 10, 100, 300, toggle_wireless);
     label(settings_panel, "USB always stays enabled.\nChange discovery while idle.", 340, 103, 500, 0xC1CFDF, false);
     microphone_setting = button(settings_panel, "Microphone not enabled", 10, 182, 300, toggle_microphone);
@@ -743,6 +745,14 @@ void carplay_demo_launcher_init(void)
     label(settings_panel, "SYSTEM", 10, 280, 500, 0x58E0BF, false);
     lv_obj_t *system = label(settings_panel, "", 10, 316, width - 140, 0xC1CFDF, false);
     lv_label_set_text_fmt(system, "Launcher V2  |  ArtInChip D213  |  LVGL 9\nDisplay: %d x %d  |  One active CarPlay session", width, height);
+#endif
+    lv_obj_t *legal = label(settings_panel,
+        "Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI)",
+        10, height - 104, width - 140, 0x8FA5BF, false);
+#if LV_FONT_MONTSERRAT_14
+    lv_obj_set_style_text_font(legal, &lv_font_montserrat_14, 0);
+#else
+    (void)legal;
 #endif
     lv_obj_t *back = button(settings_panel, "Back",
                             width - 268, 388, 160, NULL);

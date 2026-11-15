@@ -6,6 +6,8 @@
 
 ## 源码所有权
 
+[Ultra 开发](docs/ultra-development.zh-CN.md)记录 LIVI 源码研究、可移植 SDK 里程碑、专用 GUI/Headless 配置、CI 产物及独立 L0-L5 验收。最终目标是完整官方 Ultra，当前配置为开发验证平台，未实现能力保持不声明。Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI)。
+
 | 目录 | 职责 |
 | --- | --- |
 | `app/` | Receiver 组合、自动连接管理器、USB/iAP2、配对与信任记录 |

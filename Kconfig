@@ -5,6 +5,15 @@ source "packages/third-party/rt-carplay/Kconfig"
 
 menu "rt-carplay application"
 
+config RTCARPLAY_ULTRA_DEMO
+    bool "CarPlay Ultra development demo"
+    default n
+    help
+      Separate development profile for portable protocol work and the D213
+      single-screen demo. Enables only capabilities implemented by this build.
+      This switch does not claim official Ultra interoperability, certification,
+      HEVC decoding, a second display, or Apple's Local UI renderer.
+
 config RTCARPLAY_USB_FILE_SYNC
     bool "Development USB file transfer (CherryUSB ADB sync only)"
     default n

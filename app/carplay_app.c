@@ -1200,6 +1200,15 @@ static int build_announcement_data(app_state_t *app)
     info.width_pixels = app->width;
     info.height_pixels = app->height;
     info.max_fps = 30U;
+#if defined(RTCARPLAY_ULTRA_DEMO)
+    /* Profile storage is consumed synchronously by the plist builder. Keep
+     * the working Main Display geometry and codec until new sinks are proven. */
+    const rtcp_display_profile_t main_profile = {
+        .struct_size = sizeof(main_profile),
+        .draw_outside_safe_area = true,
+    };
+    info.main_display_profile = &main_profile;
+#endif
 #if defined(RTCARPLAY_AUDIO)
     if (app->audio_started) {
         /* The sink can decode the compiled formats. Discovery must publish
