@@ -19,12 +19,17 @@ for variant in ('rtcarplay', 'rtcarplay_headless', 'legacy', 'aic8800'):
                 assert value, name
                 config += '#define {} {}\n'.format(name, value[1])
             expected = (64,65536)
+            assert re.search(r'^CONFIG_RT_LWIP_QUEUED_INPUT=y$', text, re.M)
+            config += '#define RT_LWIP_QUEUED_INPUT 1\n'
+            expected_input = 0
         else:
             expected = (32 if variant == 'aic8800' else 1,8192)
+            expected_input = 1
             if variant == 'aic8800': config = '#define AIC_WLAN_AIC8800D40L 1\n'
         (work/'rtconfig.h').write_text(config)
         (work/'verify.c').write_text('#include "lwipopts.h"\n'
           '_Static_assert(DEFAULT_UDP_RECVMBOX_SIZE == %u, "UDP slots");\n'
-          '_Static_assert(RECV_BUFSIZE_DEFAULT == %u, "UDP bytes");\n' % expected)
+          '_Static_assert(RECV_BUFSIZE_DEFAULT == %u, "UDP bytes");\n' % expected +
+          '_Static_assert(LWIP_TCPIP_CORE_LOCKING_INPUT == %u, "input context");\n' % expected_input)
         subprocess.run(['cc','-std=c11','-fsyntax-only','-I'+str(work),'-I'+str(port),str(work/'verify.c')],check=True)
         print('actual lwipopts {}: slots={} bytes={}'.format(variant,*expected))
