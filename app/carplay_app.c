@@ -34,6 +34,9 @@
 #include "rtcp/rtcp.h"
 #include "rtcp_lubanlite.h"
 #include "rtcp_rtthread.h"
+#if defined(RTCARPLAY_VEHICLE_PROTOCOL_DEMO)
+#include "vehicle_protocol_demo.h"
+#endif
 
 #if defined(RTCARPLAY_VIDEO)
 #include "video_sink_lubanlite.h"
@@ -207,6 +210,10 @@ typedef struct {
     mdns_responder_t *mdns;
     mdns_browser_t *browser;
     rtcp_receiver_t *receiver;
+#if defined(RTCARPLAY_VEHICLE_PROTOCOL_DEMO)
+    carplay_vehicle_protocol_demo_t vehicle_demo;
+    carplay_vehicle_protocol_snapshot_t vehicle_snapshot;
+#endif
     input_bridge_t *bridge;
     rt_mutex_t lock;
     rt_thread_t thread;
@@ -684,6 +691,10 @@ static void shutdown_stack(app_state_t *app)
         (void)rtcp_receiver_destroy(app->receiver);
         app->receiver = NULL;
     }
+#if defined(RTCARPLAY_VEHICLE_PROTOCOL_DEMO)
+    /* Receiver borrows the model until destruction. */
+    carplay_vehicle_protocol_demo_destroy(&app->vehicle_demo);
+#endif
 #if defined(RTCARPLAY_AUDIO)
     /* After the server: no PCM callback can run once it is stopped. */
     if (app->audio_started) {
@@ -939,6 +950,9 @@ static void poll_thread(void *argument)
          * each recv. Screen headers and bodies need separate readable polls;
          * pacing every fragment by 10 ms caps throughput and builds latency. */
         /* Wait on session sockets, never on an unrelated mDNS socket. */
+#if defined(RTCARPLAY_VEHICLE_PROTOCOL_DEMO)
+        int vehicle_error=carplay_vehicle_protocol_demo_tick(&app->vehicle_demo,app->os.now_ms());
+#endif
         (void)rtcp_receiver_poll(app->receiver, 10);
         /* Snapshot on the owner thread; the shell never dereferences a
          * screen server that the protocol loop may tear down. */
@@ -952,6 +966,10 @@ static void poll_thread(void *argument)
             app->audio_stats = diagnostics.audio;
             app->timing_stats = diagnostics.timing;
             app->screen_sample_ms = sample_ms;
+#if defined(RTCARPLAY_VEHICLE_PROTOCOL_DEMO)
+            carplay_vehicle_protocol_demo_snapshot(&app->vehicle_demo,app->receiver,&app->vehicle_snapshot);
+            app->vehicle_snapshot.sample_error=vehicle_error;
+#endif
             (void)rt_mutex_release(app->lock);
         }
         drain_touch(app);
@@ -1200,6 +1218,9 @@ static int build_announcement_data(app_state_t *app)
     info.width_pixels = app->width;
     info.height_pixels = app->height;
     info.max_fps = 30U;
+#if defined(RTCARPLAY_VEHICLE_PROTOCOL_DEMO)
+    info.vehicle=app->vehicle_demo.model;
+#endif
 #if defined(RTCARPLAY_ULTRA_DEMO)
     /* Profile storage is consumed synchronously by the plist builder. Keep
      * the working Main Display geometry and codec until new sinks are proven. */
@@ -1383,6 +1404,14 @@ static int carplay_app_start_owned(const carplay_app_config_t *config)
     }
 #endif
 
+#if defined(RTCARPLAY_VEHICLE_PROTOCOL_DEMO)
+    result=carplay_vehicle_protocol_demo_create(&app->vehicle_demo);
+    if (result != RTCP_OK) {
+        shutdown_stack(app);
+        return result;
+    }
+    APP_LOG("Vehicle State protocol bench: SIMULATED engine RPM only; no official Ultra renderer");
+#endif
     result = build_announcement_data(app);
     if (result != RTCP_OK) {
         shutdown_stack(app);
@@ -1404,6 +1433,10 @@ static int carplay_app_start_owned(const carplay_app_config_t *config)
     receiver_config.media.video_context = app;
     receiver_config.on_event_state = on_event_state;
     receiver_config.event_state_context = app;
+#if defined(RTCARPLAY_VEHICLE_PROTOCOL_DEMO)
+    receiver_config.vehicle=app->vehicle_demo.model;
+    receiver_config.negotiate_vehicle=true;
+#endif
 #if defined(RTCARPLAY_IAP2)
     if (!app->wired) {
         receiver_config.iap2.on_bytes = carplay_iap2_tunnel_bytes;
@@ -1833,6 +1866,24 @@ static int carplay_status_owned(int argc, char **argv)
                carplay_app_pairing_code()[0] != '\0'
                    ? carplay_app_pairing_code()
                    : "-");
+#if defined(RTCARPLAY_VEHICLE_PROTOCOL_DEMO)
+    carplay_vehicle_protocol_snapshot_t vehicle={0};
+    if (s_app.lock && rt_mutex_take(s_app.lock,RT_WAITING_FOREVER)==RT_EOK) {
+        vehicle=s_app.vehicle_snapshot;
+        (void)rt_mutex_release(s_app.lock);
+    }
+    rt_kprintf("carplay vehicle: SIMULATED combustion RPM=%u max=6000 redline=5000 sample_error=%d\n",
+               vehicle.rpm,vehicle.sample_error);
+    rt_kprintf("vehicle protocol: offered=%u enabled=%u normal=%u high=%u requests=%u rejected=%u subscriptions=%u notifications=%u\n",
+               vehicle.normal.offered ? 1U : 0U,vehicle.normal.enabled ? 1U : 0U,
+               (unsigned)vehicle.normal.state,(unsigned)vehicle.high.state,
+               vehicle.model.requests,vehicle.model.rejected_messages,
+               (unsigned)vehicle.model.subscribed,vehicle.model.notifications);
+    rt_kprintf("vehicle delivery: queued=%u retries=%u rejected=%u abandoned_replies=%u abandoned_notify=%u error=%d\n",
+               (unsigned)vehicle.delivery.queued_messages,(unsigned)vehicle.delivery.queue_retries,
+               (unsigned)vehicle.delivery.rejected_requests,(unsigned)vehicle.delivery.abandoned_replies,
+               (unsigned)vehicle.delivery.abandoned_notifications,vehicle.delivery.last_error);
+#endif
 #if defined(RTCARPLAY_AUDIO)
     unsigned packets = 0U, dropped = 0U, errors = 0U, replays = 0U;
     carplay_audio_sink_stats(&packets, &dropped, &errors, &replays);

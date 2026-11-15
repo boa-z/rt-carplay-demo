@@ -2,6 +2,8 @@
 
 # CarPlay Ultra 开发与 D213 融合
 
+当前应用里程碑：专用 Ultra GUI/Headless 配置已显式启用 [SIMULATED 发动机 Vehicle State 协议实验入口](vehicle-protocol-demo.zh-CN.md)，普通 Classic 配置保持不变。下文各节记录对应历史里程碑，其中“D213 尚未接入 Vehicle 处理器”的描述早于此次实验集成。D213 的 UI Sync 及其渲染器/资产/呈现能力仍保持关闭。
+
 最终产品目标是完整官方 CarPlay Ultra。本开发配置是中间阶段的协议与集成验证平台。Classic 视频加 LVGL 仪表、Ultra 相关协商和完整官方产品采用不同验收标准。外观、弹窗、Host 模拟或第二路视频均不能证明完整 Ultra 支持。
 
 ## 参考来源与实现基线
@@ -174,3 +176,9 @@ SDK d6ab43aef99f39c31bcffaab317b0352cef35136 增加可选 queue_phone_choices �
 SDK d6ab43aef99f39c31bcffaab317b0352cef35136 的 [sanitizer Host 和双语文档 CI 均通过](https://github.com/boa-z/rt-carplay/actions/runs/43763712003)。集成 2f5f5895d019503c600361aa573bede2e1f6196b 的 [Host、GUI、Headless CI 均通过](https://github.com/boa-z/luban-lite-carplay/actions/runs/43763767218)。三个产物均已下载，两份固件验收清单的精确版本匹配上述记录，SDK/集成工作区记录为空。每份固件产物六项 SHA256 及每份完整镜像九个组件边界/CRC32 检查全部通过。
 
 GUI 镜像 SHA256：324226e2a572111d7943e743227960fecc10bc1097c4e64c2321999f29a31971。Headless 镜像 SHA256：9d938362522e9cc57ae81431045d886cc22d65fdf33e4658ddc87c0653d40b47。两份镜像均未刷写，滚动 Preview Release 已跳过；后续仅文档提交不会改变这些镜像身份。队列提供宿主交接基础，不能证明渲染器或物理呈现已完成。L0 保持 PASS，完整范围 L1 为 PARTIAL，L2-L5 为 NOT_RUN。
+
+## 应用 Vehicle State 实验
+
+专用 Ultra 配置接入车辆侧拥有的三项内燃机模拟模型，声明匹配的 /info 目录，并显式选择手机提议的 vehicleStateProtocol。应用在 Receiver 所有者上更新模型，每次新控制器接入前刷新当前初值，先销毁 Receiver 再释放模型。carplay_status 发布复制后的模拟/协议/交付观察值。不会从发动机模型推断车速、挡位、电池 SOC、UI Sync、显示面板、HEVC 或备用视频流，参见[模型、源码映射及实机步骤](vehicle-protocol-demo.zh-CN.md)。
+
+本地完整集成 Host 套件通过，包含开启/关闭选项的实际应用启停、元数据刷新、处理器生命周期、订阅/HIGH 通知、拒绝写入，以及独立 plistlib 对目录和缺省未支持声明的验证。专用镜像 CI 检查两份固件 ELF 中实际模型/协议符号，并在验收清单记录模拟数据源。本里程碑没有新增开发板或手机验收，L0 PASS、完整范围 L1 PARTIAL、L2-L5 NOT_RUN 不变。

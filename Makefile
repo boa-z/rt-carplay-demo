@@ -35,7 +35,7 @@ sdk-libraries:
 	$(MAKE) -C $(RTCP_ROOT) $(patsubst $(RTCP_ROOT)/%,%,$(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS))
 $(BOARD_BINS): | sdk-libraries $(BUILD)
 $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS): sdk-libraries
-check: $(BOARD_BINS) check-auto-connections check-internet-share check-udp-burst check-usb-file-sync check-ota check-native-ncm
+check: $(BOARD_BINS) check-auto-connections check-internet-share check-udp-burst check-usb-file-sync check-ota check-native-ncm check-vehicle-protocol-demo
 	@set -e; for t in $(BOARD_BINS); do ./$$t; done
 	$(MAKE) check-lubanlite-video check-lubanlite-touch check-lubanlite-demo check-lubanlite-bonds check-lubanlite-usb check-lubanlite-handoff check-lubanlite-reconnect check-lubanlite-capabilities check-wired-identity check-wired-trace check-iap2-endpoints check-usb-iap2-worker check-wireless-iap2-worker
 
@@ -97,6 +97,19 @@ $(BUILD)/test_rtthread_app: tests/unit/test_rtthread_app.c app/carplay_app.c \
 	  -Wno-unused-function -ffunction-sections -fdata-sections tests/unit/test_rtthread_app.c \
 	  $(BUILD)/rtthread-app/os.o $(BUILD)/rtthread-app/net.o $(LIB) $(MBEDTLS_LIB) $(LDLIBS) \
 	  -pthread -Wl,--gc-sections -o $(BUILD)/test_rtthread_app
+
+.PHONY: check-vehicle-protocol-demo
+check-vehicle-protocol-demo: $(BUILD)/test_rtthread_app
+	$(CC) $(CFLAGS) $(CPPFLAGS) -Itests/support/rtthread_app -Iplatform \
+	  -DRTCARPLAY_ULTRA_DEMO -DRTCARPLAY_VEHICLE_PROTOCOL_DEMO \
+	  -Wno-unused-function -ffunction-sections -fdata-sections tests/unit/test_rtthread_app.c \
+	  app/vehicle_protocol_demo.c $(BUILD)/rtthread-app/os.o $(BUILD)/rtthread-app/net.o \
+	  $(LIB) $(MBEDTLS_LIB) $(LDLIBS) -pthread -Wl,--gc-sections -o $(BUILD)/test_rtthread_app_vehicle
+	$(BUILD)/test_rtthread_app_vehicle
+	$(CC) $(CFLAGS) $(CPPFLAGS) tests/unit/test_vehicle_protocol_demo.c \
+	  app/vehicle_protocol_demo.c $(LIB) $(MBEDTLS_LIB) $(LDLIBS) -o $(BUILD)/test_vehicle_protocol_demo
+	$(BUILD)/test_vehicle_protocol_demo $(BUILD)/vehicle-protocol-info.bplist
+	python3 tests/check_vehicle_protocol_info.py $(BUILD)/vehicle-protocol-info.bplist
 
 # Actual video sink with a bounded MPP model and the SDK's public headers.
 .PHONY: check-fusion-display check-lubanlite-video

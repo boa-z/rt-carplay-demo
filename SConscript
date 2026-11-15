@@ -25,6 +25,8 @@ if GetDepend('RTCARPLAY_DEMO_LAUNCHER'):
     src += Glob('ui/*.c')
 if GetDepend('RTCARPLAY_SINGLE_SCREEN_FUSION'):
     src += Glob('app/fusion_display.c')
+if GetDepend('RTCARPLAY_VEHICLE_PROTOCOL_DEMO'):
+    src += Glob('app/vehicle_protocol_demo.c')
 if GetDepend('RTCARPLAY_AUTO_CONNECT'):
     src += Glob('app/connection_manager.c')
 if GetDepend('RTCARPLAY_INTERNET_SHARE'):

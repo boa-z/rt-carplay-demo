@@ -25,6 +25,20 @@ config RTCARPLAY_SINGLE_SCREEN_FUSION
       Vehicle values default to explicitly labelled simulated data. This is
       a local integration demo, not Apple's Ultra Local UI renderer.
 
+config RTCARPLAY_VEHICLE_PROTOCOL_DEMO
+    bool "Experimental Vehicle State protocol bench (SIMULATED engine RPM)"
+    default n
+    depends on RTCARPLAY_ULTRA_DEMO
+    help
+      Attach a three-characteristic combustion-engine simulator to the real
+      authenticated Vehicle State lanes. Advertises only this implemented
+      model as rt-carplay SIMULATED, and enables vehicleStateProtocol only
+      when the phone offers it. Supports config/read/register/notifications;
+      phone writes are refused. This is not a real vehicle, road speed,
+      battery SOC, official Local UI renderer or complete CarPlay Ultra.
+      UI Sync, HEVC and alternate-display declarations remain disabled.
+      The ordinary Classic profiles leave this development option disabled.
+
 config RTCARPLAY_USB_FILE_SYNC
     bool "Development USB file transfer (CherryUSB ADB sync only)"
     default n

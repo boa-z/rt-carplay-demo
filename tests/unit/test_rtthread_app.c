@@ -407,6 +407,29 @@ int main(void)
         size_t encoded_id_len;
         assert(airplay_bplist_open(s_app.info_plist, s_app.info_plist_len, &doc) == AIRPLAY_BPLIST_OK);
         assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
+#if defined(RTCARPLAY_VEHICLE_PROTOCOL_DEMO)
+        assert(s_app.vehicle_demo.model);
+        assert(airplay_info_plist_matches_vehicle(s_app.info_plist,s_app.info_plist_len,s_app.vehicle_demo.model));
+        rtcp_vehicle_delivery_status_t vehicle_delivery;
+        assert(rtcp_receiver_get_vehicle_delivery_status(s_app.receiver,&vehicle_delivery)==RTCP_OK);
+        assert(vehicle_delivery.attached);
+        rtcp_data_stream_status_t vehicle_lane;
+        assert(rtcp_receiver_get_data_stream_status(s_app.receiver,RTCP_DATA_STREAM_VEHICLE,&vehicle_lane)==RTCP_OK);
+        assert(vehicle_lane.registered && !vehicle_lane.offered && !vehicle_lane.enabled);
+        assert(rtcp_receiver_get_data_stream_status(s_app.receiver,RTCP_DATA_STREAM_UI_SYNC,&vehicle_lane)==RTCP_OK);
+        assert(!vehicle_lane.registered && !vehicle_lane.enabled);
+        assert(carplay_vehicle_protocol_demo_tick(&s_app.vehicle_demo,1250)==RTCP_OK);
+        assert(!airplay_info_plist_matches_vehicle(s_app.info_plist,s_app.info_plist_len,s_app.vehicle_demo.model));
+        const uint8_t *refreshed; size_t refreshed_length;
+        assert(refresh_info_plist(&refreshed,&refreshed_length,&s_app));
+        assert(airplay_info_plist_matches_vehicle(refreshed,refreshed_length,s_app.vehicle_demo.model));
+        assert(airplay_bplist_open(s_app.info_plist,s_app.info_plist_len,&doc)==AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_root(&doc,&root)==AIRPLAY_BPLIST_OK);
+#else
+        assert(airplay_bplist_dict_get(&doc,root,"vehicleStateProtocolInfo",&object)==AIRPLAY_BPLIST_NOT_FOUND);
+#endif
+        assert(airplay_bplist_dict_get(&doc,root,"uiSyncInfo",&object)==AIRPLAY_BPLIST_NOT_FOUND);
+        assert(airplay_bplist_dict_get(&doc,root,"displayPanels",&object)==AIRPLAY_BPLIST_NOT_FOUND);
         assert(airplay_bplist_dict_get(&doc, root, "deviceID", &object) == AIRPLAY_BPLIST_OK);
         assert(airplay_bplist_get_string(&doc, object, encoded_id, sizeof(encoded_id), &encoded_id_len) == AIRPLAY_BPLIST_OK);
         assert(!strcmp(encoded_id, s_app.device_id));
@@ -487,6 +510,9 @@ int main(void)
         }
         assert(!carplay_app_is_running() && !pending && live_mutexes == 0);
         assert(s_app.thread == NULL);
+#if defined(RTCARPLAY_VEHICLE_PROTOCOL_DEMO)
+        assert(!s_app.vehicle_demo.model); /* Destroyed after borrowed Receiver. */
+#endif
         assert(cmd_carplay_ab(2, single) == RTCP_ESTATE);
         memset(s_app.device_id, 0, sizeof(s_app.device_id));
         memset(s_app.ssid, 0, sizeof(s_app.ssid));
