@@ -160,3 +160,11 @@ SDK a25c0cb99553492bc6d65d5f84fddceb25cfebe6 的 [sanitizer Host 和双语文档
 GUI 镜像 SHA256：3cc1343e289e5134fab37542400402ad98bef5f0759b4f774574a8a4ce5ee01d。Headless 镜像 SHA256：7b1075016ad1ea0161546d2bd282ed99369781a27958987c63443f1ceb5a1b91。两份镜像均未刷写，滚动 Preview Release 已跳过。后续仅文档提交不会改变这些镜像的源码身份。
 
 2026-11-15 使用项目 aiburn 技能经 COM9 只读查询，返回 requested=FUSION、effective=LOCAL、generation=3、latched=0、video=0、error=0，以及 SIMULATED 车辆样本。连接管理器报告 owner=wireless、stage=1、usb_ready=1、attached=1、bt_ready=1。这些是现有固件在查询时的协调器/连接状态，不能证明可视合成、自动重连或连续正常运行。没有重启、进入升级模式或传输身份文件。原始日志保留在 Git 外的受限私有设备目录，此处没有手机标识或配对材料。物理融合/输入与真实 iPhone Ultra 验收仍为 NOT_RUN。
+
+## 按顺序将 UI Sync 选择交给宿主渲染器
+
+SDK d6ab43aef99f39c31bcffaab317b0352cef35136 增加可选 queue_phone_choices 和复制 peek/consume API。十六项 FIFO 保留布局、调色板、外观的顺序、源 session/sequence 及本地重置 generation。布局加调色板必须原子占用两个空槽。默认保留原有最终状态行为，不分配选择队列工作区。本地交接不会增加手机侧能力、渲染器、资产运行时或呈现时钟。
+
+队列满时，在状态/ACK 提交前拒绝当前命令，保留旧记录。成功协议/通道重置会统计放弃记录、递增 generation，宿主应作废已复制的旧工作。消费记录仅代表宿主接受，不能证明已经绘制或呈现。[SDK 状态与归属文档](../../../../packages/third-party/rt-carplay/docs/zh-CN/ui-sync.md)说明生命周期、noAck、失败及重置契约。该接口参考 LIVI 分开的手机选择，并补充明确上限和生命周期处理。
+
+本地完整 SDK Make、ASan/UBSan 下 CMake 66/66 项及完整集成 Host 套件均通过。覆盖输入/输出复制生命周期、顺序、noAck、旧/重复消息过滤、双项拒绝、环形回绕/重试、失败 RESET 事务性及放弃计数。加密 Receiver 测试消费实际选择、区分重开 generation，在传输持续排空时填满宿主 FIFO，仅拒绝 UI 下一条命令并继续 Vehicle 读取。D213 仍未接入 UI 处理器，不声明 UI Sync；本次未刷写。L0 保持 PASS，完整范围 L1 为 PARTIAL，L2-L5 为 NOT_RUN。
