@@ -34,9 +34,11 @@ D213 已有应用融合所需的 MPP H.264 与 DE 硬件图层路径，但这不
 
 ## SDK 里程碑与后续协议工作
 
-[可移植基础](../../../../packages/third-party/rt-carplay/docs/zh-CN/ultra-foundation.md)提供可选 Main Display 配置、等比例显示/触摸几何、有界 OPACK 与 Vehicle State 消息处理器。由宿主指定 ID、所有权、可变性、格式/范围和回调，避免猜测车辆目录。Make 执行 57 个程序和 legacy E2E，CMake 执行 58 个用例，并通过 sanitizer、公共头文件、平台边界及双语文档检查。
+[可移植基础](../../../../packages/third-party/rt-carplay/docs/zh-CN/ultra-foundation.md)提供可选 Main Display 配置、等比例显示/触摸几何、有界 OPACK 与 Vehicle State 消息处理器。由宿主指定 ID、所有权、可变性、格式/范围和回调，避免猜测车辆目录。后续 SDK 里程碑 f67b10da52a0d344d90d9e31624a7d0c2c129c19 新增内部认证双向 DataStream 传输，具备完整消息组装、同步 token 回复、有界复制队列、短写续传、对端绑定及终止清理。Make 现执行 58 个程序和 legacy E2E，CMake 通过 59 个用例，并通过 sanitizer、公共头文件、平台边界及双语文档检查。[该 SDK CI 已通过](https://github.com/boa-z/rt-carplay/actions/runs/43737988065)。
 
-实际 Type 130 仍是原有仅接收 iAP 路径。新 Vehicle State 处理器尚未接入 Receiver 协商及 /info，UI Sync 尚未实现。后续为有界双向注册、认证后的完整消息路由、手机能力门控、生命周期/队列失败测试、UI Sync binary-plist 状态/ACK，以及公共 Receiver 状态和错误接口。开发开关不会增加 HEVC、displayPanels、altScreen 或未完成车辆/UI 能力。SDK 不依赖 LVGL、MPP、DE 或 D213。
+Windows GUI 与 Headless 配置均已使用 SDK f67b10d 重新构建，编译、有线配置及完整镜像全部九个组件的边界/CRC32 检查通过，原有 Classic 配置与打包输入已恢复。本里程碑没有刷写固件。
+
+实际 Type 130 仍是原有仅接收 iAP 路径。新双向基础及 Vehicle State 处理器尚未接入 Receiver 协商及 /info，UI Sync 尚未实现。后续为带新密钥派生的协商注册表、完整消息路由、手机能力门控、UI Sync binary-plist 状态/ACK，以及公共 Receiver 状态和错误接口。开发开关不会增加 HEVC、displayPanels、altScreen 或未完成车辆/UI 能力。SDK 不依赖 LVGL、MPP、DE 或 D213。
 
 ## 专用开发配置与产物
 
@@ -54,7 +56,9 @@ bash .ci/build-ultra-demo.sh headless
 
 ultra-demo workflow 在 SDK 和应用 Host 检查后构建两个变体。可下载的 Actions 产物在 output/ultra-ci/gui 或 output/ultra-ci/headless 中包含完整 IMG、ELF/map、bootloader、解析后的配置、源码/验收元数据、日志和 SHA256SUMS。这些是开发镜像，不是经过认证的 Ultra Release。推送里程碑使用提交标记 [ultra-dev]，使现有滚动 Classic Preview Release 任务跳过；专用构建及产物工作流仍执行。普通 Classic 提交保留原有发布行为。
 
-2026-11-15 两个配置的 Windows 本地构建均通过，包括有线配置检查及完整镜像全部九个组件的边界/CRC32 检查，构建后已恢复原有 Classic 配置。提交前镜像在 acceptance.txt 中记录未提交源码清单；Actions 产物标识其已提交源码。GUI 镜像 SHA256 为 f3d0fddcd0a66d5985bfb68740cb9c4827a2885bc56524ae40b80c2479f31dfe，Headless 为 b5d7e36f78df5ec355bcc7f428b2d68207081ed2ae6a6b5ecf91c2055613ac17，两者均未刷写。完整应用 Host 测试与真实 LVGL 9 Settings 预览通过，已发布的 SDK 里程碑也通过了 [GitHub CI](https://github.com/boa-z/rt-carplay/actions/runs/43734899981)。
+2026-11-15 两个配置的 Windows 本地构建均通过，包括有线配置检查及完整镜像全部九个组件的边界/CRC32 检查，构建后已恢复原有 Classic 配置。首个配置里程碑的提交前镜像使用 SDK 183fd91，在 acceptance.txt 中记录未提交源码清单：GUI SHA256 为 f3d0fddcd0a66d5985bfb68740cb9c4827a2885bc56524ae40b80c2479f31dfe，Headless 为 b5d7e36f78df5ec355bcc7f428b2d68207081ed2ae6a6b5ecf91c2055613ac17，两者均未刷写。完整应用 Host 测试与真实 LVGL 9 Settings 预览通过，已发布的首个 SDK 里程碑也通过了 [GitHub CI](https://github.com/boa-z/rt-carplay/actions/runs/43734899981)。
+
+已提交的配置里程碑 096de7eb242aba84ab868fd6b1e0f127ddd5483b 通过了[全部专用 CI 任务](https://github.com/boa-z/luban-lite-carplay/actions/runs/43736939136)：Host、GUI 和 Headless。三个产物均已下载，全部 SHA256、干净源码清单及 SDK/集成版本核对通过；下载的两个镜像也再次通过全部九个组件的边界/CRC32 检查。滚动 Preview Release 任务已跳过。这些检查确认开发产物可追溯，不能代替开发板或手机验收。
 
 ## 单屏融合实施方案
 
@@ -75,7 +79,7 @@ FULLSCREEN 保留原有 Main Display。FUSION 将 MPP 视频直接由 DE 缩放�
 | 等级 | 状态 | 仍需证据 |
 | --- | --- | --- |
 | L0 | 初步源码研究 PASS | 本文区分代码、未运行参考测试和官方产品要求，后续协议研究继续。 |
-| L1 | PARTIAL | 显示/OPACK/Vehicle State Host 测试通过，尚缺实际双向传输、协商接入和 UI Sync。 |
+| L1 | PARTIAL | 显示/OPACK/Vehicle State/双向传输 Host 测试通过，尚缺协商接入和 UI Sync。 |
 | L2 | NOT_RUN | 实现并实测 D213 FULLSCREEN/FUSION/LOCAL、输入、回连及性能。 |
 | L3 | NOT_RUN | 真实 iPhone Ultra 能力协商。 |
 | L4 | NOT_RUN | 真实 iPhone Vehicle State 和 UI Sync 交互。 |

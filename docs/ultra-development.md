@@ -34,9 +34,11 @@ Static inspection found 15 test annotations in info.rs, 27 in vehicle_state/test
 
 ## SDK milestone and remaining protocol work
 
-The [portable foundation](../../../../packages/third-party/rt-carplay/docs/ultra-foundation.md) provides optional Main Display profile metadata, aspect-fit/touch geometry, bounded OPACK and a Vehicle State message processor. Host-supplied IDs, ownership, mutability, format/range validation and callbacks avoid inventing a vehicle catalogue. Make runs 57 test programs plus legacy E2E, and CMake runs 58 cases, with sanitizer, public-header, boundary and bilingual-document checks.
+The [portable foundation](../../../../packages/third-party/rt-carplay/docs/ultra-foundation.md) provides optional Main Display profile metadata, aspect-fit/touch geometry, bounded OPACK and a Vehicle State message processor. Host-supplied IDs, ownership, mutability, format/range validation and callbacks avoid inventing a vehicle catalogue. The next SDK milestone f67b10da52a0d344d90d9e31624a7d0c2c129c19 adds an internal authenticated duplex DataStream transport with complete-message assembly, sync-token replies, bounded copied queues, partial-write continuation, peer binding and terminal cleanup. Make now runs 58 test programs plus legacy E2E, and CMake passes 59 cases, with sanitizer, public-header, boundary and bilingual-document checks. Its [SDK CI passed](https://github.com/boa-z/rt-carplay/actions/runs/43737988065).
 
-Live Type 130 is still the existing receive-only iAP path. The new Vehicle State processor is not yet wired to receiver negotiation or /info; UI Sync is not implemented. Next steps are a bounded duplex registry, authenticated whole-message routing, phone-offer gating, lifecycle/queue failure tests, UI Sync binary-plist state/ACK handling and public receiver status/errors. HEVC, displayPanels, altScreen and unsupported vehicle/UI features are not added by the development flag. SDK code stays independent of LVGL, MPP, DE and D213.
+Both Windows GUI and Headless profiles were rebuilt with SDK f67b10d; compilation, wired-profile validation and all nine complete-image component bounds/CRC32 checks passed. The original Classic configuration and pack inputs were restored. No firmware was flashed for this milestone.
+
+Live Type 130 is still the existing receive-only iAP path. The new duplex primitive and Vehicle State processor are not yet wired to receiver negotiation or /info; UI Sync is not implemented. Next steps are a negotiated registry with fresh key derivation, whole-message routing, phone-offer gating, UI Sync binary-plist state/ACK handling and public receiver status/errors. HEVC, displayPanels, altScreen and unsupported vehicle/UI features are not added by the development flag. SDK code stays independent of LVGL, MPP, DE and D213.
 
 ## Dedicated development profiles and artifacts
 
@@ -54,7 +56,9 @@ bash .ci/build-ultra-demo.sh headless
 
 The ultra-demo workflow builds both variants after SDK and application Host checks. Downloadable Actions artifacts contain the complete IMG, ELF/map, bootloader, resolved configuration, source/acceptance metadata, logs and SHA256SUMS under output/ultra-ci/gui or output/ultra-ci/headless. These are development images, not qualified Ultra releases. Push milestones use the commit marker [ultra-dev] so the existing rolling Classic Preview Release job skips them; the dedicated build/artifact workflow still runs. Ordinary Classic pushes keep the original release behavior.
 
-Local Windows builds of both profiles passed on 2026-11-15, including the wired-profile check and all nine complete-image component bounds/CRC32 checks. The build restored the original Classic configuration afterward. These pre-commit images record the dirty source inventory in acceptance.txt; the Actions artifacts identify their committed source. The GUI image SHA256 is f3d0fddcd0a66d5985bfb68740cb9c4827a2885bc56524ae40b80c2479f31dfe and the Headless image SHA256 is b5d7e36f78df5ec355bcc7f428b2d68207081ed2ae6a6b5ecf91c2055613ac17. Neither has been flashed. The full application Host suite and actual LVGL 9 Settings preview passed. The published SDK milestone also passed [its GitHub CI](https://github.com/boa-z/rt-carplay/actions/runs/43734899981).
+Local Windows builds of both profiles passed on 2026-11-15, including the wired-profile check and all nine complete-image component bounds/CRC32 checks. The build restored the original Classic configuration afterward. The first profile milestone's pre-commit images used SDK 183fd91 and record the dirty source inventory in acceptance.txt: GUI SHA256 f3d0fddcd0a66d5985bfb68740cb9c4827a2885bc56524ae40b80c2479f31dfe and Headless SHA256 b5d7e36f78df5ec355bcc7f428b2d68207081ed2ae6a6b5ecf91c2055613ac17. Neither has been flashed. The full application Host suite and actual LVGL 9 Settings preview passed. The published first SDK milestone also passed [its GitHub CI](https://github.com/boa-z/rt-carplay/actions/runs/43734899981).
+
+The committed profile milestone 096de7eb242aba84ab868fd6b1e0f127ddd5483b passed [all dedicated CI jobs](https://github.com/boa-z/luban-lite-carplay/actions/runs/43736939136): Host, GUI and Headless. All three artifacts were downloaded; every SHA256 entry, clean source inventory and SDK/integration revision was verified, and both downloaded images passed all nine component bounds/CRC32 checks. The rolling Preview Release job was skipped. These checks establish traceable development artifacts, not board or phone acceptance.
 
 ## Single-screen fusion implementation plan
 
@@ -75,7 +79,7 @@ Receiver seed, AirPlay records and USB trust files were backed up outside Git wi
 | Level | Status | Evidence still required |
 | --- | --- | --- |
 | L0 | PASS for initial source research | This review distinguishes code, unexecuted reference tests and official product requirements; further protocol research continues. |
-| L1 | PARTIAL | Display/OPACK/Vehicle State Host tests passed; live duplex transport, negotiated composition and UI Sync remain. |
+| L1 | PARTIAL | Display/OPACK/Vehicle State/duplex transport Host tests passed; negotiated composition and UI Sync remain. |
 | L2 | NOT_RUN | Implement and physically validate D213 FULLSCREEN/FUSION/LOCAL, input, reconnect and performance. |
 | L3 | NOT_RUN | Real-iPhone Ultra feature negotiation. |
 | L4 | NOT_RUN | Real-iPhone Vehicle State and UI Sync exchanges. |
