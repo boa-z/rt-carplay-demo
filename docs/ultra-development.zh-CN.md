@@ -206,3 +206,9 @@ SDK 8a0d71acb97bbc62426bc96ae13872f2baa2b95d 通过显式配对的内部视频�
 SDK 8a0d71acb97bbc62426bc96ae13872f2baa2b95d 的 [sanitizer Host 和双语文档 CI 均通过](https://github.com/boa-z/rt-carplay/actions/runs/43768403492)。集成 5be76b8b9b322481d9d40bc1a6839c9f3da1ff7f 的 [Host、GUI、Headless CI 全部通过](https://github.com/boa-z/luban-lite-carplay/actions/runs/43768478380)。三个产物均已下载，两份固件清单精确匹配上述版本，SDK/集成工作区记录为空。每份固件六项 SHA256、完整镜像九个组件边界/CRC32 检查全部通过。
 
 GUI 镜像 SHA256：fc31e995d7e2d793019031f535343c281297de16adaaa8e5379f259c92defee1。Headless 镜像 SHA256：1fc2a4e97790d4486b6b872d13568a40b9e4cdffdd01cf7bf5d3a8690bf93e0f。下载后的 ELF/config 组合在本地通过有线/模拟模型检查器，清单保留 SIMULATED_ENGINE_RPM、PHONE_OFFER_REQUIRED 及 UI Sync 关闭。生产 server 仍未接入实验性备用视频回调。两份镜像均未刷写，滚动 Preview Release 已跳过；仅文档跟进不会改变镜像身份及 L0 PASS、完整范围 L1 PARTIAL、L2-L5 NOT_RUN 的验收状态。
+
+## 实验性独立备用视频传输
+
+SDK 35ac6da36ad8f433d781caaf407fb723bfa7ed78 新增公共 Receiver 显式 experimental_alt_video 开关、独立 Type 111 H.264 TCP 监听、按连接派生的密钥/nonce 周期、独立媒体回调或明确的 Null Sink，以及所有者线程状态/统计查询。备用套接字/认证失败只退役自身端点，共享已消费 ID 台账继续保留；Main 丢失保持完整控制器清理。默认 Classic 路径和专用 D213 Ultra 配置均保持开关关闭，不声明第二显示 /info、altScreen、HEVC、第二路硬解或官方渲染能力。[SDK 契约](../../../../packages/third-party/rt-carplay/docs/zh-CN/video-stream-session.md) 说明接口和剩余能力门控。
+
+本地完整 SDK Make、启用 RTCP_SANITIZE 的 CMake 69/69 项和完整集成 Host 套件通过。新增公共 Receiver 场景使用真实 Pair-Setup/Pair-Verify、加密 RTSP 及分别加密且交错发送的 Main/备用 TCP 帧，覆盖认证/初始 SETUP 门控、独立端口/Sink/计数器、Null Sink、ID 复用拒绝、过期清理、监听失败、错误密钥/认证标签/EOF 隔离、新 ID 恢复、Main 丢失清理和 stop/start 重置，随后继续 Classic 媒体/重连回归。双语文档检查通过 31 对及一个明确例外。这些属于合成 Host 传输结果，L0 PASS、完整范围 L1 PARTIAL、L2–L5 NOT_RUN 不变，本里程碑没有新增刷写或真实手机交互。
