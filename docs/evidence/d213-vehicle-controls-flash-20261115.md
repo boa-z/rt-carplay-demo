@@ -26,18 +26,38 @@ Raw backups, manifests and logs remain outside Git in the private device-backup 
 
 The image includes the explicitly simulated engine RPM Vehicle State model, enabled only when offered by the phone. The model registers no typed service controls. UI Sync, HEVC, alternate-display declarations and the experimental Type 111 Receiver gate remain disabled in these D213 profiles. The software control tests do not imply phone-side command compatibility or physical vehicle actuation.
 
+## Subsequent runtime observations and visual failure
+
+Later aiburn commands with explicit leading carriage return and CRLF received valid shell responses. This is a useful command convention for this session, not proof of the root cause of earlier silence. `carplay_ota status` confirmed the running version as `Firmware 1.0.0 (363c7e0c)`.
+
+The real phone offered Vehicle State, the Receiver enabled it, and Normal/HIGH both reported state 2 (connected). The simulated engine model reported RPM=1000 and sample_error=0. The processor counted one request and zero rejections; delivery counted one queued response, zero retries/rejections/abandonment and error=0. There were no subscriptions or notifications. The current counters do not identify the request method or prove phone receipt/acceptance, so do not infer verified configuration, reads/writes, subscription semantics or complete Vehicle State interoperability. UI Sync remains disabled. This is real-phone negotiation and bounded application-processing evidence, distinct from the earlier Host results and complete official Ultra.
+
+Mode commands selected LOCAL, FULLSCREEN and FUSION without a reported coordinator error. Immediately returned status can show the prior video generation; a later FUSION sample confirmed requested generation=6 and latched generation=6, video=1, error=0, rectangle `(0,75,768,450)` and logical input `1024x600`. The local sample was marked SIMULATED with speed=64 and battery=82. Read-only DE queries showed:
+
+| Mode | Video layer | UI layer |
+| --- | --- | --- |
+| FUSION | Enabled; destination 768x450 at (0,75); decoded 1024x608 buffer cropped to 1024x600. | Enabled; 1024x600 buffer, stride 4096, crop (768,0,256,600), position (768,0). |
+| LOCAL | Enabled behind UI; destination 1024x600 at (0,0). | Enabled; full 1024x600, origin (0,0), crop disabled. |
+| FULLSCREEN | Enabled; destination 1024x600 at (0,0). | Full geometry restored; global alpha enabled, mode=1, value=0. |
+
+Video status reported 3,117 frames, zero drops/errors/resets, queue peak one, no IDR wait or skipped NALs, and 7.1 FPS over a 214,921 ms interval. Average/max receiver stage wall times were queue=0/21 ms, decode=9/13 ms and present=8/17 ms. The phone workload was not controlled, so this is neither a frame-rate benchmark nor phone-to-glass latency. One `top` sample returned CPU=50; heap collection produced no usable output, so no memory result is claimed.
+
+Despite those software/driver observations, **the user reported that the left CarPlay region was still black**. Persistent black video with an active session is a visual failure, not expected fusion behavior. FULLSCREEN was then selected again and its UI alpha=0 confirmed; the user confirmed the full-screen video was normal. FUSION was restored and `test_fb -A -e -m 0 -v 255` selected pixel alpha through the existing driver command. A separate readback confirmed alpha enabled, mode=0 and value=255. The user then confirmed that the left video displayed. This isolates the visible failure to the FUSION alpha policy: DE initializes the UI surface to full panel size (`drv_de_core.c`), and a cropped rectangle with global alpha 255 obscures the video's region. The application fix uses pixel alpha for FUSION and retains original LOCAL/global-zero FULLSCREEN behavior. No video copy or BSP change is needed.
+
+The restored picture is a runtime modification of the image identified above; a new image with the source fix, reboot persistence, right instruments, physical touch, disconnect/reconnect and fault recovery still need validation. Driver configuration and frame counters alone did not prove visible success, and the original image's visual failure remains part of this record.
+
 ## Acceptance at this checkpoint
 
 | Level | Status | Scope |
 | --- | --- | --- |
 | L0 | PASS, initial source research | Existing LIVI/code/test and official public material report. |
 | L1 | PARTIAL for full scope | Portable protocol foundations have Host evidence; complete official Ultra inventory, rendering and integration remain incomplete. |
-| L2 | NOT_RUN for full acceptance | New GUI flashed and identity restoration verified; visual fusion, touch boundaries, disconnect/reconnect, faults and measured performance still need physical validation. |
-| L3 | NOT_RUN | Real-iPhone Ultra negotiation on this image. |
-| L4 | NOT_RUN | Real-iPhone Vehicle State/UI Sync exchanges. |
+| L2 | PARTIAL, runtime fix | Original image failed with black left video; user confirms FULLSCREEN normal and FUSION video restored by runtime pixel alpha. New fixed image, right instruments, touch, disconnect/reconnect and faults remain unverified. |
+| L3 | PARTIAL | Real phone offered/enabled Vehicle State and connected both lanes. UI Sync, remaining Ultra negotiation and official qualification remain NOT_RUN. |
+| L4 | PARTIAL, bounded observation | One real-phone request processed without rejection and a response queued; method, phone receipt, read/write/subscription/notification acceptance and UI Sync remain unverified. |
 | L5 | NOT_RUN | Real-iPhone independent Type 111 reception. |
 
-Next steps are to confirm the new runtime revision and shell after a normal power cycle if necessary, verify identity files after restart, observe FULLSCREEN/FUSION/LOCAL, test phone/local touch boundaries and reconnect, and capture media/resource statistics. Do not infer official Ultra support from local instruments, a phone prompt, Host tests or the old firmware's video latch.
+Next steps are to build and flash the pixel-alpha fix after a fresh verified pairing backup, revalidate visible composition and mode changes after reboot, test phone/local touch boundaries and reconnect, identify real Vehicle State requests and responses without exposing phone/identity data, and collect controlled media/resource statistics. Do not infer official Ultra support from local instruments, a phone prompt, Host tests or a video latch.
 
 ## 中文说明
 
@@ -47,4 +67,10 @@ Next steps are to confirm the new runtime revision and shell after a normal powe
 
 6 个配对/身份文件已恢复并回读，全部 SHA256 与本次刷前备份一致。已发送串口 reset 请求重新加载，请求之后再次导出仍与刷前 6 个文件全部匹配；但后续串口查询仍没有有效响应，不能据发送成功认定重启已经执行，也不能据文件恢复认定自动回连。备份、身份、原始日志均保留在 Git 之外，蓝牙 bond 持久化尚未验证。
 
-当前镜像仅启用由手机主动提供时才协商的模拟发动机 RPM Vehicle State 模型，不注册控制命令，也不声明尚未接入的 UI Sync、HEVC 或第二显示屏能力。完整 L1 仍为 PARTIAL，L2–L5 仍为 NOT_RUN；下一步需确认新固件运行版本，观察三种显示模式和触摸边界，验证断连/重连、异常恢复及性能，再记录真实 iPhone 协商结果。本地仪表融合和 Host 测试均不等于完整官方 Ultra。
+后续使用显式 CRLF 收到有效串口响应，运行版本确认是 `363c7e0c`。真实手机已提供并启用 Vehicle State，Normal/HIGH 两条通道连接，处理器收到 1 条请求、0 拒绝，响应入队且无重试/错误；尚无订阅或通知，计数器也不能确定请求方法、手机收到响应或接受其语义。模拟模型不注册控制命令，也不声明尚未接入的 UI Sync、HEVC 或第二显示屏能力。
+
+三种模式命令及硬件图层查询已有记录，FUSION 的后续采样确认代次/锁存均为 6、视频有效、错误码 0；DE 视频层为左侧 768×450、位置 (0,75)，UI 图层为右侧 256×600、位置 (768,0)。用户明确报告左侧持续黑屏后，再次切到 FULLSCREEN 并确认 UI 全局透明度为 0，用户确认全屏视频正常。随后切回 FUSION，通过现有 `test_fb -A -e -m 0 -v 255` 改为逐像素 alpha，独立回读确认 mode=0、value=255，用户确认左侧恢复显示。因此问题定位到 FUSION 的 alpha 策略：DE UI 平面仍为整屏，裁剪矩形配合全局 alpha 255 遮住视频区域。修复仅在应用层 FUSION 使用逐像素 alpha，LOCAL 和 FULLSCREEN 保留原有策略，不增加视频拷贝或修改 BSP。
+
+以上恢复是原镜像上的运行时试验，尚不证明固化修复的新镜像、重启、右侧仪表、触摸、断连/重连和异常恢复通过；原镜像的黑屏失败也不能从记录中抹去。L2 据此记为 PARTIAL，而非完整通过。
+
+视频统计为累计 3,117 帧、0 丢帧/错误/重置、队列峰值 1；214,921 ms 区间为 7.1 FPS，队列/解码/呈现平均耗时为 0/9/8 ms，单次 CPU 样本为 50。手机负载未受控，不能作为性能基准或端到端延迟；内存未取得有效结果。L0 仍 PASS，完整 L1 为 PARTIAL；L3 和 L4 根据以上真实手机的有限证据记为 PARTIAL，其他未测项及 L5 仍 NOT_RUN。下一步先生成并验证固化 alpha 修复的镜像，再完成输入、重连和真实协议交互验收。本地仪表、Host 测试及单项协商均不等于完整官方 Ultra。

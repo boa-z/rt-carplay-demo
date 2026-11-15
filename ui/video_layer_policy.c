@@ -56,7 +56,10 @@ int carplay_launcher_fusion_apply(const carplay_fusion_snapshot_t *s)
         next.pos.x=s->width-s->local_width; next.pos.y=0;
         next.buf.crop_en=1; next.buf.crop.x=next.pos.x; next.buf.crop.y=0;
         next.buf.crop.width=s->local_width; next.buf.crop.height=s->height;
-        next_alpha.enable=1; next_alpha.mode=AICFB_GLOBAL_ALPHA_MODE; next_alpha.value=255;
+        /* DE keeps a full-panel UI surface even when its only rectangle is
+         * cropped to the instrument strip. Keep the empty region transparent
+         * through pixel alpha instead of overriding it with global opacity. */
+        next_alpha.enable=1; next_alpha.mode=AICFB_PIXEL_ALPHA_MODE; next_alpha.value=255;
     } else if (s->effective == CARPLAY_FULLSCREEN) {
         next_alpha.enable=1; next_alpha.mode=AICFB_GLOBAL_ALPHA_MODE; next_alpha.value=0;
     }

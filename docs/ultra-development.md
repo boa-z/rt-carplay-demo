@@ -10,6 +10,8 @@ Development uses boa-z/luban-lite-carplay on the existing carplay-oss branch; lu
 
 Current application milestone: dedicated Ultra GUI/Headless configurations now opt into the [SIMULATED engine Vehicle State protocol bench](vehicle-protocol-demo.md). Ordinary Classic configurations remain unchanged. Earlier sections below describe their respective historical milestones; statements that D213 attaches no Vehicle processor predate this explicit experimental integration. UI Sync and its renderer/asset/presentation capabilities remain disabled on D213.
 
+Latest physical checkpoint: the real phone offered/enabled Vehicle State, connected both lanes and issued one processed request; the user confirmed FULLSCREEN video and restored FUSION video after a runtime pixel-alpha change. The application now selects pixel alpha for FUSION to prevent its empty UI region from hiding video. See the [exact image, observations and limitations](evidence/d213-vehicle-controls-flash-20261115.md). L2-L4 are PARTIAL for these bounded observations; new fixed-image acceptance, input/reconnect, full protocol interaction and official Ultra remain incomplete. Historical NOT_RUN statements below describe earlier milestones.
+
 The local LIVI checkout is C:/Project/Carplay/references/LIVI at 64a05b68358db52ed887169143afd5944fd6f1f7. Code and tests, rather than README feature claims, are the research evidence. Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI). GPL-3.0-or-later and its NOTICE attribution requirement apply to inclusion and translation. Original notices remain; startup and Settings include visible attribution. Do not distribute Apple themes, proprietary assets, keys or identity material.
 
 ## Classic, Ultra and official product requirements

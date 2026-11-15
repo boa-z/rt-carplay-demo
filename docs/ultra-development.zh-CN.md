@@ -4,6 +4,8 @@
 
 当前应用里程碑：专用 Ultra GUI/Headless 配置已显式启用 [SIMULATED 发动机 Vehicle State 协议实验入口](vehicle-protocol-demo.zh-CN.md)，普通 Classic 配置保持不变。下文各节记录对应历史里程碑，其中“D213 尚未接入 Vehicle 处理器”的描述早于此次实验集成。D213 的 UI Sync 及其渲染器/资产/呈现能力仍保持关闭。
 
+最新实机检查点：真实手机已提供并启用 Vehicle State，两条通道连接，处理器收到 1 条请求；用户确认 FULLSCREEN 视频正常，运行时改为逐像素 alpha 后 FUSION 左侧视频恢复。应用现对 FUSION 使用逐像素 alpha，避免空白 UI 区域遮住视频。[确切镜像、观察和限制](evidence/d213-vehicle-controls-flash-20261115.md)记录全部证据。L2–L4 根据有限实测记为 PARTIAL，固化修复的新镜像、输入/重连、完整协议交互及官方 Ultra 仍未完成；下文历史 NOT_RUN 属于较早里程碑。
+
 最终产品目标是完整官方 CarPlay Ultra。本开发配置是中间阶段的协议与集成验证平台。Classic 视频加 LVGL 仪表、Ultra 相关协商和完整官方产品采用不同验收标准。外观、弹窗、Host 模拟或第二路视频均不能证明完整 Ultra 支持。
 
 ## 参考来源与实现基线

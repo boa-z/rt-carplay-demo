@@ -107,7 +107,7 @@ int main(void)
     missing=true; assert(carplay_launcher_fusion_apply(&s) == RTCP_ENOENT);
     missing=false; assert(carplay_launcher_fusion_apply(&s) == RTCP_OK);
     assert(ui_layer.pos.x == 768 && ui_layer.buf.crop_en && ui_layer.buf.crop.x == 768 && ui_layer.buf.crop.width == 256);
-    assert(ui_alpha.value == 255);
+    assert(ui_alpha.enable && ui_alpha.mode == AICFB_PIXEL_ALPHA_MODE && ui_alpha.value == 255);
     unsigned before=writes; assert(carplay_launcher_fusion_apply(&s) == RTCP_OK && writes == before);
     ui_layer.buf.phy_addr[0]=200; /* LVGL PAN_DISPLAY to the other framebuffer. */
     (void)carplay_fusion_set_mode(CARPLAY_LOCAL); s=snapshot();
@@ -118,9 +118,11 @@ int main(void)
     assert(carplay_launcher_fusion_apply(&s) == RTCP_EIO && ui_layer.buf.crop_en);
     fail_vsync=false;
     assert(carplay_launcher_fusion_apply(&s) == RTCP_OK && !ui_layer.buf.crop_en && !ui_layer.pos.x);
-    assert(ui_layer.buf.phy_addr[0] == 200 && ui_alpha.value == 255);
+    assert(ui_layer.buf.phy_addr[0] == 200 && ui_alpha.mode == AICFB_GLOBAL_ALPHA_MODE && ui_alpha.value == 255);
     (void)carplay_fusion_set_mode(CARPLAY_FULLSCREEN); s=snapshot();
-    assert(carplay_launcher_fusion_apply(&s) == RTCP_OK && ui_alpha.value == 0);
+    assert(carplay_launcher_fusion_apply(&s) == RTCP_OK && ui_alpha.mode == AICFB_GLOBAL_ALPHA_MODE && ui_alpha.value == 0);
+    (void)carplay_fusion_set_mode(CARPLAY_FUSION); latch(); s=snapshot();
+    assert(carplay_launcher_fusion_apply(&s) == RTCP_OK && ui_alpha.mode == AICFB_PIXEL_ALPHA_MODE && ui_alpha.value == 255);
     carplay_launcher_video_event(false,NULL); s=snapshot();
     assert(s.effective == CARPLAY_LOCAL && carplay_launcher_fusion_apply(&s) == RTCP_OK && ui_alpha.value == 255);
     rtcp_display_rect_t target; uint32_t generation;
