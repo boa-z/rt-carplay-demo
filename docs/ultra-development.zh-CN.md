@@ -168,3 +168,9 @@ SDK d6ab43aef99f39c31bcffaab317b0352cef35136 增加可选 queue_phone_choices �
 队列满时，在状态/ACK 提交前拒绝当前命令，保留旧记录。成功协议/通道重置会统计放弃记录、递增 generation，宿主应作废已复制的旧工作。消费记录仅代表宿主接受，不能证明已经绘制或呈现。[SDK 状态与归属文档](../../../../packages/third-party/rt-carplay/docs/zh-CN/ui-sync.md)说明生命周期、noAck、失败及重置契约。该接口参考 LIVI 分开的手机选择，并补充明确上限和生命周期处理。
 
 本地完整 SDK Make、ASan/UBSan 下 CMake 66/66 项及完整集成 Host 套件均通过。覆盖输入/输出复制生命周期、顺序、noAck、旧/重复消息过滤、双项拒绝、环形回绕/重试、失败 RESET 事务性及放弃计数。加密 Receiver 测试消费实际选择、区分重开 generation，在传输持续排空时填满宿主 FIFO，仅拒绝 UI 下一条命令并继续 Vehicle 读取。D213 仍未接入 UI 处理器，不声明 UI Sync；本次未刷写。L0 保持 PASS，完整范围 L1 为 PARTIAL，L2-L5 为 NOT_RUN。
+
+## 有序 UI Sync 交接 CI 与镜像核验
+
+SDK d6ab43aef99f39c31bcffaab317b0352cef35136 的 [sanitizer Host 和双语文档 CI 均通过](https://github.com/boa-z/rt-carplay/actions/runs/43763712003)。集成 2f5f5895d019503c600361aa573bede2e1f6196b 的 [Host、GUI、Headless CI 均通过](https://github.com/boa-z/luban-lite-carplay/actions/runs/43763767218)。三个产物均已下载，两份固件验收清单的精确版本匹配上述记录，SDK/集成工作区记录为空。每份固件产物六项 SHA256 及每份完整镜像九个组件边界/CRC32 检查全部通过。
+
+GUI 镜像 SHA256：324226e2a572111d7943e743227960fecc10bc1097c4e64c2321999f29a31971。Headless 镜像 SHA256：9d938362522e9cc57ae81431045d886cc22d65fdf33e4658ddc87c0653d40b47。两份镜像均未刷写，滚动 Preview Release 已跳过；后续仅文档提交不会改变这些镜像身份。队列提供宿主交接基础，不能证明渲染器或物理呈现已完成。L0 保持 PASS，完整范围 L1 为 PARTIAL，L2-L5 为 NOT_RUN。
