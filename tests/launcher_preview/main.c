@@ -12,6 +12,14 @@ static unsigned file_version, replies, audio_selection;
 static carplay_internet_status_t network_model;
 static unsigned network_requests;
 static bool preview_video_active;
+static carplay_ota_status_t ota_model;
+static unsigned ota_checks, ota_installs;
+void carplay_ota_status(carplay_ota_status_t *out) { *out = ota_model; }
+int carplay_ota_check(void) { ++ota_checks; ota_model.state = CARPLAY_OTA_CHECKING; ota_model.busy = true; return 0; }
+int carplay_ota_install(const char *commit) {
+    if (strcmp(commit, ota_model.remote_commit)) return -1;
+    ++ota_installs; ota_model.state = CARPLAY_OTA_DOWNLOADING; ota_model.busy = true; return 0;
+}
 void carplay_internet_status(carplay_internet_status_t *out) { *out = network_model; }
 bool carplay_internet_check(void) { ++network_requests; network_model.checking = true; return true; }
 static unsigned preview_ms = 183000, manager_calls;
@@ -138,6 +146,32 @@ int main(int argc, char **argv)
     assert(!model.wireless_enabled && microphone_muted);
     screenshot(argv[1], "settings");
     inside(wireless_setting); inside(microphone_setting);
+    inside(ota_check_button); inside(ota_install_button); inside(ota_state_label);
+    snprintf(ota_model.current, sizeof(ota_model.current), "1.0.0");
+    snprintf(ota_model.current_commit, sizeof(ota_model.current_commit), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    snprintf(ota_model.slot, sizeof(ota_model.slot), "A");
+    lv_obj_send_event(ota_check_button, LV_EVENT_CLICKED, NULL); update_page(NULL);
+    assert(ota_checks == 1 && lv_obj_has_state(ota_check_button, LV_STATE_DISABLED));
+    ota_model.state = CARPLAY_OTA_AVAILABLE; ota_model.busy = false;
+    strcpy(ota_model.remote, "1.0.0");
+    strcpy(ota_model.remote_commit, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    strcpy(ota_model.message, "Preview build bbbbbbbb is available. Disconnect CarPlay before installing.");
+    screenshot(argv[1], "ota-available"); inside(ota_version_label);
+    lv_obj_send_event(ota_install_button, LV_EVENT_CLICKED, NULL);
+    assert(!ota_installs && !lv_obj_has_flag(ota_confirm_panel, LV_OBJ_FLAG_HIDDEN));
+    screenshot(argv[1], "ota-confirm"); inside(ota_confirm_text);
+    inside(lv_obj_get_child(ota_confirm_panel, 1)); inside(lv_obj_get_child(ota_confirm_panel, 2));
+    ota_confirm_cancel(NULL); assert(!ota_installs);
+    ota_install_now(NULL); strcpy(ota_model.remote_commit, "cccccccccccccccccccccccccccccccccccccccc");
+    ota_confirm_install(NULL); assert(!ota_installs && ota_notice);
+    ota_install_now(NULL); ota_confirm_install(NULL); assert(ota_installs == 1);
+    ota_model.state = CARPLAY_OTA_APPLYING; ota_model.progress = 60;
+    strcpy(ota_model.message, "Package verified. Writing inactive slot; keep power connected.");
+    screenshot(argv[1], "ota-applying");
+    assert(lv_obj_has_state(ota_check_button, LV_STATE_DISABLED) && lv_obj_has_state(ota_install_button, LV_STATE_DISABLED));
+    ota_model.state = CARPLAY_OTA_FAILED; ota_model.busy = false;
+    strcpy(ota_model.message, "Download, storage or SHA256 check failed. Check for updates again.");
+    screenshot(argv[1], "ota-failed"); inside(ota_state_label);
     lv_obj_add_flag(settings_panel, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(diagnostics_panel, LV_OBJ_FLAG_HIDDEN);
     screenshot(argv[1], "diagnostics"); inside(debug_label);
@@ -165,6 +199,6 @@ int main(int argc, char **argv)
     show_modal(network_panel);model.stage=DEMO_LIVE;preview_video_active=true;
     update_page(NULL);assert(lv_obj_has_flag(network_panel,LV_OBJ_FLAG_HIDDEN));
     assert(lv_obj_has_flag(modal_scrim,LV_OBJ_FLAG_HIDDEN));
-    puts("Actual LVGL 9: twelve 1024x600 previews, visible bounds and network/settings/device/audio/pairing request routing passed; modeled connection values only");
+    puts("Actual LVGL 9: 1024x600 previews including OTA consent and failure states, visible bounds and network/settings/device/audio/pairing request routing passed; modeled connection values only");
     return 0;
 }

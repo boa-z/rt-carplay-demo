@@ -62,6 +62,8 @@ ipheth_status
 
 Settings are held in RAM and reset at reboot. Wireless off leaves USB enabled. Pairing and trust records persist independently. For manual bring-up, disable both automatic options before using `carplay_start wired` or `carplay_start`; do not mix manual lifecycle commands with an active manager.
 
+Settings → FIRMWARE & UPDATES shows the installed version, source commit and A/B slot. Check for updates reads a strict manifest containing version, full commit, board, package size and SHA256 over wired Ethernet. Any different commit is offered as a preview build, including an older commit. Installation requires confirmation of that exact target and an idle CarPlay session. The worker stages the complete package in `/data`, verifies the stored bytes, writes the inactive slot and reboots. Console commands `carplay_ota status`, `carplay_ota check` and `carplay_ota install` share the same worker gate. See [OTA update policy and validation](docs/ota.md).
+
 ## Application configuration
 
 The `rt-carplay application` menu owns board options; generic SDK options have one owner in the SDK Kconfig. The GUI configuration enables the following features; Headless deliberately omits media/input devices.
@@ -81,6 +83,7 @@ The `rt-carplay application` menu owns board options; generic SDK options have o
 | `RTCARPLAY_MIC_AEC` | GUI enables queue-aligned AEC with runtime comparison/calibration |
 | `RTCARPLAY_TOUCH_PANEL` | Exclusive panel reader and CarPlay HID routing |
 | `RTCARPLAY_SCREEN_WIDTH/HEIGHT` | 1024 / 600, matching the panel |
+| `RTCARPLAY_OTA` | Settings firmware version and wired-Ethernet A/B update |
 
 Pinmux, clocks and partition layout belong to [the board](../../../target/d21x/demo128-nand-carplay/). Verify board and application configuration together when changing media or input. Launcher V2 preserved the prior audio behavior. The subsequent [audio recovery](docs/audio-recovery.md) changes application buffering, clock protection and AEC integration; portable SDK protocol and codec behavior remain unchanged.
 

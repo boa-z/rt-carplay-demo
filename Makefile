@@ -29,7 +29,7 @@ sdk-libraries:
 	$(MAKE) -C $(RTCP_ROOT) $(patsubst $(RTCP_ROOT)/%,%,$(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS))
 $(BOARD_BINS): | sdk-libraries $(BUILD)
 $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS): sdk-libraries
-check: $(BOARD_BINS) check-auto-connections check-internet-share check-udp-burst check-usb-file-sync
+check: $(BOARD_BINS) check-auto-connections check-internet-share check-udp-burst check-usb-file-sync check-ota
 	@set -e; for t in $(BOARD_BINS); do ./$$t; done
 	$(MAKE) check-lubanlite-video check-lubanlite-touch check-lubanlite-demo check-lubanlite-bonds check-lubanlite-usb check-lubanlite-handoff check-lubanlite-reconnect check-lubanlite-capabilities check-iap2-endpoints check-usb-iap2-worker check-wireless-iap2-worker
 
@@ -196,6 +196,10 @@ $(BUILD)/test_audio_input_aec: tests/unit/test_audio_input.c platform/audio_inpu
 .PHONY: check-usb-iap2-worker
 check-usb-iap2-worker: sdk-libraries
 	python3 tests/run_usb_iap2_worker.py
+
+.PHONY: check-ota
+check-ota: sdk-libraries
+	python3 tests/run_ota_worker.py
 
 .PHONY: check-wireless-iap2-worker
 check-wireless-iap2-worker: sdk-libraries

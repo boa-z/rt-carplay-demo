@@ -27,6 +27,8 @@ if GetDepend('RTCARPLAY_AUTO_CONNECT'):
     src += Glob('app/connection_manager.c')
 if GetDepend('RTCARPLAY_INTERNET_SHARE'):
     src += Glob('platform/internet_share_lubanlite.c')
+if GetDepend('RTCARPLAY_OTA'):
+    src += Glob('platform/ota_lubanlite.c')
 cpppath = [cwd, cwd + '/app', cwd + '/platform']
 if GetDepend('RTCARPLAY_USB_FILE_SYNC'):
     # Application composition: reuse the upstream class, sync service, DFS
@@ -146,10 +148,61 @@ if GetDepend('LPKG_RT_CARPLAY_LOG'):
     ccflags = '-include ' + os.path.join(
         repo, 'port', 'rtthread', 'include', 'rtcp_log_rtthread.h')
 
+# Firmware version shown on the Settings page. image_cfg.json is the single
+# source of truth: mkcpio.py copies the same string into the OTA package.
+def firmware_version():
+    chip = GetDepend('PRJ_CHIP')
+    board = GetDepend('PRJ_BOARD')
+    if not isinstance(chip, str) or not isinstance(board, str):
+        return 'unknown'
+    aic_root = os.environ.get('AIC_ROOT', '')
+    if not aic_root:
+        aic_root = os.path.normpath(os.path.join(cwd, '..', '..', '..'))
+    path = os.path.join(aic_root, 'target', chip.strip('"'), board.strip('"'),
+                        'pack', 'image_cfg.json')
+    try:
+        import json
+        with open(path) as cfg:
+            # image_cfg.json allows // comments; strip them before parsing.
+            text = ''.join(line.split('//')[0].strip()
+                           for line in cfg.readlines())
+        text = text.replace(',}', '}').replace(',]', ']')
+        return str(json.loads(text)['image']['info']['version'])
+    except Exception as error:
+        print('[rtcarplay] firmware version unavailable: %s' % error)
+        return 'unknown'
+
+# Commit hash of the running image; the nightly channel treats a different
+# published hash as a new build even when the version string is unchanged.
+def build_commit():
+    try:
+        import subprocess
+        import re
+        override = os.environ.get('RTCARPLAY_BUILD_COMMIT', '')
+        if override:
+            if not re.match(r'^[0-9a-f]{40}$', override):
+                raise ValueError('invalid RTCARPLAY_BUILD_COMMIT')
+            return override
+        out = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=cwd)
+        if not isinstance(out, str):
+            out = out.decode('ascii', 'replace')
+        dirty = subprocess.check_output(
+            ['git', 'status', '--porcelain', '--untracked-files=no'], cwd=cwd)
+        return out.strip() + ('-dirty' if dirty.strip() else '')
+    except Exception as error:
+        print('[rtcarplay] build commit unavailable: %s' % error)
+        return 'unknown'
+
+# The values are passed unquoted and stringified in C: quoted definitions do
+# not survive SCons' command-line splitting on every host.
+cppdefines = ['MBEDTLS_CHACHA20_C', 'MBEDTLS_CHACHAPOLY_C',
+              'MBEDTLS_HKDF_C',
+              'RTCARPLAY_FW_VERSION=%s' % firmware_version(),
+              'RTCARPLAY_BUILD_COMMIT=%s' % build_commit()]
+
 group = DefineGroup('Applications', src, depend=[''], CPPPATH=cpppath,
                     LOCAL_CCFLAGS=ccflags,
-                    CPPDEFINES=['MBEDTLS_CHACHA20_C', 'MBEDTLS_CHACHAPOLY_C',
-                                'MBEDTLS_HKDF_C'])
+                    CPPDEFINES=cppdefines)
 
 app_sconscript = os.path.join(repo, 'SConscript')
 if not os.path.isfile(app_sconscript):

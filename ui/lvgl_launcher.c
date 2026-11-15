@@ -15,6 +15,9 @@
 #if defined(RTCARPLAY_MICROPHONE)
 #include "audio_input_lubanlite.h"
 #endif
+#if defined(RTCARPLAY_OTA)
+#include "ota_lubanlite.h"
+#endif
 
 static rt_mutex_t pointer_lock;
 static lv_obj_t *heading, *description, *pin_label, *badge, *debug_label;
@@ -25,6 +28,15 @@ static lv_obj_t *settings_button, *diagnostics_panel, *modal_scrim;
 static lv_obj_t *network_panel, *network_button, *network_summary, *network_detail, *network_check, *network_note;
 static lv_obj_t *bt_panel, *bt_text, *bt_accept;
 static uint32_t visible_pairing_request;
+static bool network_ready;
+
+#if defined(RTCARPLAY_OTA)
+static lv_obj_t *ota_version_label, *ota_state_label;
+static lv_obj_t *ota_check_button, *ota_install_button;
+static lv_obj_t *ota_confirm_panel, *ota_confirm_text;
+static char ota_confirm_commit[41];
+static const char *ota_notice;
+#endif
 
 static lv_obj_t *manage_button, *retry_button, *file_panel, *file_list, *file_note;
 static lv_obj_t *confirm_panel, *confirm_text;
@@ -44,6 +56,9 @@ static void update_scrim(void)
 {
     if (!modal_scrim) return;
     lv_obj_t *pages[] = {settings_panel, diagnostics_panel, network_panel, file_panel, bt_panel,
+#if defined(RTCARPLAY_OTA)
+        ota_confirm_panel,
+#endif
 #if defined(RTCARPLAY_AUDIO)
         audio_panel,
 #endif
@@ -334,10 +349,103 @@ static void network_check_now(lv_event_t *event)
     (void)carplay_internet_check(); /* Queue only; never wait in the LVGL task. */
 }
 
+#if defined(RTCARPLAY_OTA)
+static void ota_check_now(lv_event_t *event)
+{
+    (void)event;
+    ota_notice = carplay_ota_check() == RT_EOK ? NULL : "Update check could not start; retry when the worker is idle.";
+}
+/* Nightly channel: the download starts only after this explicit confirmation. */
+static void ota_install_now(lv_event_t *event)
+{
+    (void)event;
+    carplay_ota_status_t ota;
+    carplay_ota_status(&ota);
+    if (ota.busy || ota.state != CARPLAY_OTA_AVAILABLE) return;
+    snprintf(ota_confirm_commit, sizeof(ota_confirm_commit), "%s", ota.remote_commit);
+    char target[48];
+    if (ota.remote_commit[0])
+        snprintf(target, sizeof(target), "preview build %.8s", ota.remote_commit);
+    else
+        snprintf(target, sizeof(target), "version %s", ota.remote);
+    lv_label_set_text_fmt(ota_confirm_text,
+        "Install %s?\n\n"
+        "Installed now: %s (%.8s)\n\n"
+        "Disconnect CarPlay and keep power connected.\n"
+        "The unit reboots after package verification and inactive-slot writing.",
+        target, ota.current, ota.current_commit);
+    lv_obj_remove_flag(ota_confirm_panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(ota_confirm_panel);
+    update_scrim();
+}
+static void ota_confirm_install(lv_event_t *event)
+{
+    (void)event;
+    lv_obj_add_flag(ota_confirm_panel, LV_OBJ_FLAG_HIDDEN);
+    update_scrim();
+    ota_notice = carplay_ota_install(ota_confirm_commit) == RT_EOK ? NULL :
+        "The update target changed or the worker is busy. Check and confirm again.";
+}
+static void ota_confirm_cancel(lv_event_t *event)
+{
+    (void)event;
+    lv_obj_add_flag(ota_confirm_panel, LV_OBJ_FLAG_HIDDEN);
+    update_scrim();
+}
+/* Mirrors the OTA service state; runs in the GUI timer only. */
+static void ota_update(void)
+{
+    if (lv_obj_has_flag(settings_panel, LV_OBJ_FLAG_HIDDEN)) return;
+
+    carplay_ota_status_t ota;
+    carplay_ota_status(&ota);
+    lv_label_set_text_fmt(ota_version_label, "Firmware %s (%.8s)  |  Slot %s  |  Preview channel",
+                          ota.current,
+                          ota.current_commit[0] ? ota.current_commit : "unknown",
+                          ota.slot);
+    char text[160];
+    switch (ota.state) {
+    case CARPLAY_OTA_CHECKING:
+        snprintf(text, sizeof(text), "Checking the release server...");
+        break;
+    case CARPLAY_OTA_DOWNLOADING:
+    case CARPLAY_OTA_APPLYING:
+        if (ota.progress >= 0)
+            snprintf(text, sizeof(text), "%s  %d%%", ota.message, ota.progress);
+        else
+            snprintf(text, sizeof(text), "%s", ota.message);
+        break;
+    case CARPLAY_OTA_UP_TO_DATE:
+    case CARPLAY_OTA_AVAILABLE:
+    case CARPLAY_OTA_FAILED:
+    case CARPLAY_OTA_REBOOTING:
+        snprintf(text, sizeof(text), "%s", ota.message);
+        break;
+    default:
+        snprintf(text, sizeof(text),
+                 "Not checked yet. Connect Ethernet, then check for updates.");
+        break;
+    }
+    lv_label_set_text(ota_state_label, ota_notice ? ota_notice : text);
+    lv_obj_set_style_text_color(ota_state_label, lv_color_hex(0xC1CFDF), 0);
+    if (ota.state == CARPLAY_OTA_UP_TO_DATE || ota.state == CARPLAY_OTA_AVAILABLE)
+        lv_obj_set_style_text_color(ota_state_label, lv_color_hex(0x58E0BF), 0);
+    else if (ota.state == CARPLAY_OTA_FAILED)
+        lv_obj_set_style_text_color(ota_state_label, lv_color_hex(0xE08A8A), 0);
+    bool busy = ota.busy || !lv_obj_has_flag(ota_confirm_panel, LV_OBJ_FLAG_HIDDEN);
+    if (network_ready && !busy) lv_obj_remove_state(ota_check_button, LV_STATE_DISABLED);
+    else lv_obj_add_state(ota_check_button, LV_STATE_DISABLED);
+    if (network_ready && !busy && ota.state == CARPLAY_OTA_AVAILABLE)
+        lv_obj_remove_state(ota_install_button, LV_STATE_DISABLED);
+    else lv_obj_add_state(ota_install_button, LV_STATE_DISABLED);
+}
+#endif
+
 static void network_update(void)
 {
     carplay_internet_status_t n;
     carplay_internet_status(&n);
+    network_ready = n.available && n.route_ready;
     const char *state = !n.available ? "Unavailable" : !n.device ? "No adapter" :
         !n.link ? "Cable disconnected" : !n.addressed ? "Getting address" :
         !n.route_ready ? "No gateway" :
@@ -383,6 +491,9 @@ static void update_page(lv_timer_t *timer)
             lv_obj_add_flag(settings_panel, LV_OBJ_FLAG_HIDDEN);
             lv_obj_add_flag(diagnostics_panel, LV_OBJ_FLAG_HIDDEN);
             lv_obj_add_flag(network_panel, LV_OBJ_FLAG_HIDDEN);
+#if defined(RTCARPLAY_OTA)
+            lv_obj_add_flag(ota_confirm_panel, LV_OBJ_FLAG_HIDDEN);
+#endif
             update_scrim();
         }
         was_live = true;
@@ -391,6 +502,9 @@ static void update_page(lv_timer_t *timer)
     was_live = false;
     network_update();
     update_files();
+#if defined(RTCARPLAY_OTA)
+    ota_update();
+#endif
 #if defined(RTCARPLAY_AUDIO)
     audio_update();
 #endif
@@ -608,13 +722,42 @@ void carplay_demo_launcher_init(void)
     lv_obj_add_state(microphone_setting, LV_STATE_DISABLED);
 #endif
     label(settings_panel, "Mute applies to CarPlay microphone uplink.\nSpeaker and microphone tests are on the Audio page.", 340, 185, 500, 0xC1CFDF, false);
+#if defined(RTCARPLAY_OTA)
+    label(settings_panel, "FIRMWARE & UPDATES", 10, 264, 500, 0x58E0BF, false);
+    ota_version_label = label(settings_panel, "Installed firmware", 10, 296, width - 140, 0xC1CFDF, false);
+    ota_state_label = label(settings_panel,
+        "Not checked yet. Connect Ethernet, then check for updates.",
+        10, 324, width - 140, 0x8FA5BF, false);
+    ota_check_button = button(settings_panel, "Check for updates", 10, 388, 230, ota_check_now);
+    ota_install_button = button(settings_panel, "Install update", 255, 388, 230, ota_install_now);
+    lv_obj_add_state(ota_check_button, LV_STATE_DISABLED);
+    lv_obj_add_state(ota_install_button, LV_STATE_DISABLED);
+    lv_obj_t *ota_note = label(settings_panel,
+        "Disconnect CarPlay before installing. Downloads are staged in /data and verified.\n"
+        "Keep power connected while writing the inactive slot. The unit then reboots.",
+        10, 448, width - 140, 0x8FA5BF, false);
+#if LV_FONT_MONTSERRAT_14
+    lv_obj_set_style_text_font(ota_note, &lv_font_montserrat_14, 0);
+#endif
+#else
     label(settings_panel, "SYSTEM", 10, 280, 500, 0x58E0BF, false);
     lv_obj_t *system = label(settings_panel, "", 10, 316, width - 140, 0xC1CFDF, false);
     lv_label_set_text_fmt(system, "Launcher V2  |  ArtInChip D213  |  LVGL 9\nDisplay: %d x %d  |  One active CarPlay session", width, height);
-    lv_obj_t *back = button(settings_panel, "Back", 10, height - 165, 160, NULL);
+#endif
+    lv_obj_t *back = button(settings_panel, "Back",
+                            width - 268, 388, 160, NULL);
     lv_obj_add_event_cb(back, close_panel, LV_EVENT_CLICKED, settings_panel);
     lv_obj_add_flag(settings_panel, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(settings_button, open_panel, LV_EVENT_CLICKED, settings_panel);
+#if defined(RTCARPLAY_OTA)
+    ota_confirm_panel = panel(screen, 80, 120, width - 160, height - 240);
+    ota_confirm_text = label(ota_confirm_panel, "", 20, 20, width - 240, 0xFFFFFF, false);
+    lv_obj_set_style_text_line_space(ota_confirm_text, 6, 0);
+    button(ota_confirm_panel, "Cancel", 20, height - 340, 200, ota_confirm_cancel);
+    button(ota_confirm_panel, "Install and reboot", 240, height - 340, 260,
+           ota_confirm_install);
+    lv_obj_add_flag(ota_confirm_panel, LV_OBJ_FLAG_HIDDEN);
+#endif
     diagnostics_panel = panel(screen, 30, 25, width - 60, height - 50);
     label(diagnostics_panel, "CONNECTION DIAGNOSTICS", 10, 0, width - 140, 0xF2F7FF, true);
     debug_label = label(diagnostics_panel, "Waiting for a status snapshot...", 10, 55, width - 140, 0xC1CFDF, false);

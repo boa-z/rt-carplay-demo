@@ -14,7 +14,7 @@ Launcher V2 follows the [V2.1 software verification baseline](refactoring-v21-ve
 | Vehicle network | Home Ethernet shortcut, adapter/cable status, IPv4/mask/gateway/DNS, asynchronous Check now, HTTP 204 evidence age and separate Internet-sharing status |
 | Bluetooth pairing | Current numeric comparison, consent or displayed passkey; matching-request confirmation and cancellation |
 | Devices | Saved wired phone identifiers and CarPlay trust group, refresh, confirmed deletion and explicit all-Bluetooth-phones reset |
-| Settings | Idle-only wireless discovery on/off with USB always enabled, actual microphone mute when built, panel resolution and system information |
+| Settings | Idle-only wireless discovery on/off with USB always enabled, actual microphone mute when built, installed firmware version, commit hash and A/B slot, preview commit check, target-bound confirmation, verified download, inactive-slot writing and failure status |
 | Audio | Existing tone/silence/AAC, rate/channel, gain/mute, start/stop, microphone level/loopback and input meters; controls run on the owner |
 | Diagnostics | Independent transport/authentication/session/media/input states, network, radio/MFi, trust/storage errors, decoded counts, display handoff, recovery and retry wait |
 

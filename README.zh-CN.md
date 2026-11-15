@@ -62,6 +62,8 @@ ipheth_status
 
 设置保存在 RAM，重启复位。关闭无线后 USB 仍启用。配对和信任记录独立持久化。手动调试前禁用两个自动选项，再使用 `carplay_start wired` 或 `carplay_start`，不要与活动管理器混用手动生命周期命令。
 
+Settings → FIRMWARE & UPDATES 显示当前版本、源码提交和 A/B 槽位。检查更新通过有线以太网读取包含版本、完整提交、板型、包大小及 SHA256 的严格清单。不同提交会作为预览版本提供，其中也可能包含较旧提交。安装需要确认该确切目标并断开 CarPlay；工作线程将完整包暂存到 `/data`，校验存储内容后写入非活动槽位并重启。控制台 `carplay_ota status`、`carplay_ota check`、`carplay_ota install` 共用同一个任务入口。详见 [OTA 更新策略与验证](docs/zh-CN/ota.md)。
+
 ## 应用配置
 
 `rt-carplay application` 菜单拥有板级选项，通用 SDK 选项在 SDK Kconfig 中有唯一 Owner。GUI 配置启用下列功能，Headless 则有意省略媒体和输入设备。
@@ -81,6 +83,7 @@ ipheth_status
 | `RTCARPLAY_MIC_AEC` | GUI 启用队列对齐的 AEC，支持运行时对比/校准 |
 | `RTCARPLAY_TOUCH_PANEL` | 独占面板 Reader 和 CarPlay HID 路由 |
 | `RTCARPLAY_SCREEN_WIDTH/HEIGHT` | 1024 / 600，与面板一致 |
+| `RTCARPLAY_OTA` | Settings 版本显示与有线以太网 A/B 更新 |
 
 Pinmux、时钟和分区布局归属[板级目录](../../../target/d21x/demo128-nand-carplay/)。修改媒体或输入时同时核对板级和应用配置。Launcher V2 保留了此前音频行为，后续[音频恢复](docs/zh-CN/audio-recovery.md)修改应用缓冲、时钟保护及 AEC 集成，不改变可移植 SDK 协议或编解码行为。
 

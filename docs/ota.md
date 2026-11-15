@@ -1,0 +1,19 @@
+# Wired A/B updates
+
+[中文](zh-CN/ota.md)
+
+OTA is application policy built on the existing webclient, mbedTLS and Luban-Lite A/B updater. The portable rt-carplay SDK has no update or UI dependency. The GUI defconfig enables OTA; it does not introduce another firmware profile.
+
+Flash a matching full A/B IMG over USB before using OTA on an older non-A/B installation. OTA updates only OS and rodata, retaining `/data`; it cannot migrate a bootloader or partition layout. Keep a matching full image available for recovery.
+
+Settings → FIRMWARE & UPDATES displays the running version and source commit. Checking reads the active OS/rodata slot in a worker; the slot is initially unknown. Ethernet `e0` must have link, IPv4 address, gateway and the default route. A valid clock and trusted TLS chain are also required. The application requires HTTPS and verifies that the final HTTP session uses TLS; it retains the existing webclient redirect behavior.
+
+The preview manifest requires `version`, a full lowercase 40-character `commit`, `board=d21x_demo128-nand-carplay`, decimal `size` and lowercase `sha256`. The supported archive size is 512 bytes to 8 MiB. CI checks the archive structure, payload CRCs and exact OS/rodata mapping before generating this manifest, and uploads the manifest after the assets. SHA256 binds the downloaded bytes to the manifest; this is not an independent firmware signature. Trust depends on HTTPS, the configured CA roots and the release publisher.
+
+Any different commit is offered, including a possible downgrade. The confirmation dialog pins the full commit observed when opened. Rechecking or changing the candidate invalidates an older confirmation. Console commands `carplay_ota status`, `carplay_ota check` and `carplay_ota install` use the same reservation as the GUI; `install` is explicit consent to the candidate shown by the last check. Arbitrary URL installation is not exposed by this application command.
+
+Disconnect CarPlay before installing. A single worker reserves the task before scheduling, downloads `/data/.carplay-update.cpio`, checks its complete size and hashes the stored bytes before initializing flash writes. Ensure `/data` has enough free space for the package. A new CarPlay session during download or application aborts the update at the next check; the updater does not reserve the connection manager. Inactive-slot writing displays progress, then the existing A/B library commits the slot selection and reboots. Keep power connected throughout writing and reboot.
+
+Network, download, storage and hash failures remove the staging file without initializing flash. A write failure does not request a slot switch or reboot. An environment commit failure is reported separately because the SDK can partially modify its environment; inspect the boot state before retrying. Before reboot, the application reopens the stored environment and requires both next-slot records and the upgrade flag to match the intended switch, because the SDK does not propagate its flush error. The underlying SDK flush and rollback implementation is unchanged. The legacy SDK `test_ota` command bypasses this application's checks and must not run concurrently; use the Settings or `carplay_ota` path for normal updates.
+
+Run `make check-ota` from the application directory and `python3 .ci/test-ota-manifest.py` from the repository root. Host tests exercise the actual worker with real SHA256 and modeled HTTP, flash and RTOS operations; LVGL previews exercise confirmation, cancellation, target changes, writing and failure states. Firmware builds and archive verification establish software evidence only. Physical TLS download, A→B→A boot, retained settings, power interruption and rollback require board testing and are not established by host tests.
