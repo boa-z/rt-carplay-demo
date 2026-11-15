@@ -44,7 +44,7 @@ The independent encrypted Host controller passed three-channel TCP exchanges thr
 
 The SDK routing milestone passed [its CI](https://github.com/boa-z/rt-carplay/actions/runs/43740826579). Integration 3a9e363d35040d9720df8d899028f78dc9c514c5 passed [Host and both firmware jobs](https://github.com/boa-z/luban-lite-carplay/actions/runs/43740941965). Downloaded GUI/Headless artifacts passed every SHA256 entry, source identity/clean-inventory check and all nine complete-image component checks; the Preview Release job was skipped.
 
-The D213 profiles still register no new application protocol and use the existing receive-only iAP path. The SDK supports explicit Vehicle State processor attachment to Receiver, but does not compose its /info declaration; UI Sync is not implemented. Next steps are capability declarations gated by complete handlers and UI Sync binary-plist state/ACK handling. HEVC, displayPanels, altScreen and unsupported vehicle/UI features are not added by the development flag. SDK code stays independent of LVGL, MPP, DE and D213.
+The D213 profiles still register no new application protocol and use the existing receive-only iAP path. The SDK supports explicit Vehicle State and UI Sync processor attachment to Receiver, but does not compose their /info declarations. The next protocol step is capability declarations gated by complete handlers and actual host inventory. HEVC, displayPanels, altScreen and unsupported vehicle/UI features are not added by the development flag. SDK code stays independent of LVGL, MPP, DE and D213.
 
 ## Dedicated development profiles and artifacts
 
@@ -85,7 +85,7 @@ Receiver seed, AirPlay records and USB trust files were backed up outside Git wi
 | Level | Status | Evidence still required |
 | --- | --- | --- |
 | L0 | PASS for initial source research | This review distinguishes code, unexecuted reference tests and official product requirements; further protocol research continues. |
-| L1 | PARTIAL | Display/OPACK/Vehicle State/registered Type 130 transport Host tests passed; Vehicle State Receiver composition now has encrypted Host coverage; gated capability declarations and UI Sync remain. |
+| L1 | PARTIAL | Display/OPACK/Vehicle State/registered Type 130 transport Host tests passed; Vehicle State/UI Sync Receiver composition has encrypted Host coverage; gated capability declarations remain. |
 | L2 | NOT_RUN | Implement and physically validate D213 FULLSCREEN/FUSION/LOCAL, input, reconnect and performance. |
 | L3 | NOT_RUN | Real-iPhone Ultra feature negotiation. |
 | L4 | NOT_RUN | Real-iPhone Vehicle State and UI Sync exchanges. |
@@ -98,3 +98,9 @@ Official Ultra product acceptance remains NOT_RUN. Unknown requirements are not 
 The SDK now optionally attaches a real Vehicle State processor to Receiver configuration, registering both authenticated lanes and managing response/notification retry, selective channel replacement and subscription reset at the authentication boundary. The encrypted simulated-controller scenario verifies config/read/write/register and HIGH notifications alongside Classic media; a raw UI backend can coexist. Dedicated fault tests cover queue exhaustion and rejection before an additional write. Delivery status exposes pending bytes, retries and abandoned buffers. This is Host application-protocol evidence, not L3/L4 or official Ultra acceptance. The D213 application still attaches no vehicle processor and advertises no new Vehicle State/UI Sync capabilities.
 
 Validation on 2026-11-15 passed the full SDK Make suite, CMake 61/61 tests with ASan/UBSan, the complete integration Host suite and both native Windows GUI/Headless image builds with nine-component bounds/CRC checks. Integral step validation now uses exact integer modulo rather than a long-double libm function absent from this RISC-V toolchain. SDK commit 5c15c3699368585508d28dc284620dda988402f1 passed [its GitHub CI](https://github.com/boa-z/rt-carplay/actions/runs/43743788364). Local pre-commit artifacts retain dirty-source inventories; CI produces clean revision-specific artifacts. No new image has been flashed.
+
+## UI Sync application milestone
+
+The SDK now provides an optional UI Sync model and Receiver attachment: reset/version negotiation, nested plist layout/appearance/focus messages, phone-choice state, application ACK/noAck and retained output. Focus tokens come from the host; no reference constant is assumed. Independent Python plistlib fixtures and outgoing message checks complement the encrypted simulated-controller scenario. The latter exercises both actual application processors, queue exhaustion and rejection before applying a new layout, fresh-channel negotiation, bad-tag isolation, a surviving vehicle read and Classic media. Limits, sequence assumptions and remaining renderer requirements are recorded in the SDK UI Sync documentation. D213 still attaches neither processor and advertises no new UI/vehicle capabilities. L1 remains PARTIAL until gated capability composition; L2–L5 remain NOT_RUN.
+
+Validation on 2026-11-15 passed the full SDK Make suite, CMake 64/64 with ASan/UBSan, the complete integration Host suite and native Windows GUI/Headless builds with all nine image-component bounds/CRC checks. The independent Python check parsed 28 outgoing UI Sync messages. This integration pins SDK a76a7fe03a592a4854f15b0fcd147dfd406cb702. Local images include their pre-commit dirty-source inventories; revision-specific CI images are the clean source artifacts. No new firmware was flashed.
