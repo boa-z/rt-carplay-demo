@@ -196,6 +196,8 @@ with tempfile.TemporaryDirectory(prefix="rtcp-capabilities-") as directory:
                     "-I" + str(rtcp / "core/discovery/include"), str(path / "test.c"),
                     str(rtcp / "core/airplay/airplay_bplist.c"),
                     str(rtcp / "core/airplay/airplay_info_plist.c"),
+                    str(rtcp / "core/airplay/airplay_vehicle.c"),
+                    str(rtcp / "core/airplay/airplay_opack.c"),
                     str(rtcp / "core/media/display.c"),
                     str(rtcp / "core/airplay/airplay_hid_descriptor.c"),
                     str(rtcp / "core/discovery/airplay_txt.c"), "-lm", "-o", str(path / "test")], check=True)

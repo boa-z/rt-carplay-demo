@@ -104,3 +104,11 @@ SDK 现可通过 Receiver 配置显式接入 Vehicle State 处理器，注册两
 SDK 现有可选 UI Sync 模型与 Receiver 接入：reset/版本协商、嵌套 plist 布局/外观/焦点消息、手机选择状态、应用 ACK/noAck 及保留输出。焦点 token 由宿主提供，不采用参考固定值。独立 Python plistlib 输入及输出核对补充加密模拟控制器场景；后者使用两个实际应用处理器，覆盖队列耗尽、应用新布局前拒绝、新通道协商、错误认证标签隔离、车辆读操作继续工作及 Classic 媒体。SDK UI Sync 文档记录限制、序号假设及剩余渲染器要求。D213 仍未接入这两个处理器，不声明新的 UI/车辆能力。能力组合门控完成前 L1 保持 PARTIAL，L2–L5 保持 NOT_RUN。
 
 2026-11-15 验证通过完整 SDK Make 测试、ASan/UBSan 下 CMake 64/64、完整集成 Host 测试，以及原生 Windows GUI/Headless 构建及全部九组件范围/CRC 校验。独立 Python 检查解析了 28 条输出 UI Sync 消息。本集成固定 SDK 版本 a76a7fe03a592a4854f15b0fcd147dfd406cb702。本地镜像保留提交前未提交源码清单，确定版本的 CI 镜像提供干净源码产物。尚未刷写新固件。
+
+## Vehicle State 能力生成里程碑
+
+SDK e175a8f019d5c86b5e152397fb0a75d758d11668 新增显式 Vehicle State 协商开关。/info 构造器可从接入的模型生成 vehicleStateProtocolInfo；Receiver 在创建时及每次接受新控制器前，校验完整目录和当前初值。元数据缺失、重复、不匹配或过期会拒绝启用或会话。动态宿主应在相关值变化后、重连前重新构建 /info。初始 SETUP 仅在该校验通过且手机提供对应能力时启用 vehicleStateProtocol。媒体流状态区分 registered、offered 和 enabled；enabled 不代表手机实际执行或官方验收。
+
+独立 Python plistlib 测试验证 Unicode、代理对、内嵌 NUL、有限浮点元数据、二进制值、大于 2^53 的精确 int64，以及十种独立编码或修改的元数据情况。加密 Host 场景检查 enabledFeatures，拒绝错误能力刷新，验证重复 SETUP 保留 offer，并验证新控制器未提供协议时不启用。2026-11-15 的 SDK Make、完整集成 Host 测试及启用 ASan/UBSan 的 CMake 65/65 全部通过。集成能力测试工具显式链接新增的可移植 Vehicle/OPACK 依赖。
+
+D213 配置仍未接入这两个处理器，negotiate_vehicle 保持 false。UI Sync 声明仍需真实显示、主题及渲染目录，不新增模拟 displayPanels、HEVC 或 Type 111。L0 为已记录的初步研究 PASS，完整需求范围的 L1 仍为 PARTIAL，L2-L5 仍为 NOT_RUN。本里程碑未刷写固件。对应提交的专用 CI GUI/Headless 镜像是构建产物，不是开发板或真实 iPhone 验收证据。
