@@ -9,6 +9,11 @@ static demo_status_t model;
 static uint8_t pixels[1024 * 600 * 4];
 static bool files_opened, audio_opened, microphone_muted;
 static unsigned file_version, replies, audio_selection;
+static carplay_internet_status_t network_model;
+static unsigned network_requests;
+static bool preview_video_active;
+void carplay_internet_status(carplay_internet_status_t *out) { *out = network_model; }
+bool carplay_internet_check(void) { ++network_requests; network_model.checking = true; return true; }
 static unsigned preview_ms = 183000, manager_calls;
 uint32_t rt_tick_get_millisecond(void) { return preview_ms; }
 rt_mutex_t rt_mutex_create(const char *n, int f) { (void)n; (void)f; return (void *)1; }
@@ -20,7 +25,7 @@ int carplay_connection_manager_start(void)
 { return ++manager_calls <= 2 ? RTCP_ENOMEM : RTCP_OK; }
 int carplay_touch_panel_start(uint16_t w, uint16_t h, carplay_touch_panel_cb_t c, void *p)
 { assert(w == 1024 && h == 600 && c); (void)p; return RTCP_OK; }
-bool carplay_launcher_video_is_active(void) { return false; }
+bool carplay_launcher_video_is_active(void) { return preview_video_active; }
 void carplay_launcher_video_event(bool a, void *p) { (void)a; (void)p; }
 bool carplay_video_sink_is_running(void) { return false; }
 int carplay_video_sink_set_display_observer(carplay_video_display_cb_t c, void *p)
@@ -100,6 +105,32 @@ int main(int argc, char **argv)
     screenshot(argv[1], "home");
     inside(heading); inside(pin_label); inside(path_labels[1]); inside(retry_button);
     assert(!lv_obj_has_state(manage_button, LV_STATE_DISABLED));
+    lv_obj_send_event(network_button, LV_EVENT_CLICKED, NULL);
+    assert(!lv_obj_has_flag(network_panel, LV_OBJ_FLAG_HIDDEN));
+    screenshot(argv[1], "network-unavailable");assert(lv_obj_has_state(network_check, LV_STATE_DISABLED));
+    network_model.available = network_model.device = true;
+    screenshot(argv[1], "network-unplugged");assert(strstr(lv_label_get_text(network_summary), "Cable disconnected"));
+    network_model.link = network_model.addressed = network_model.route_ready = true;
+    strcpy(network_model.probe_url,"http://connectivitycheck.gstatic.com/generate_204");
+    strcpy(network_model.address,"192.168.10.123");strcpy(network_model.mask,"255.255.255.0");
+    strcpy(network_model.gateway,"192.168.10.1");strcpy(network_model.dns,"8.8.8.8");
+    network_model.route_ready=false;
+    update_page(NULL);assert(lv_obj_has_state(network_check,LV_STATE_DISABLED));
+    assert(strstr(lv_label_get_text(network_summary),"No gateway"));
+    network_model.route_ready=true;
+    update_page(NULL);assert(!lv_obj_has_state(network_check, LV_STATE_DISABLED));
+    lv_obj_send_event(network_check, LV_EVENT_CLICKED, NULL);
+    screenshot(argv[1], "network-checking");assert(network_requests==1 && lv_obj_has_state(network_check, LV_STATE_DISABLED));
+    network_model.checking=false;network_model.checked=network_model.reachable=true;
+    screenshot(argv[1], "network-online");inside(network_detail);inside(network_check);
+    assert(strstr(lv_label_get_text(network_detail),"sharing: Inactive"));
+    assert(strstr(lv_label_get_text(network_summary),"Internet verified"));
+    network_model.reachable=false;
+    screenshot(argv[1], "network-failed");assert(strstr(lv_label_get_text(network_summary),"Check failed"));
+    network_model.age_ms=46000;
+    update_page(NULL);assert(strstr(lv_label_get_text(network_summary),"Check expired"));
+    lv_obj_send_event(lv_obj_get_child(network_panel,4),LV_EVENT_CLICKED,NULL);
+    assert(lv_obj_has_flag(network_panel,LV_OBJ_FLAG_HIDDEN));
     lv_obj_send_event(settings_button, LV_EVENT_CLICKED, NULL);
     assert(!lv_obj_has_flag(settings_panel, LV_OBJ_FLAG_HIDDEN));
     lv_obj_send_event(wireless_setting, LV_EVENT_CLICKED, NULL);
@@ -131,6 +162,9 @@ int main(int argc, char **argv)
     lv_obj_send_event(bt_accept, LV_EVENT_CLICKED, NULL); assert(replies == 1);
     assert(lv_obj_has_flag(bt_panel, LV_OBJ_FLAG_HIDDEN));
     assert(lv_obj_has_state(manage_button, LV_STATE_DISABLED));
-    puts("Actual LVGL 9: seven 1024x600 previews, visible bounds and settings/device/audio/pairing request routing passed; modeled connection values only");
+    show_modal(network_panel);model.stage=DEMO_LIVE;preview_video_active=true;
+    update_page(NULL);assert(lv_obj_has_flag(network_panel,LV_OBJ_FLAG_HIDDEN));
+    assert(lv_obj_has_flag(modal_scrim,LV_OBJ_FLAG_HIDDEN));
+    puts("Actual LVGL 9: twelve 1024x600 previews, visible bounds and network/settings/device/audio/pairing request routing passed; modeled connection values only");
     return 0;
 }

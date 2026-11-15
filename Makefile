@@ -24,9 +24,15 @@ sdk-libraries:
 	$(MAKE) -C $(RTCP_ROOT) $(patsubst $(RTCP_ROOT)/%,%,$(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS))
 $(BOARD_BINS): | sdk-libraries $(BUILD)
 $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS): sdk-libraries
-check: $(BOARD_BINS) check-auto-connections
+check: $(BOARD_BINS) check-auto-connections check-internet-share
 	@set -e; for t in $(BOARD_BINS); do ./$$t; done
 	$(MAKE) check-lubanlite-video check-lubanlite-touch check-lubanlite-demo check-lubanlite-bonds check-lubanlite-usb check-lubanlite-handoff check-lubanlite-reconnect check-lubanlite-capabilities check-iap2-endpoints check-usb-iap2-worker check-wireless-iap2-worker
+
+.PHONY: check-internet-share
+check-internet-share:
+	cmake -S tests/internet_share -B $(BUILD)/internet-share -DCMAKE_BUILD_TYPE=Debug
+	cmake --build $(BUILD)/internet-share -j2
+	ctest --test-dir $(BUILD)/internet-share --output-on-failure
 $(BUILD)/test_pairing_files: tests/unit/test_pairing_files.c app/pairing_files.c app/pairing_manager.c app/usb_pair_cache.c $(LIB) $(MBEDTLS_LIB)
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) $(CPPFLAGS) $< $(LIB) $(MBEDTLS_LIB) $(LDLIBS) -o $@

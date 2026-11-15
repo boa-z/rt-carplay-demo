@@ -96,6 +96,7 @@ Host 测试在 ASan/UBSan 下运行实际源码，调度和设备边界使用模
 
 | 文档 | 范围 |
 | --- | --- |
+| [Ethernet 互联网共享](docs/zh-CN/internet-sharing.md) | 可选 IPv4 网关、协议证据、恢复和必需的 iPhone 验收 |
 | [V2 验证](docs/zh-CN/v2-verification.md) | 已验证版本、CI、IMG 校验值和剩余实机验收 |
 | [连接管理器](docs/zh-CN/connection-manager.md) | 仲裁、重试、设置、所有权和 Headless 行为 |
 | [Launcher V2](docs/zh-CN/launcher-v2.md) | 页面、真实 LVGL 预览和硬件清单 |

@@ -11,7 +11,7 @@ target_include_directories(launcher_preview PRIVATE
     ../support/lubanlite_demo ../../app ../../platform
     "${SDK_ROOT}/packages/third-party/rt-carplay/include"
     "${SDK_ROOT}/packages/third-party/rt-carplay/core/airplay/include")
-target_compile_definitions(launcher_preview PRIVATE RTCARPLAY_AUDIO RTCARPLAY_MICROPHONE
+target_compile_definitions(launcher_preview PRIVATE RTCARPLAY_INTERNET_SHARE RTCARPLAY_AUDIO RTCARPLAY_MICROPHONE
     RTCARPLAY_IAP2 LPKG_RT_CARPLAY_LUBANLITE_WIFI RTCP_AUDIO_CODECS)
 target_compile_options(launcher_preview PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(launcher_preview PRIVATE lvgl m)

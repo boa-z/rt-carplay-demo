@@ -25,6 +25,8 @@ if GetDepend('RTCARPLAY_DEMO_LAUNCHER'):
     src += Glob('ui/*.c')
 if GetDepend('RTCARPLAY_AUTO_CONNECT'):
     src += Glob('app/connection_manager.c')
+if GetDepend('RTCARPLAY_INTERNET_SHARE'):
+    src += Glob('platform/internet_share_lubanlite.c')
 cpppath = [cwd, cwd + '/app', cwd + '/platform']
 src += Glob('app/pairing_files.c') + Glob('platform/carplay_mfi_provider.c')
 if GetDepend('RTCARPLAY_AUTO_CONNECT'):

@@ -1,0 +1,1 @@
+#define RT_WLAN_DEVICE_AP_NAME "ap0"

@@ -5,6 +5,7 @@
 #include <string.h>
 #include "lvgl.h"
 #include "connection_manager.h"
+#include "internet_share_lubanlite.h"
 #include "carplay_app.h"
 #include "video_sink_lubanlite.h"
 #include "video_layer_policy.h"
@@ -21,6 +22,7 @@ static lv_obj_t *steps[3];
 static lv_obj_t *step_labels[3], *path_labels[2], *session_note, *uptime_label;
 static lv_obj_t *settings_panel, *settings_note, *wireless_setting, *microphone_setting;
 static lv_obj_t *settings_button, *diagnostics_panel, *modal_scrim;
+static lv_obj_t *network_panel, *network_button, *network_summary, *network_detail, *network_check, *network_note;
 static lv_obj_t *bt_panel, *bt_text, *bt_accept;
 static uint32_t visible_pairing_request;
 
@@ -41,7 +43,7 @@ static lv_obj_t *audio_play, *audio_mode_buttons[5], *audio_meters[2];
 static void update_scrim(void)
 {
     if (!modal_scrim) return;
-    lv_obj_t *pages[] = {settings_panel, diagnostics_panel, file_panel, bt_panel,
+    lv_obj_t *pages[] = {settings_panel, diagnostics_panel, network_panel, file_panel, bt_panel,
 #if defined(RTCARPLAY_AUDIO)
         audio_panel,
 #endif
@@ -326,6 +328,40 @@ static void update_files(void)
         count, more ? "+ (refresh after deletion for more)" : "", result);
 }
 
+static void network_check_now(lv_event_t *event)
+{
+    (void)event;
+    (void)carplay_internet_check(); /* Queue only; never wait in the LVGL task. */
+}
+
+static void network_update(void)
+{
+    carplay_internet_status_t n;
+    carplay_internet_status(&n);
+    const char *state = !n.available ? "Unavailable" : !n.device ? "No adapter" :
+        !n.link ? "Cable disconnected" : !n.addressed ? "Getting address" :
+        !n.route_ready ? "No gateway" :
+        n.checking ? "Checking..." : !n.checked ? "Not checked" :
+        n.reachable ? "Internet verified" : n.age_ms > 45000U ? "Check expired" : "Check failed";
+    lv_label_set_text_fmt(network_summary, "Ethernet: %s", state);
+    lv_obj_set_style_text_color(network_summary, lv_color_hex(n.reachable ? 0x58E0BF : 0xC1CFDF), 0);
+    if (n.available && n.route_ready && !n.checking) lv_obj_remove_state(network_check, LV_STATE_DISABLED);
+    else lv_obj_add_state(network_check, LV_STATE_DISABLED);
+    char age[32];
+    if (n.checked) snprintf(age, sizeof(age), "%lu s ago", (unsigned long)(n.age_ms / 1000U));
+    else snprintf(age, sizeof(age), "Never");
+    lv_label_set_text_fmt(network_note, "Probe: %s\nChecks this head unit through Ethernet, without an iPhone.\nFailure can mean DNS, timeout or a captive portal; other sites may still work.",
+        n.available ? n.probe_url : "Not built or service unavailable");
+    lv_label_set_text_fmt(network_detail,
+        "ETHERNET UPLINK                         %s\n\n"
+        "Adapter       %s\nCable link     %s\nIPv4             %s\nSubnet mask  %s\nGateway       %s\nDNS              %s\n\n"
+        "HTTP 204 check: %s   |   Last result: %s\n"
+        "CarPlay Internet sharing: %s",
+        state, n.device ? "Detected" : "Not detected", n.link ? "Up" : "Down",
+        n.address, n.mask, n.gateway, n.dns, n.checking ? "Running" : n.checked ? (n.reachable ? "Passed" : "Failed / expired") : "Not run",
+        age, n.sharing ? "Active" : "Inactive");
+}
+
 static void update_page(lv_timer_t *timer)
 {
     (void)timer;
@@ -346,11 +382,14 @@ static void update_page(lv_timer_t *timer)
         if (!was_live) {
             lv_obj_add_flag(settings_panel, LV_OBJ_FLAG_HIDDEN);
             lv_obj_add_flag(diagnostics_panel, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(network_panel, LV_OBJ_FLAG_HIDDEN);
+            update_scrim();
         }
         was_live = true;
         return; /* No further invalidation/animation on the hidden launcher. */
     }
     was_live = false;
+    network_update();
     update_files();
 #if defined(RTCARPLAY_AUDIO)
     audio_update();
@@ -510,7 +549,7 @@ void carplay_demo_launcher_init(void)
     int height = lv_display_get_vertical_resolution(NULL);
     label(screen, "CARPLAY", 36, 30, 300, 0xEDF5FF, true);
     label(screen, "YOUR IPHONE. EVERY DRIVE.", 36, 65, 420, 0x8FA5BF, false);
-    uptime_label = label(screen, "UPTIME  00:00:00", width - 250, 40, 230, 0x8FA5BF, false);
+    uptime_label = label(screen, "UPTIME  00:00:00", 410, 40, 230, 0x8FA5BF, false);
     lv_obj_t *card = panel(screen, 36, 110, width - 422, height - 282);
     badge = label(card, "LAUNCHER 02", 0, 0, 480, 0x58E0BF, false);
     heading = label(card, "Your drive, connected.", 0, 44, width - 474, 0xF2F7FF, true);
@@ -550,6 +589,8 @@ void carplay_demo_launcher_init(void)
     lv_obj_t *unavailable = button(screen, "Audio unavailable", 36+nav_width+13, height-83, nav_width, NULL);
     lv_obj_add_state(unavailable, LV_STATE_DISABLED);
 #endif
+    network_button = button(screen, "Ethernet: starting...", width - 366, 36, 330, NULL);
+    network_summary = lv_obj_get_child(network_button, 0);
     modal_scrim = lv_obj_create(screen);
     lv_obj_remove_style_all(modal_scrim);
     lv_obj_set_size(modal_scrim, width, height);
@@ -585,6 +626,17 @@ void carplay_demo_launcher_init(void)
     lv_obj_add_event_cb(back, close_panel, LV_EVENT_CLICKED, diagnostics_panel);
     lv_obj_add_event_cb(diagnostics_button, open_panel, LV_EVENT_CLICKED, diagnostics_panel);
     lv_obj_add_flag(diagnostics_panel, LV_OBJ_FLAG_HIDDEN);
+    network_panel = panel(screen, 30, 25, width - 60, height - 50);
+    label(network_panel, "VEHICLE NETWORK", 10, 0, 700, 0xF2F7FF, true);
+    network_detail = label(network_panel, "Waiting for Ethernet status...", 10, 55, width - 140, 0xC1CFDF, false);
+    lv_obj_set_style_text_line_space(network_detail, 4, 0);
+    network_note = label(network_panel, "",
+        10, 350, width - 140, 0x8FA5BF, false);
+    network_check = button(network_panel, "Check now", 10, height - 165, 200, network_check_now);
+    back = button(network_panel, "Back", 230, height - 165, 160, NULL);
+    lv_obj_add_event_cb(back, close_panel, LV_EVENT_CLICKED, network_panel);
+    lv_obj_add_event_cb(network_button, open_panel, LV_EVENT_CLICKED, network_panel);
+    lv_obj_add_flag(network_panel, LV_OBJ_FLAG_HIDDEN);
 #if defined(RTCARPLAY_AUDIO)
     audio_panel=panel(screen,30,25,width-60,height-50);
     label(audio_panel,"SPEAKER & MICROPHONE TEST",10,0,width-130,0xFFFFFF,true);

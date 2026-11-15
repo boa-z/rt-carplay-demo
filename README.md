@@ -96,6 +96,7 @@ The host suite runs actual sources with ASan/UBSan and modeled scheduling/device
 
 | Document | Scope |
 | --- | --- |
+| [Ethernet Internet sharing](docs/internet-sharing.md) | Optional IPv4 gateway, protocol evidence, recovery and required iPhone acceptance |
 | [V2 verification](docs/v2-verification.md) | Verified revisions, CI, IMG checksums and remaining board acceptance |
 | [Connection manager](docs/connection-manager.md) | Arbitration, retry, settings, ownership and Headless behavior |
 | [Launcher V2](docs/launcher-v2.md) | Pages, real LVGL preview and hardware checklist |

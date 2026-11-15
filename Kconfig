@@ -31,6 +31,36 @@ config RTCARPLAY_AUTO_CONNECT
       retry/backoff and resource retirement. May run without LVGL.
       Do not mix manual receiver/USB/iAP2 lifecycle commands with this owner.
 
+config RTCARPLAY_INTERNET_SHARE
+    bool "Ethernet to CarPlay AP IPv4 sharing (requires iPhone validation)"
+    default n
+    depends on RT_USING_LWIP212 && LWIP_USING_DHCPD && RT_LWIP_DHCP
+    depends on !LWIP_NO_RX_THREAD
+    depends on LPKG_RT_CARPLAY_LUBANLITE_WIFI && AIC_USING_GMAC0
+    help
+      Optional host-only Ethernet DHCP, bounded NAPT, upstream DNS routing and checked
+      DHCP gateway/DNS offers. Does not change Apple vendor IE or iAP2.
+      Requires an Ethernet-connected board and iPhone routing validation.
+      CarPlay remains local when upstream detection fails. IPv4 only.
+
+config RTCARPLAY_INTERNET_WAN
+    string "Ethernet RT-Thread device name"
+    default "e0"
+    depends on RTCARPLAY_INTERNET_SHARE
+
+config RTCARPLAY_INTERNET_PROBE_HOST
+    string "HTTP 204 connectivity probe host"
+    default "connectivitycheck.gstatic.com"
+    depends on RTCARPLAY_INTERNET_SHARE
+    help
+      Choose a reachable endpoint in the deployment network. A failed or
+      redirected probe closes sharing even if some other sites are reachable.
+
+config RTCARPLAY_INTERNET_PROBE_PATH
+    string "HTTP 204 connectivity probe path"
+    default "/generate_204"
+    depends on RTCARPLAY_INTERNET_SHARE
+
 config RTCARPLAY_AUTO_START
     bool "Start the AirPlay receiver automatically after boot"
     depends on !RTCARPLAY_DEMO_LAUNCHER && !RTCARPLAY_AUTO_CONNECT
