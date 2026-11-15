@@ -23,6 +23,8 @@ repo = os.path.normpath(repo)
 src = Glob('main.c') + Glob('app/carplay_app.c')
 if GetDepend('RTCARPLAY_DEMO_LAUNCHER'):
     src += Glob('ui/*.c')
+if GetDepend('RTCARPLAY_SINGLE_SCREEN_FUSION'):
+    src += Glob('app/fusion_display.c')
 if GetDepend('RTCARPLAY_AUTO_CONNECT'):
     src += Glob('app/connection_manager.c')
 if GetDepend('RTCARPLAY_INTERNET_SHARE'):

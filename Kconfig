@@ -14,6 +14,17 @@ config RTCARPLAY_ULTRA_DEMO
       This switch does not claim official Ultra interoperability, certification,
       HEVC decoding, a second display, or Apple's Local UI renderer.
 
+config RTCARPLAY_SINGLE_SCREEN_FUSION
+    select LV_FONT_MONTSERRAT_12
+    bool "Single-screen CarPlay and local vehicle instruments"
+    default y if RTCARPLAY_ULTRA_DEMO
+    depends on RTCARPLAY_ULTRA_DEMO && RTCARPLAY_DEMO_LAUNCHER
+    help
+      Application display modes FULLSCREEN/FUSION/LOCAL. Uses hardware DE
+      video positioning and UI-layer cropping on the single D213 panel.
+      Vehicle values default to explicitly labelled simulated data. This is
+      a local integration demo, not Apple's Ultra Local UI renderer.
+
 config RTCARPLAY_USB_FILE_SYNC
     bool "Development USB file transfer (CherryUSB ADB sync only)"
     default n

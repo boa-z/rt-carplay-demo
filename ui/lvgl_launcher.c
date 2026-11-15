@@ -9,6 +9,7 @@
 #include "carplay_app.h"
 #include "video_sink_lubanlite.h"
 #include "video_layer_policy.h"
+#include "fusion_dashboard.h"
 #include "touch_panel_lubanlite.h"
 #include "rtcp/rtcp.h"
 #include "rtcp/input.h"
@@ -80,6 +81,7 @@ static void show_modal(lv_obj_t *page)
 /* Called only by the existing GT911 reader. No LVGL calls here. */
 bool carplay_demo_touch(uint8_t phase, uint16_t id, uint16_t x, uint16_t y)
 {
+#if !defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
     if (carplay_launcher_video_is_active() &&
         carplay_video_sink_is_running() && carplay_app_is_running()) {
         if (pointer_lock) {
@@ -89,6 +91,7 @@ bool carplay_demo_touch(uint8_t phase, uint16_t id, uint16_t x, uint16_t y)
         }
         return false;
     }
+#endif
     if (!pointer_lock) return true;
     (void)rt_mutex_take(pointer_lock, RT_WAITING_FOREVER);
     if (!pointer_active && phase == RTCP_TOUCH_DOWN) {
@@ -110,13 +113,27 @@ bool carplay_demo_touch(uint8_t phase, uint16_t id, uint16_t x, uint16_t y)
     return true;
 }
 
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+static void dispatch_fusion_touch(carplay_fusion_touch_t action)
+{
+    if (action.owner == CARPLAY_TOUCH_PHONE)
+        (void)carplay_connection_touch(action.phase,action.id,action.x,action.y);
+    else if (action.owner == CARPLAY_TOUCH_LOCAL)
+        (void)carplay_demo_touch(action.phase,action.id,action.x,action.y);
+}
+#endif
+
 static void launcher_panel_touch(uint8_t phase, uint16_t id, uint16_t x,
                                   uint16_t y, void *context)
 {
     (void)context;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    dispatch_fusion_touch(carplay_fusion_touch(phase,id,x,y));
+#else
     if (!carplay_demo_touch(phase, id, x, y)) {
         (void)carplay_connection_touch(phase, id, x, y);
     }
+#endif
 }
 
 static void pointer_read(lv_indev_t *indev, lv_indev_data_t *data)
@@ -482,8 +499,13 @@ static void update_page(lv_timer_t *timer)
         attempted = true; last_attempt = now;
         (void)carplay_connection_manager_start();
     }
-    demo_status_t s;
-    if (!carplay_connection_status(&s)) return;
+    demo_status_t s={0};
+    bool have_status=carplay_connection_status(&s);
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    dispatch_fusion_touch(carplay_fusion_cancel_touch());
+    if (carplay_fusion_ui_update(&s)) return;
+#endif
+    if (!have_status) return;
     /* Close read-only pages once when the first visible frame takes over. */
     static bool was_live;
     if (s.stage == DEMO_LIVE && carplay_launcher_video_is_active()) {
@@ -857,6 +879,10 @@ void carplay_demo_launcher_init(void)
         lv_indev_set_type(pointer, LV_INDEV_TYPE_POINTER);
         lv_indev_set_read_cb(pointer, pointer_read);
     }
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    lv_obj_add_flag(uptime_label,LV_OBJ_FLAG_HIDDEN);
+    carplay_fusion_ui_init(screen,(uint16_t)width,(uint16_t)height);
+#endif
     lv_timer_create(update_page, 250, NULL);
     int touch = carplay_touch_panel_start((uint16_t)width, (uint16_t)height,
                                           launcher_panel_touch, NULL);

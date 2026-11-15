@@ -14,6 +14,9 @@
  * before decoding resumes. Cached configuration is replayed on recovery.
  */
 #include "video_sink_lubanlite.h"
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+#include "fusion_display.h"
+#endif
 
 #include <rtthread.h>
 #include <rtdevice.h>
@@ -64,6 +67,9 @@ typedef struct {
     /* Panel geometry from aicfb; the DE layer works in these coordinates. */
     uint16_t panel_width;
     uint16_t panel_height;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    uint32_t fusion_generation;
+#endif
 
     nal_entry_t queue[SINK_QUEUE_LENGTH];
     atomic_uint head;
@@ -81,6 +87,7 @@ typedef struct {
 
     atomic_uint nal_count;
     atomic_uint frame_count;
+    atomic_uint latched_frames;
     atomic_uint skipped_frames;
     atomic_uint dropped_nals;
     atomic_uint loss_generation;
@@ -301,6 +308,17 @@ static bool present_frame(video_sink_t *sink, const struct mpp_frame *frame)
         src_h = frame->buf.crop.height;
     }
 
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    rtcp_display_rect_t viewport={.width=sink->panel_width,.height=sink->panel_height}, destination;
+    uint32_t generation=0;
+    (void)carplay_fusion_video_target(sink->panel_width,sink->panel_height,&viewport,&generation);
+    if (src_w <= 0 || src_h <= 0 || src_w > UINT16_MAX || src_h > UINT16_MAX ||
+        !rtcp_display_fit(&viewport,(uint16_t)src_w,(uint16_t)src_h,&destination)) {
+        ++sink->decode_errors; return false;
+    }
+    layer.scale_size.width=destination.width; layer.scale_size.height=destination.height;
+    layer.pos.x=destination.x; layer.pos.y=destination.y;
+#else
     /* Letterbox: keep the source aspect ratio inside the panel.  The DE layer
      * position/scale is in panel pixels, not in the AirPlay display mode, so
      * use the aicfb geometry (identical when the mode matches the panel). */
@@ -318,13 +336,21 @@ static bool present_frame(video_sink_t *sink, const struct mpp_frame *frame)
     layer.scale_size.height = scale_h;
     layer.pos.x = ((int)sink->panel_width - scale_w) / 2;
     layer.pos.y = ((int)sink->panel_height - scale_h) / 2;
+#endif
     memcpy(&layer.buf, &frame->buf, sizeof(layer.buf));
 
     if (rt_device_control(sink->fb, AICFB_UPDATE_LAYER_CONFIG, &layer) < 0) {
         ++sink->decode_errors;
         return false;
     }
-    if (rt_device_control(sink->fb, AICFB_WAIT_FOR_VSYNC, &layer) >= 0) return true;
+    if (rt_device_control(sink->fb, AICFB_WAIT_FOR_VSYNC, &layer) >= 0) {
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+        sink->fusion_generation=generation;
+        carplay_fusion_video_latched(&destination,sink->display_width,sink->display_height,
+            generation,sink_now_ms());
+#endif
+        return true;
+    }
     ++sink->decode_errors;
     return false;
 }
@@ -344,6 +370,7 @@ static void commit_scanout(video_sink_t *sink, const struct mpp_frame *frame)
 {
     if (sink->have_frame) (void)mpp_decoder_put_frame(sink->decoder,&sink->held);
     sink->held=*frame; sink->have_frame=true;
+    ++sink->latched_frames;
     if (!sink->display_reported) {
         sink->display_reported=true;
         if (s_display_observer) s_display_observer(true,s_display_context);
@@ -357,6 +384,9 @@ static bool retire_scanout(video_sink_t *sink)
         ++sink->decode_errors;
         return false;
     }
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    carplay_fusion_video_stopped();
+#endif
     if (sink->have_pending_scanout) {
         (void)mpp_decoder_put_frame(sink->decoder,&sink->pending_scanout);
         sink->have_pending_scanout=false;
@@ -600,6 +630,19 @@ static bool prepare_picture(video_sink_t *sink, const nal_entry_t *nal)
     return true;
 }
 
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+static void apply_display_mode(video_sink_t *sink)
+{
+    /* A static phone image must also respond to mode changes. Re-presenting
+     * the owned scanout does not count as a newly received video frame. */
+    rtcp_display_rect_t viewport;
+    uint32_t generation;
+    if (!sink->stop && sink->have_frame && !sink->have_pending_scanout &&
+        carplay_fusion_video_target(sink->panel_width,sink->panel_height,&viewport,&generation) &&
+        generation != sink->fusion_generation) (void)present_timed(sink,&sink->held);
+}
+#endif
+
 static void sink_thread(void *argument)
 {
     video_sink_t *sink = argument;
@@ -633,6 +676,9 @@ static void sink_thread(void *argument)
             }
         }
         if (!sink->recovery_pending) pump_decoder(sink);
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+        apply_display_mode(sink);
+#endif
     }
 
     free(sink->configuration);
@@ -799,7 +845,7 @@ static void video_perf_owned(carplay_video_perf_t *out)
     if (!out) return;
     rt_base_t level = rt_hw_interrupt_disable();
     *out = (carplay_video_perf_t) {
-        .frames = s_sink.frame_count, .packets = s_sink.nal_count,
+        .frames = s_sink.frame_count, .latched = s_sink.latched_frames, .packets = s_sink.nal_count,
         .drops = s_sink.dropped_nals, .errors = s_sink.decode_errors,
         .pending = (s_sink.head + SINK_QUEUE_LENGTH - s_sink.tail) % SINK_QUEUE_LENGTH,
         .queue_peak = s_sink.queue_peak, .dequeued = s_sink.dequeued,

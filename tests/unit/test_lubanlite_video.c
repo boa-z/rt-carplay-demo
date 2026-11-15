@@ -184,6 +184,8 @@ static void reset(void) {
     s_sink.fb = (rt_device_t)(uintptr_t)1;
     s_sink.lock = (rt_mutex_t)(uintptr_t)1;
     s_sink.decoder = (struct mpp_decoder *)(uintptr_t)1;
+    s_sink.panel_width = s_sink.display_width = 1024;
+    s_sink.panel_height = s_sink.display_height = 600;
     slots = decoded = destroyed = delays = last_config_size = 0;
     pressure = false; hardware_reads=false; disable_queued=false;
     reference_mode = reference_active = fail_next = false;
@@ -194,6 +196,33 @@ static void reset(void) {
     s_display_observer = NULL; s_display_context = NULL;
 }
 int main(int argc, char **argv) {
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    assert(carplay_fusion_init(1024,600) == RTCP_OK);
+    reset();
+    render_remaining=1;
+    pump_decoder(&s_sink);
+    carplay_fusion_snapshot_t layout;
+    carplay_fusion_snapshot(100,&layout);
+    assert(layout.video_active && layout.video_rect.width == 768 && layout.video_rect.height == 450);
+    assert(atomic_load(&s_sink.latched_frames) == 1);
+    unsigned before_updates=updates;
+    assert(carplay_fusion_set_mode(CARPLAY_FULLSCREEN) == RTCP_OK);
+    fail_vsync=true;
+    apply_display_mode(&s_sink);
+    carplay_fusion_snapshot(100,&layout);
+    assert(layout.video_rect.width == 768 && layout.generation != layout.video_generation);
+    fail_vsync=false;
+    apply_display_mode(&s_sink);
+    carplay_fusion_snapshot(100,&layout);
+    assert(layout.video_rect.width == 1024 && layout.video_rect.height == 600);
+    assert(layout.generation == layout.video_generation && updates == before_updates+2);
+    assert(return_count == 0 && atomic_load(&s_sink.latched_frames) == 1);
+    apply_display_mode(&s_sink);
+    assert(updates == before_updates+2); /* No redundant static-frame update. */
+    assert(retire_scanout(&s_sink));
+    assert(return_count == 1);
+    assert(carplay_fusion_set_mode(CARPLAY_FUSION) == RTCP_OK);
+#endif
     if (argc > 1 && strcmp(argv[1], "queue") == 0) {
         reset();
         for (unsigned i = 0; i < 10; ++i)

@@ -8,3 +8,9 @@
  * after video shutdown, so it must not call LVGL or reenter the lifecycle. */
 void carplay_launcher_video_event(bool active, void *context);
 bool carplay_launcher_video_is_active(void);
+
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+#include "fusion_display.h"
+/* GUI-owner only. Hardware UI crop + alpha; never copies a video image. */
+int carplay_launcher_fusion_apply(const carplay_fusion_snapshot_t *);
+#endif

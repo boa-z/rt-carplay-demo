@@ -92,7 +92,14 @@ int main(void) {
     if(rc==RTCP_ETIMEDOUT)rt_thread_mdelay(1);
    }
    assert(rc==RTCP_OK);
-   assert(carplay_audio_sink_local_pcm(pcm,sizeof(pcm),48000,1,false)==RTCP_ESTATE);
+   /* The actual writer may hold the nonblocking queue lock. Retry only that
+    * documented contention result before checking critical-lane priority. */
+   rc=RTCP_ETIMEDOUT;
+   for(unsigned retry=0;retry<20 && rc==RTCP_ETIMEDOUT;++retry) {
+    rc=carplay_audio_sink_local_pcm(pcm,sizeof(pcm),48000,1,false);
+    if(rc==RTCP_ETIMEDOUT)rt_thread_mdelay(1);
+   }
+   assert(rc==RTCP_ESTATE);
   }
   rt_thread_mdelay(350);
   carplay_audio_sink_stream_stop(102);

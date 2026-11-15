@@ -66,11 +66,9 @@ ultra-demo workflow 在 SDK 和应用 Host 检查后构建两个变体。可下�
 
 已提交的配置里程碑 096de7eb242aba84ab868fd6b1e0f127ddd5483b 通过了[全部专用 CI 任务](https://github.com/boa-z/luban-lite-carplay/actions/runs/43736939136)：Host、GUI 和 Headless。三个产物均已下载，全部 SHA256、干净源码清单及 SDK/集成版本核对通过；下载的两个镜像也再次通过全部九个组件的边界/CRC32 检查。滚动 Preview Release 任务已跳过。这些检查确认开发产物可追溯，不能代替开发板或手机验收。
 
-## 单屏融合实施方案
+## 单屏融合实现
 
-FULLSCREEN 保留原有 Main Display。FUSION 将 MPP 视频直接由 DE 缩放到有界窗口，同时保留运行中的 ARGB LVGL 仪表层。LOCAL 在没有视频时继续显示速度、挡位、电量及连接状态。初始数据必须标记 SIMULATED，预留真实数据提供接口。该应用融合独立于官方 Ultra Local UI。
-
-现有 video_layer_policy 在首帧后隐藏整个 UI，launcher 在视频活动时停止页面刷新，需要改为模式相关策略。视频已通过 MPP buffer、DE scanout 和 VSYNC 显示，应保留硬件合成，正确处理更新失败及关闭时的缓冲区归属，避免逐帧软件拷贝。触摸使用同一份实际缩放矩形，拒绝黑边，跨区域时保留从按下到抬起的归属，模式/会话改变时取消触点。LVGL 调用只在自身线程执行。断连、重连及视频停滞时本地仪表保持运行。阶段耗时、帧率、CPU、内存计数保持测量含义，接收端处理耗时不等于手机到屏幕端到端延迟。
+Ultra GUI 配置现已通过 DE 视频位置与 UI 图层裁剪实现 FULLSCREEN/FUSION/LOCAL，包含明确标注的模拟仪表、复制式车辆数据接口、共用已锁存几何的触摸映射、安全的扫描帧生命周期和接收端阶段统计。操作、约束、Host 覆盖和实机验收清单见[单屏融合文档](single-screen-fusion.zh-CN.md)。2026-11-15 原生 GUI/Headless 构建及实际 LVGL Host 预览通过，L2 在确切镜像实机验证前保持 NOT_RUN。该应用融合独立于官方 Ultra Local UI。
 
 ## 开发板准备与证据
 
@@ -86,7 +84,7 @@ FULLSCREEN 保留原有 Main Display。FUSION 将 MPP 视频直接由 DE 缩放�
 | --- | --- | --- |
 | L0 | 初步源码研究 PASS | 本文区分代码、未运行参考测试和官方产品要求，后续协议研究继续。 |
 | L1 | PARTIAL | 显示/OPACK/Vehicle State/注册 Type 130 传输 Host 测试通过；Vehicle State/UI Sync Receiver 集成已有加密 Host 覆盖，尚缺能力声明门控。 |
-| L2 | NOT_RUN | 实现并实测 D213 FULLSCREEN/FUSION/LOCAL、输入、回连及性能。 |
+| L2 | NOT_RUN | 实测已实现的 D213 FULLSCREEN/FUSION/LOCAL、输入、回连及性能。 |
 | L3 | NOT_RUN | 真实 iPhone Ultra 能力协商。 |
 | L4 | NOT_RUN | 真实 iPhone Vehicle State 和 UI Sync 交互。 |
 | L5 | NOT_RUN | 可选独立 Type 111 sink 及接收。 |

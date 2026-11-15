@@ -15,3 +15,12 @@ target_compile_definitions(launcher_preview PRIVATE RTCARPLAY_INTERNET_SHARE RTC
     RTCARPLAY_IAP2 LPKG_RT_CARPLAY_LUBANLITE_WIFI RTCP_AUDIO_CODECS RTCARPLAY_OTA)
 target_compile_options(launcher_preview PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(launcher_preview PRIVATE lvgl m)
+
+# Render the actual fusion dashboard without a panel, decoder or phone.
+add_executable(fusion_preview fusion_main.c ../../app/fusion_display.c
+    "${SDK_ROOT}/packages/third-party/rt-carplay/core/media/display.c")
+target_include_directories(fusion_preview PRIVATE ../support/lubanlite_video ../../app ../../platform
+    "${SDK_ROOT}/packages/third-party/rt-carplay/include")
+target_compile_definitions(fusion_preview PRIVATE RTCARPLAY_SINGLE_SCREEN_FUSION)
+target_compile_options(fusion_preview PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(fusion_preview PRIVATE lvgl m)

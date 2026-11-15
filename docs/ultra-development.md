@@ -66,11 +66,9 @@ Local Windows builds of both profiles passed on 2026-11-15, including the wired-
 
 The committed profile milestone 096de7eb242aba84ab868fd6b1e0f127ddd5483b passed [all dedicated CI jobs](https://github.com/boa-z/luban-lite-carplay/actions/runs/43736939136): Host, GUI and Headless. All three artifacts were downloaded; every SHA256 entry, clean source inventory and SDK/integration revision was verified, and both downloaded images passed all nine component bounds/CRC32 checks. The rolling Preview Release job was skipped. These checks establish traceable development artifacts, not board or phone acceptance.
 
-## Single-screen fusion implementation plan
+## Single-screen fusion implementation
 
-FULLSCREEN preserves the existing Main Display. FUSION will scale MPP video directly through DE into a bounded window while keeping an ARGB LVGL instrument layer active. LOCAL will keep speed, gear, battery and connection state visible without video. Initial telemetry must say SIMULATED and expose a real-provider boundary. This application fusion is independent of official Ultra Local UI.
-
-The current video_layer_policy hides the entire UI after first video, and the launcher stops page refresh while video is active; these policies must become mode-aware. Video already retains MPP buffers for DE scanout and VSYNC. Keep hardware composition, preserve buffer ownership on failed updates/shutdown, and avoid full-frame software copies. Share the actual aspect-fit rectangle with touch mapping, reject bars, retain press-to-release ownership across region crossings and cancel contacts on mode/session changes. LVGL calls stay on its own thread. Disconnect, reconnect and stale video must leave local instruments running. Stage timing/FPS/CPU/memory counters must retain their measurement meaning; receiver processing time is not phone-to-glass latency.
+The Ultra GUI profile now implements FULLSCREEN/FUSION/LOCAL using DE video positioning and UI-layer crop, with explicit simulated instruments, a copied vehicle-provider API, shared latched touch geometry, lifecycle-safe scanout ownership and receiver-stage metrics. See [D213 single-screen fusion](single-screen-fusion.md) for controls, constraints, Host coverage and the physical acceptance checklist. Native GUI/Headless builds and actual LVGL Host previews passed on 2026-11-15; L2 remains NOT_RUN pending exact-image board validation. This application fusion is independent of official Ultra Local UI.
 
 ## Board preparation and evidence
 
@@ -86,7 +84,7 @@ Receiver seed, AirPlay records and USB trust files were backed up outside Git wi
 | --- | --- | --- |
 | L0 | PASS for initial source research | This review distinguishes code, unexecuted reference tests and official product requirements; further protocol research continues. |
 | L1 | PARTIAL | Display/OPACK/Vehicle State/registered Type 130 transport Host tests passed; Vehicle State/UI Sync Receiver composition has encrypted Host coverage; gated capability declarations remain. |
-| L2 | NOT_RUN | Implement and physically validate D213 FULLSCREEN/FUSION/LOCAL, input, reconnect and performance. |
+| L2 | NOT_RUN | Physically validate the implemented D213 FULLSCREEN/FUSION/LOCAL, input, reconnect and performance. |
 | L3 | NOT_RUN | Real-iPhone Ultra feature negotiation. |
 | L4 | NOT_RUN | Real-iPhone Vehicle State and UI Sync exchanges. |
 | L5 | NOT_RUN | Optional independent Type 111 sink and reception. |

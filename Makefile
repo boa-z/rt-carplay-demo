@@ -99,8 +99,14 @@ $(BUILD)/test_rtthread_app: tests/unit/test_rtthread_app.c app/carplay_app.c \
 	  -pthread -Wl,--gc-sections -o $(BUILD)/test_rtthread_app
 
 # Actual video sink with a bounded MPP model and the SDK's public headers.
-.PHONY: check-lubanlite-video
-check-lubanlite-video:
+.PHONY: check-fusion-display check-lubanlite-video
+check-fusion-display: | $(BUILD)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -DRTCARPLAY_SINGLE_SCREEN_FUSION -Itests/support/lubanlite_video \
+	  -I$(SDK_ROOT)/packages/artinchip/mpp/include -I$(SDK_ROOT)/bsp/artinchip/include/uapi \
+	  tests/unit/test_fusion_display.c $(RTCP_ROOT)/core/media/display.c -o $(BUILD)/test_fusion_display
+	$(BUILD)/test_fusion_display
+
+check-lubanlite-video: check-fusion-display
 	@test -f "$(SDK_ROOT)/packages/artinchip/mpp/include/mpp_decoder.h" || (echo "Set SDK_ROOT to Luban-Lite SDK"; exit 1)
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -Itests/support/lubanlite_video \
@@ -116,6 +122,12 @@ check-lubanlite-video:
 	  -ffunction-sections -fdata-sections tests/unit/test_lubanlite_video.c \
 	  -Wl,--gc-sections -o $(BUILD)/test_lubanlite_video_launcher
 	$(BUILD)/test_lubanlite_video_launcher
+	$(CC) $(CFLAGS) $(CPPFLAGS) -DRTCARPLAY_DEMO_LAUNCHER -DRTCARPLAY_SINGLE_SCREEN_FUSION -Itests/support/lubanlite_video \
+	  -I$(SDK_ROOT)/packages/artinchip/mpp/include -I$(SDK_ROOT)/bsp/artinchip/include/uapi \
+	  -ffunction-sections -fdata-sections tests/unit/test_lubanlite_video.c app/fusion_display.c \
+	  $(RTCP_ROOT)/core/media/display.c -Wl,--gc-sections -o $(BUILD)/test_lubanlite_video_fusion
+	$(BUILD)/test_lubanlite_video_fusion
+	$(BUILD)/test_lubanlite_video_fusion queue
 	$(CC) $(CFLAGS) $(CPPFLAGS) -Itests/support/lubanlite_video \
 	  -I$(SDK_ROOT)/bsp/artinchip/include/uapi \
 	  $(SDK_ROOT)/application/rt-thread/rtcarplay/tests/test_video_layer_policy.c \
