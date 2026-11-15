@@ -7,7 +7,8 @@
 #include RTCP_CONNECTION_SOURCE
 
 enum { USB_AFTER_IDLE, WIRELESS_RESERVATION, USB_RETRY, RADIO_FAILURE,
-       ENUM_RETRY, NO_PICTURE, EVENT_LOSS, USB_START_FAILURE, NO_NETWORK };
+       ENUM_RETRY, NO_PICTURE, EVENT_LOSS, USB_START_FAILURE, NO_NETWORK,
+       ATTACHED_TIMEOUT };
 static unsigned scenario, now, boot, radio_at, pairs, opens, starts, closes;
 static unsigned radio_starts, radio_stops, first_pair_at;
 static unsigned network_samples;
@@ -69,6 +70,12 @@ int carplay_usb_pair(void)
         assert(now - first_pair_at >= 95000);
         assert(status.last_error == RTCP_ETIMEDOUT);
         longjmp(done, 1);
+    }
+    if (scenario == ATTACHED_TIMEOUT && pairs == 2) {
+        assert(now - first_pair_at >= 95000);
+        assert(status.last_error == RTCP_ETIMEDOUT && !radio_starts);
+        assert(closes && wireless_enabled && !status.wireless);
+        longjmp(done, 1); /* No cable replug or wireless power cycle needed. */
     }
     if (scenario == EVENT_LOSS && pairs == 2) {
         assert(seen_live && closes && now - first_pair_at >= 1000);
@@ -166,7 +173,7 @@ void carplay_video_sink_stats(unsigned *n, unsigned *f, unsigned *d, unsigned *e
 }
 bool carplay_video_sink_has_presented(void)
 {
-    return (usb_session && scenario != NO_PICTURE) || wireless_event();
+    return (usb_session && scenario != NO_PICTURE && scenario != ATTACHED_TIMEOUT) || wireless_event();
 }
 int carplay_app_touch(uint8_t p, uint16_t i, uint16_t x, uint16_t y)
 { (void)p; (void)i; (void)x; (void)y; return RTCP_ESTATE; }
@@ -181,9 +188,9 @@ int rtcp_bt_lubanlite_forget_bonds(void) { return RTCP_OK; }
 int main(void)
 {
     for (unsigned cycle = 0; cycle < 32; ++cycle) {
-        for (scenario = USB_AFTER_IDLE; scenario <= NO_NETWORK; ++scenario) {
+        for (scenario = USB_AFTER_IDLE; scenario <= ATTACHED_TIMEOUT; ++scenario) {
 #if !defined(RTCARPLAY_VIDEO)
-            if (scenario == NO_PICTURE) continue; /* Headless has no display gate. */
+            if (scenario == NO_PICTURE || scenario == ATTACHED_TIMEOUT) continue;
 #endif
             now = boot = cycle & 1 ? UINT32_MAX - 1000U : 0;
             pairs = opens = starts = closes = radio_starts = radio_stops = 0;
@@ -196,6 +203,8 @@ int main(void)
             wireless_enabled = scenario != USB_RETRY && scenario != NO_PICTURE &&
                 scenario != EVENT_LOSS && scenario != USB_START_FAILURE;
             requested_wireless = status.wireless = wireless_enabled;
+            if (scenario == ATTACHED_TIMEOUT)
+                requested_wireless = status.wireless = false;
             status_lock = (void *)1; manager_open = retry_requested = false;
             file_action = FILE_NONE;
             if (setjmp(done) == 0) {

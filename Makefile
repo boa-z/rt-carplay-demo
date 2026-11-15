@@ -7,6 +7,11 @@ SDK_ROOT ?= $(abspath ../../..)
 RTCP_ROOT ?= $(SDK_ROOT)/packages/third-party/rt-carplay
 CHERRYUSB_ROOT ?= $(SDK_ROOT)/packages/third-party/cherryusb
 BUILD ?= build
+
+.PHONY: check-usb-file-sync
+check-usb-file-sync: | $(BUILD)
+	$(CC) $(CFLAGS) -Itests/usb_file_sync -I$(CHERRYUSB_ROOT)/common -I$(CHERRYUSB_ROOT)/class/adb tests/usb_file_sync/test_sync.c $(CHERRYUSB_ROOT)/class/adb/usbd_adb_sync.c -o $(BUILD)/test_usb_file_sync
+	$(BUILD)/test_usb_file_sync
 RTCP_BUILD := $(RTCP_ROOT)/build
 LIB := $(RTCP_BUILD)/librtcp_core.a
 PORT_LINUX_LIB := $(RTCP_BUILD)/librtcp_port_linux.a
@@ -24,7 +29,7 @@ sdk-libraries:
 	$(MAKE) -C $(RTCP_ROOT) $(patsubst $(RTCP_ROOT)/%,%,$(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS))
 $(BOARD_BINS): | sdk-libraries $(BUILD)
 $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS): sdk-libraries
-check: $(BOARD_BINS) check-auto-connections check-internet-share check-udp-burst
+check: $(BOARD_BINS) check-auto-connections check-internet-share check-udp-burst check-usb-file-sync
 	@set -e; for t in $(BOARD_BINS); do ./$$t; done
 	$(MAKE) check-lubanlite-video check-lubanlite-touch check-lubanlite-demo check-lubanlite-bonds check-lubanlite-usb check-lubanlite-handoff check-lubanlite-reconnect check-lubanlite-capabilities check-iap2-endpoints check-usb-iap2-worker check-wireless-iap2-worker
 

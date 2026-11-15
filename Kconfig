@@ -5,6 +5,19 @@ source "packages/third-party/rt-carplay/Kconfig"
 
 menu "rt-carplay application"
 
+config RTCARPLAY_USB_FILE_SYNC
+    bool "Development USB file transfer (CherryUSB ADB sync only)"
+    default n
+    depends on RT_USING_DFS && AIC_USING_USB0_DEVICE
+    depends on LPKG_CHERRYUSB_DEVICE && LPKG_CHERRYUSB_DEVICE_CLASS_NULL
+    depends on !LPKG_USING_ADBD
+    help
+      Reuse CherryUSB's ADB sync service and RT-Thread DFS adapter on USB0.
+      USB1 remains the iPhone host port. Supports adb push/pull without a
+      separate adbd package or shell service. Uses the upstream demo USB
+      descriptors (FFFF:FFFF), for development only. Files are accessed via
+      DFS; this does not export a concurrently mounted raw block device.
+
 config RTCARPLAY_DEMO_LAUNCHER
     bool "LVGL 9 Launcher V2"
     select RTCARPLAY_AUTO_CONNECT

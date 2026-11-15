@@ -28,6 +28,30 @@ if GetDepend('RTCARPLAY_AUTO_CONNECT'):
 if GetDepend('RTCARPLAY_INTERNET_SHARE'):
     src += Glob('platform/internet_share_lubanlite.c')
 cpppath = [cwd, cwd + '/app', cwd + '/platform']
+if GetDepend('RTCARPLAY_USB_FILE_SYNC'):
+    # Application composition: reuse the upstream class, sync service, DFS
+    # adapter and development descriptors. Do not link its shell.
+    sdk_root = os.path.normpath(os.path.join(cwd, '..', '..', '..'))
+    usb_root = os.path.join(sdk_root, 'packages', 'third-party', 'cherryusb')
+    src += Glob('platform/usb_file_sync.c')
+    for source in ('class/adb/usbd_adb.c', 'class/adb/usbd_adb_sync.c',
+                   'demo/adb_template.c'):
+        src += Glob(os.path.join(usb_root, source))
+    # newlib defines st_mtime as st_mtim.tv_sec, colliding with the upstream
+    # VFS field name. Compile a narrowly adapted copy, leaving upstream intact.
+    import building
+    def prepare_usb_vfs(target, source, env):
+        import subprocess, sys
+        return subprocess.call([sys.executable, str(source[1]),
+                                str(source[0]), str(target[0])])
+    src += building.Env.Command(
+        os.path.join(cwd, 'generated/rt_vfs_dfs.c'),
+        [os.path.join(usb_root, 'platform/rtthread/rt_vfs_dfs.c'),
+         os.path.join(cwd, 'tools/prepare_usb_vfs.py')], prepare_usb_vfs)
+    cpppath += [os.path.join(usb_root, directory)
+                for directory in ('common', 'core', 'class/adb')]
+    cpppath.append(os.path.join(sdk_root, 'packages', 'third-party',
+                                'cherryusb-luban'))
 src += Glob('app/pairing_files.c') + Glob('platform/carplay_mfi_provider.c')
 if GetDepend('RTCARPLAY_AUTO_CONNECT'):
     src += Glob('app/pairing_manager.c')
