@@ -765,6 +765,11 @@ static void iap2_usb_event(iap2_session_event_t event, void *context)
             rt_kprintf("[carplay_usb] iap2: link ready\n");
             break;
         case IAP2_SESSION_EVENT_LINK_DEAD:
+            /* Stop at the worker's next loop boundary. The SDK invokes this
+             * from feed/advance: destroying the session here would free the
+             * active callback's owner. The worker releases it before marking
+             * itself quiescent, allowing the connection manager to recover. */
+            link->run = false;
             rt_kprintf("[carplay_usb] iap2: link failed\n");
             break;
         default:
@@ -815,10 +820,18 @@ static void iap2_usb_thread(void *parameter)
         rt_kprintf("[carplay_usb] iap2: link up\n");
     }
     while (link->run) {
-        int ret = iap2_stream_rx_step(&link->rx, link->session,
-                                      IAP2_USB_RX_TIMEOUT_MS,
-                                      iap2_usb_now_ms());
-        if (ret == RTCP_OK || ret == RTCP_ETIMEDOUT) {
+        /* The generic stream helper returns zero both for fed data and EOF
+         * (RTCP_OK). Preserve the raw read result here so a closed CarKit
+         * stream cannot spin forever while the owner still reports running. */
+        int ret = link->rx.stream.ops->read(link->rx.stream.context,
+                    link->rx.buffer, sizeof(link->rx.buffer), IAP2_USB_RX_TIMEOUT_MS);
+        uint64_t now = iap2_usb_now_ms();
+        if (ret > (int)sizeof(link->rx.buffer)) ret = RTCP_EIO;
+        if (ret > 0) {
+            iap2_session_feed(link->session, link->rx.buffer, (size_t)ret, now);
+        }
+        if (ret > 0 || ret == RTCP_ETIMEDOUT) {
+            iap2_session_advance(link->session, now);
             continue;
         }
         if (ret == 0) {

@@ -386,7 +386,6 @@ static void sink_thread(void *argument)
     audio_sink_t *sink = argument;
     rtcp_audio_decoder_t *decoders[RTCP_AUDIO_LANES] = {0};
     unsigned generation[RTCP_AUDIO_LANES] = {0};
-    unsigned stack_report_packets=0;
     unsigned trace_count[RTCP_AUDIO_LANES]={0};
     unsigned gap_trace_count[RTCP_AUDIO_LANES]={0};
     uint32_t previous_ts[RTCP_AUDIO_LANES]={0};
@@ -515,9 +514,6 @@ static void sink_thread(void *argument)
                 if(direct) {
                     rtcp_audio_mixer_flush(sink->mixer,2);timeline[2]=false;
                     (void)output_media(sink,pcm,samples/2,format.sample_rate,gains[2]);
-                    if(sink->packets>=stack_report_packets+200) {
-                        carplay_audio_stack_report(TAG);stack_report_packets=sink->packets;
-                    }
                     continue;
                 }
                 if (timeline[lane]) {
@@ -592,9 +588,6 @@ static void sink_thread(void *argument)
         /* Apply a queued volume before rendering the first samples too. */
         if(sink->device_started && sink->device_rate!=48000)stop_device(sink);
         if (!sink->device_started && !start_device(sink, 48000, 2)) { ++sink->write_errors; continue; }
-        if(sink->packets>=stack_report_packets+200) {
-            carplay_audio_stack_report(TAG);stack_report_packets=sink->packets;
-        }
         int16_t *chunk=sink->chunk;
         size_t frames = rtcp_audio_mixer_render(sink->mixer, chunk, 480);
         if (!frames) continue;

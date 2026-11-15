@@ -491,11 +491,9 @@ static void descriptor_emit(void *user, const char *line)
     rt_kprintf("%s\n", line);
 }
 
-/* Scan the configuration descriptors the device currently reports, print a
- * full dump of each, and return the best wired-CarPlay configuration.  A
- * configuration carrying the standard CDC-NCM pair is preferred because the
- * existing CherryUSB usbh_cdc_ncm driver can bind to it; Apple Ethernet
- * (ff/fd/01) is the fallback and needs its own host driver. */
+/* Select from current descriptors and optionally print them. Prefer the
+ * community-observed composite mode, retaining only configurations for which
+ * a network class driver is built. Ordinary Apple Ethernet remains fallback. */
 static bool find_carplay_configuration(struct usbh_hubport *hport,
                                        uint8_t configuration_count,
                                        uint8_t *selected_index, bool *mode_present,

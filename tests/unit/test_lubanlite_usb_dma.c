@@ -1,11 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #define _POSIX_C_SOURCE 200809L
 #define RTCP_USB_TRACE_IN_TIMEOUTS 1
-/* Compile the actual SDK port, including its private DMA submission helpers. */
-#ifndef RTCP_USB_PORT_SOURCE
-#define RTCP_USB_PORT_SOURCE "../../platform/rtcp_usb_lubanlite.c"
-#endif
-#include RTCP_USB_PORT_SOURCE
+/* Compile the actual application port, including its DMA submission helpers. */
+#include "../../platform/rtcp_usb_lubanlite.c"
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>

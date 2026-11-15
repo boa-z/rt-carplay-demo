@@ -90,6 +90,7 @@ source += function("static bool usb_call_enter(")
 source += function("static void usb_call_leave(")
 source += function("static void iap2_usb_release_provider(")
 source += function("static void iap2_usb_reset(")
+source += function("static void iap2_usb_event(")
 source += function("static void iap2_usb_thread(")
 source += function("static int iap2_usb_start_worker(")
 source += function("static void iap2_usb_request_stop(void)\n{")
@@ -144,12 +145,41 @@ static void prepare(void) {
     iap2_session_config_t config = {0}; config.tx = tx;
     config.identity.name = "public-worker-fixture";
     config.transport = IAP2_SESSION_TRANSPORT_WIRED_USB;
+    config.on_event = iap2_usb_event; config.context = &s_iap2_usb;
     s_iap2_usb.session = iap2_session_create(&config);
     assert(s_iap2_usb.session); s_iap2_usb.mfi = &provider;
     s_iap2_usb.provider_installed = true;
 }
 static void *open_command(void *unused) {
     (void)unused; assert(carplay_usb_open() == RTCP_EIO); return NULL;
+}
+static unsigned reads;
+static int read_result;
+static int peer_read(void *context, void *buffer, size_t capacity, uint32_t timeout) {
+    (void)context; assert(capacity >= 9 && timeout == IAP2_USB_RX_TIMEOUT_MS);
+    ++reads;
+    if (read_result != 9) { assert(reads == 1); return read_result; }
+    /* An idle poll must not stop the worker; a checksum-valid peer RESET must. */
+    if (reads == 1) return RTCP_ETIMEDOUT;
+    assert(reads == 2); /* A dead protocol must never initiate another read. */
+    unsigned char reset[9] = {0xff, 0x5a, 0, 9, 0x10, 1, 0, 0, 0};
+    unsigned sum = 0; for (unsigned i = 0; i < 8; ++i) sum += reset[i];
+    reset[8] = (unsigned char)(0U - sum); memcpy(buffer, reset, sizeof(reset));
+    return sizeof(reset);
+}
+static void run_failed_peer(int result) {
+    prepare(); reads = 0; read_result = result;
+    static const rtcp_stream_ops_t ops = {.read = peer_read};
+    rtcp_stream_t stream = {.ops = &ops};
+    iap2_stream_rx_init(&s_iap2_usb.rx, &stream);
+    unsigned released = releases;
+    assert(iap2_usb_start_worker() == RTCP_OK);
+    rt_thread_t thread = pending; pending = NULL;
+    thread->entry(thread->context); free(thread);
+    assert(reads == (result == 9 ? 2U : 1U));
+    assert(!s_iap2_usb.running && !s_iap2_usb.run && !s_iap2_usb.session);
+    assert(!s_iap2_usb.mfi && releases == released + 1);
+    assert(cmd_iap2_stop()); /* cleanup remains idempotent */
 }
 int main(void) {
     prepare(); fail_create = true;
@@ -217,7 +247,13 @@ int main(void) {
         assert(cmd_iap2_stop()); assert(!s_iap2_usb.session && !s_iap2_usb.mfi);
     }
     assert(releases == 38 && !writes);
+    for (unsigned cycle = 0; cycle < 32; ++cycle) {
+        run_failed_peer(9); /* real iAP2 RESET event, not an injected callback */
+        run_failed_peer(0);
+        run_failed_peer(RTCP_EIO);
+    }
     puts("Actual USB iAP2: command contention, rollback, provider ownership, detach generation, self-join, timeout retention and 32 restarts passed");
+    puts("Actual USB iAP2: idle then peer RESET, EOF and I/O error clean up once over 32 cycles each");
 }
 '''
 with tempfile.TemporaryDirectory(prefix="usb-iap2-worker-") as directory:

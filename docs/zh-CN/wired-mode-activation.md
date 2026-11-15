@@ -34,3 +34,15 @@ Host 测试编译真实应用适配源码，使用合成描述符模拟手机模
 Linux/WSL 可运行 `make -C application/rt-thread/rtcarplay check-lubanlite-usb BUILD=/tmp/carplay-usb-check`。GUI 镜像、冻结源码清单、构建日志和验证报告位于 `output/wired-regression-deep/`，未生成 Headless 固件。源码快照保留了并行未提交的 OTA/UI 工作，因此镜像不是仅由 Git 已提交内容构建。
 
 实机验收仍为 NOT_RUN：本轮访问 AiBurn `127.0.0.1:9100` 被拒绝，未烧录。请保留完整开机枚举日志，重点检查模式请求实际字节数、更新后的描述符及选择索引、MAC/NCM 初始化、MFi 前后的 RX/TX、IPv6、StartSession、入站 RTSP 和第一帧。iPhone 接 USB1 Host，分别验证手机开机前已连接、拔插连接、会话结束后不拔线重试。若新选择流程下仍出现零字节 OUT 超时，保留取消前 EHCI 快照，并在相同手机状态下对照精确旧镜像。音乐死机、卡顿、无线回归和 PC 文件传输仍需单独实机验证。
+
+## 后续验收与异常恢复
+
+用户随后报告开启 iPhone 蜂窝数据后有线连接正常，并明确确认音乐播放正常。有线连接和音乐更新为用户实测 PASS，具体受测镜像哈希未提供。这不能证明所有有线 CarPlay 都必须开启蜂窝数据，也不能证明连接恢复由模式选择修改导致。有线界面卡顿仍为待解决项。
+
+本轮修正应用工作线程的两条失败路径：真实 iAP2 LINK_DEAD 事件只请求线程退出，不在回调内部销毁自身会话；工作线程销毁会话、释放自己安装的 MFi provider 后才公布静止状态，由现有连接管理器关闭流并重试。通用 iAP2 读取助手用零同时表示处理成功和 EOF，应用现在检查原始 CarKit 读取结果，将正数字节交给原 SDK 会话，并在收到数据或空闲超时时推进定时器。EOF 和 I/O 错误退出，普通空闲超时继续等待，无需修改 SDK API 或协议。
+
+真实工作线程的 ASan/UBSan 回归在修正前复现了收到 peer RESET 后仍继续读取的问题。修正后经真实 SDK 会话和实际工作线程，分别运行“空闲后 RESET”、EOF、I/O 错误各 32 轮，验证 provider 只释放一次、会话清理完成及重复 stop 安全。保留线程创建/启动失败、拔插代次、自等待和停止超时保留资源测试。可运行 `make -C application/rt-thread/rtcarplay check-usb-iap2-worker`。清理播放循环内的周期性音频栈扫描和日志，保留停止时及显式音频测试的栈水位；保留必要控制器快照及回归测试，删除旧版源码替换测试入口。
+
+此前 CPU 异常仍独立保留：只有故障镜像匹配 `output/wired-regression-deep/gui/firmware.elf` 时，`0x4011c5d8` 才对应 lwIP `mld6_tmr` 的 `mld6.c:504`，返回地址 `0x4012898c` 对应 `lwip_cyclic_timer`。故障指令通过无效 IPv6 组播链表指针读取半字。该 ELF 的 42 个编译单元 netif 布局一致，因此未观察到此镜像的结构布局不一致，但尚未找到内存破坏源。不能把工作线程修正称为此崩溃的根因修复。后续需要核对精确烧录镜像并保留异常寄存器、接口生命周期证据，复测失败恢复，不通过屏蔽异常、跳过任意链表节点或关闭 IPv6 组播掩盖问题。
+
+下一阶段用同一场景对照有线和无线，复用按需开启的 `carplay_perf on`/`off`、`carplay_video status`、`ipheth_status`，关联网络/锁等待、RX 停顿与视频排队时长、解码、显示提交、丢 NAL 和 IDR 重建，再决定是否调整调度或缓冲。音乐正常并不能确定画面卡顿发生在哪一段。
