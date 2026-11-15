@@ -38,7 +38,11 @@ The [portable foundation](../../../../packages/third-party/rt-carplay/docs/ultra
 
 Both Windows GUI and Headless profiles were rebuilt with SDK f67b10d; compilation, wired-profile validation and all nine complete-image component bounds/CRC32 checks passed. The original Classic configuration and pack inputs were restored. No firmware was flashed for this milestone.
 
-Live Type 130 is still the existing receive-only iAP path. The new duplex primitive and Vehicle State processor are not yet wired to receiver negotiation or /info; UI Sync is not implemented. Next steps are a negotiated registry with fresh key derivation, whole-message routing, phone-offer gating, UI Sync binary-plist state/ACK handling and public receiver status/errors. HEVC, displayPanels, altScreen and unsupported vehicle/UI features are not added by the development flag. SDK code stays independent of LVGL, MPP, DE and D213.
+SDK milestone 83984a1165e1550d813d9edce6c0458bcc1c271c adds public Receiver transport registration/send/status APIs and Type 130 routing for Vehicle State normal/high and UI Sync UUIDs. Explicit host registration, the initial phone feature offer, completed Pair-Verify and encrypted control are required. Concurrent channels have independent ports, IDs, directional keys, queues and lifecycle. Failed listener attempts consume their salt; retired salts cannot be reused across these streams, screen, audio or iAP in the same session. Selective/all-Type-130 teardown and stale readiness are handled without retiring other media. The portable poll capacity is 24 for the optional endpoint set. See the SDK foundation document for bounds and callback ownership.
+
+The independent encrypted Host controller passed three-channel TCP exchanges through both public and compatibility Receiver configurations, including offer/authentication gates, duplicate SETUP, cross-kind/media salt conflicts, failed-listener retirement, fresh-seed reopening, bad-tag isolation and cleanup of never-connected listeners on reconnect. SDK Make, application Host regressions and 59/59 CTest cases passed, as did Windows GUI/Headless compilation, wired-profile checks and all nine complete-image bounds/CRC32 checks. These are synthetic transport payloads, not real Vehicle State/UI Sync application or iPhone evidence.
+
+The D213 profiles still register no new application protocol and use the existing receive-only iAP path. The Vehicle State processor is not yet attached to the Receiver or /info; UI Sync is not implemented. Next steps are Vehicle State application/notification composition, capability declarations gated by complete handlers and UI Sync binary-plist state/ACK handling. HEVC, displayPanels, altScreen and unsupported vehicle/UI features are not added by the development flag. SDK code stays independent of LVGL, MPP, DE and D213.
 
 ## Dedicated development profiles and artifacts
 
@@ -79,7 +83,7 @@ Receiver seed, AirPlay records and USB trust files were backed up outside Git wi
 | Level | Status | Evidence still required |
 | --- | --- | --- |
 | L0 | PASS for initial source research | This review distinguishes code, unexecuted reference tests and official product requirements; further protocol research continues. |
-| L1 | PARTIAL | Display/OPACK/Vehicle State/duplex transport Host tests passed; negotiated composition and UI Sync remain. |
+| L1 | PARTIAL | Display/OPACK/Vehicle State/registered Type 130 transport Host tests passed; Vehicle State application composition and UI Sync remain. |
 | L2 | NOT_RUN | Implement and physically validate D213 FULLSCREEN/FUSION/LOCAL, input, reconnect and performance. |
 | L3 | NOT_RUN | Real-iPhone Ultra feature negotiation. |
 | L4 | NOT_RUN | Real-iPhone Vehicle State and UI Sync exchanges. |

@@ -38,7 +38,11 @@ D213 已有应用融合所需的 MPP H.264 与 DE 硬件图层路径，但这不
 
 Windows GUI 与 Headless 配置均已使用 SDK f67b10d 重新构建，编译、有线配置及完整镜像全部九个组件的边界/CRC32 检查通过，原有 Classic 配置与打包输入已恢复。本里程碑没有刷写固件。
 
-实际 Type 130 仍是原有仅接收 iAP 路径。新双向基础及 Vehicle State 处理器尚未接入 Receiver 协商及 /info，UI Sync 尚未实现。后续为带新密钥派生的协商注册表、完整消息路由、手机能力门控、UI Sync binary-plist 状态/ACK，以及公共 Receiver 状态和错误接口。开发开关不会增加 HEVC、displayPanels、altScreen 或未完成车辆/UI 能力。SDK 不依赖 LVGL、MPP、DE 或 D213。
+SDK 里程碑 83984a1165e1550d813d9edce6c0458bcc1c271c 新增公共 Receiver 传输注册/发送/状态 API，以及 Vehicle State 普通/高优先级和 UI Sync UUID 的 Type 130 路由，要求宿主显式注册、初始手机能力提议、完成 Pair-Verify 及加密控制连接。并行通道各自拥有独立端口、ID、方向密钥、队列及生命周期。监听失败也消耗 salt，已关闭的 salt 不能在同一会话的这些通道、屏幕、音频及 iAP 间复用。处理选择性/全部 Type 130 关闭及旧就绪事件，保留其他媒体。可移植 poll 容量为 24，可覆盖全部可选端点。边界和回调归属见 SDK 基础文档。
+
+独立加密 Host 控制器通过公共及兼容 Receiver 配置完成三通道 TCP 交互，覆盖能力/认证门控、重复 SETUP、跨类型/媒体 salt 冲突、监听失败消耗、新 seed 重开、错误认证标签隔离，以及重连时清理未连接监听器。SDK Make、应用 Host 回归及 59/59 个 CTest 用例通过；Windows GUI/Headless 编译、有线配置及完整镜像全部九个组件边界/CRC32 检查通过。这些属于模拟传输包体，不能作为真实 Vehicle State/UI Sync 应用交互或 iPhone 证据。
+
+D213 配置仍不注册新增应用协议，使用原有仅接收 iAP 路径。Vehicle State 处理器尚未连接 Receiver 或 /info，UI Sync 尚未实现。后续为 Vehicle State 应用/通知集成、由完整处理器门控的能力声明及 UI Sync binary-plist 状态/ACK。开发开关不会增加 HEVC、displayPanels、altScreen 或未完成车辆/UI 能力。SDK 不依赖 LVGL、MPP、DE 或 D213。
 
 ## 专用开发配置与产物
 
@@ -79,7 +83,7 @@ FULLSCREEN 保留原有 Main Display。FUSION 将 MPP 视频直接由 DE 缩放�
 | 等级 | 状态 | 仍需证据 |
 | --- | --- | --- |
 | L0 | 初步源码研究 PASS | 本文区分代码、未运行参考测试和官方产品要求，后续协议研究继续。 |
-| L1 | PARTIAL | 显示/OPACK/Vehicle State/双向传输 Host 测试通过，尚缺协商接入和 UI Sync。 |
+| L1 | PARTIAL | 显示/OPACK/Vehicle State/注册 Type 130 传输 Host 测试通过，尚缺 Vehicle State 应用集成和 UI Sync。 |
 | L2 | NOT_RUN | 实现并实测 D213 FULLSCREEN/FUSION/LOCAL、输入、回连及性能。 |
 | L3 | NOT_RUN | 真实 iPhone Ultra 能力协商。 |
 | L4 | NOT_RUN | 真实 iPhone Vehicle State 和 UI Sync 交互。 |
