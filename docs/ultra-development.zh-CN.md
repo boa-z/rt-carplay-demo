@@ -152,3 +152,11 @@ Receiver 的 negotiate_ui_sync 独立检查接入处理器、已绑定目录、�
 完整 SDK Make 检查通过，CMake 在 ASan/UBSan 下通过 66/66 项。独立 plistlib 覆盖 65 项元数据及四种 Vehicle/UI SETUP 能力组合。加密 Receiver 场景验证已启用能力、UI/Vehicle 交互、仅刷新 UI 元数据无效时的拒绝、重连/无提议状态和不变的 Classic 媒体。在手工链接的能力测试中补齐真实 UI 模型/值写入器源码后，完整集成 Host 套件通过。该测试还确认现有各 D213 能力配置均保持单 Type 110，且没有 UI/HEVC/面板声明。
 
 D213 仍未接入这两个处理器，两个协商开关均未启用。LVGL 融合仪表不满足渲染器/资产/呈现契约，仍为独立应用演示。本里程碑未刷写固件。L0 保持 PASS，完整范围的 L1 为 PARTIAL，L2-L5 为 NOT_RUN。
+
+## 单 Main UI Sync CI 与开发板观察
+
+SDK a25c0cb99553492bc6d65d5f84fddceb25cfebe6 的 [sanitizer Host 和双语文档 CI 均通过](https://github.com/boa-z/rt-carplay/actions/runs/43761277096)。集成 2808437f848c046a1f90798f72023cffb989f297 的 [Host、GUI、Headless CI 均通过](https://github.com/boa-z/luban-lite-carplay/actions/runs/43761359152)。三个产物均已下载，两份固件验收清单的精确版本匹配上述记录，SDK/集成工作区记录为空。每份固件产物六项 SHA256 及每份完整镜像九个组件边界/CRC32 检查全部通过。
+
+GUI 镜像 SHA256：3cc1343e289e5134fab37542400402ad98bef5f0759b4f774574a8a4ce5ee01d。Headless 镜像 SHA256：7b1075016ad1ea0161546d2bd282ed99369781a27958987c63443f1ceb5a1b91。两份镜像均未刷写，滚动 Preview Release 已跳过。后续仅文档提交不会改变这些镜像的源码身份。
+
+2026-11-15 使用项目 aiburn 技能经 COM9 只读查询，返回 requested=FUSION、effective=LOCAL、generation=3、latched=0、video=0、error=0，以及 SIMULATED 车辆样本。连接管理器报告 owner=wireless、stage=1、usb_ready=1、attached=1、bt_ready=1。这些是现有固件在查询时的协调器/连接状态，不能证明可视合成、自动重连或连续正常运行。没有重启、进入升级模式或传输身份文件。原始日志保留在 Git 外的受限私有设备目录，此处没有手机标识或配对材料。物理融合/输入与真实 iPhone Ultra 验收仍为 NOT_RUN。
