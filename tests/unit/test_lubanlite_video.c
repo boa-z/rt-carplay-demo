@@ -9,6 +9,7 @@
 #include VIDEO_SINK_SOURCE
 
 static unsigned slots, decoded, destroyed, delays;
+static unsigned frame_width, frame_height;
 static unsigned last_config_size;
 static bool pressure;
 static bool reference_mode, reference_active, fail_next;
@@ -119,8 +120,8 @@ int mpp_decoder_get_frame(struct mpp_decoder *d, struct mpp_frame *f) {
     memset(f, 0, sizeof(*f));
     f->id = (int)render_id++;
     f->buf.phy_addr[0] = (unsigned)f->id;
-    f->buf.size.width = 1024;
-    f->buf.size.height = 600;
+    f->buf.size.width = frame_width;
+    f->buf.size.height = frame_height;
     return DEC_OK;
 }
 int mpp_decoder_put_frame(struct mpp_decoder *d, struct mpp_frame *f) {
@@ -186,6 +187,7 @@ static void reset(void) {
     s_sink.decoder = (struct mpp_decoder *)(uintptr_t)1;
     s_sink.panel_width = s_sink.display_width = 1024;
     s_sink.panel_height = s_sink.display_height = 600;
+    frame_width = 1024; frame_height = 600;
     slots = decoded = destroyed = delays = last_config_size = 0;
     pressure = false; hardware_reads=false; disable_queued=false;
     reference_mode = reference_active = fail_next = false;
@@ -221,6 +223,26 @@ int main(int argc, char **argv) {
     assert(updates == before_updates+2); /* No redundant static-frame update. */
     assert(retire_scanout(&s_sink));
     assert(return_count == 1);
+    assert(carplay_fusion_set_mode(CARPLAY_FUSION) == RTCP_OK);
+
+    reset(); /* Phone viewport size differs from physical framebuffer size. */
+    memset(&s_sink, 0, sizeof(s_sink)); lifecycle=true;
+    assert(carplay_video_sink_start(768,600) == RTCP_OK);
+    assert(s_sink.display_width == 768 && s_sink.display_height == 600);
+    assert(s_sink.panel_width == 1024 && s_sink.panel_height == 600);
+    frame_width=768; frame_height=600; render_remaining=1;
+    pump_decoder(&s_sink);
+    carplay_fusion_snapshot(100,&layout);
+    assert(layout.logical_width == 768 && layout.logical_height == 600);
+    assert(layout.video_rect.x == 0 && layout.video_rect.y == 0);
+    assert(layout.video_rect.width == 768 && layout.video_rect.height == 600);
+    assert(carplay_fusion_set_mode(CARPLAY_FULLSCREEN) == RTCP_OK);
+    apply_display_mode(&s_sink);
+    carplay_fusion_snapshot(100,&layout);
+    assert(layout.video_rect.x == 128 && layout.video_rect.y == 0);
+    assert(layout.video_rect.width == 768 && layout.video_rect.height == 600);
+    assert(carplay_video_sink_stop() == RTCP_OK);
+    assert(!hardware_reads && destroyed == 1);
     assert(carplay_fusion_set_mode(CARPLAY_FUSION) == RTCP_OK);
 #endif
     if (argc > 1 && strcmp(argv[1], "queue") == 0) {

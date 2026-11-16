@@ -86,7 +86,7 @@ The `rt-carplay application` menu owns board options; generic SDK options have o
 | `RTCARPLAY_MICROPHONE` | dmic0 uplink; installed acoustic verification required |
 | `RTCARPLAY_MIC_AEC` | GUI enables queue-aligned AEC with runtime comparison/calibration |
 | `RTCARPLAY_TOUCH_PANEL` | Exclusive panel reader and CarPlay HID routing |
-| `RTCARPLAY_SCREEN_WIDTH/HEIGHT` | 1024 / 600, matching the panel |
+| `RTCARPLAY_SCREEN_WIDTH/HEIGHT` | 1024 / 600 normally; Ultra GUI fusion uses 768 / 600 logical pixels |
 | `RTCARPLAY_OTA` | Settings firmware version and wired-Ethernet A/B update |
 
 Pinmux, clocks and partition layout belong to [the board](../../../target/d21x/demo128-nand-carplay/). Verify board and application configuration together when changing media or input. Launcher V2 preserved the prior audio behavior. The subsequent [audio recovery](docs/audio-recovery.md) changes application buffering, clock protection and AEC integration; portable SDK protocol and codec behavior remain unchanged.

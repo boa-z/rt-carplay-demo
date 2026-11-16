@@ -86,7 +86,7 @@ Settings → FIRMWARE & UPDATES 显示当前版本、源码提交和 A/B 槽位�
 | `RTCARPLAY_MICROPHONE` | dmic0 上行，需要装机声学验证 |
 | `RTCARPLAY_MIC_AEC` | GUI 启用队列对齐的 AEC，支持运行时对比/校准 |
 | `RTCARPLAY_TOUCH_PANEL` | 独占面板 Reader 和 CarPlay HID 路由 |
-| `RTCARPLAY_SCREEN_WIDTH/HEIGHT` | 1024 / 600，与面板一致 |
+| `RTCARPLAY_SCREEN_WIDTH/HEIGHT` | 通常 1024 / 600；Ultra GUI 融合配置为 768 / 600 逻辑像素 |
 | `RTCARPLAY_OTA` | Settings 版本显示与有线以太网 A/B 更新 |
 
 Pinmux、时钟和分区布局归属[板级目录](../../../target/d21x/demo128-nand-carplay/)。修改媒体或输入时同时核对板级和应用配置。Launcher V2 保留了此前音频行为，后续[音频恢复](docs/zh-CN/audio-recovery.md)修改应用缓冲、时钟保护及 AEC 集成，不改变可移植 SDK 协议或编解码行为。

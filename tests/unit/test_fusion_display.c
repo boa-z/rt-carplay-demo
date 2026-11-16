@@ -125,6 +125,20 @@ int main(void)
     assert(carplay_launcher_fusion_apply(&s) == RTCP_OK && ui_alpha.mode == AICFB_PIXEL_ALPHA_MODE && ui_alpha.value == 255);
     carplay_launcher_video_event(false,NULL); s=snapshot();
     assert(s.effective == CARPLAY_LOCAL && carplay_launcher_fusion_apply(&s) == RTCP_OK && ui_alpha.value == 255);
+    /* A viewport-sized phone stream fills the left region, including edges. */
+    (void)carplay_fusion_set_mode(CARPLAY_FUSION);
+    rtcp_display_rect_t viewport, destination; uint32_t viewport_generation;
+    assert(carplay_fusion_video_target(1024,600,&viewport,&viewport_generation));
+    assert(rtcp_display_fit(&viewport,768,600,&destination));
+    carplay_fusion_video_latched(&destination,768,600,viewport_generation,123000);
+    s=snapshot();
+    assert(s.video_rect.x == 0 && s.video_rect.y == 0 && s.logical_width == 768);
+    action=touch(RTCP_TOUCH_DOWN,0,0);
+    assert(action.owner == CARPLAY_TOUCH_PHONE && action.x == 0 && action.y == 0);
+    action=touch(RTCP_TOUCH_UP,767,599);
+    assert(action.owner == CARPLAY_TOUCH_PHONE && action.x == 767 && action.y == 599);
+    assert(touch(RTCP_TOUCH_DOWN,768,599).owner == CARPLAY_TOUCH_LOCAL);
+    assert(touch(RTCP_TOUCH_UP,768,599).owner == CARPLAY_TOUCH_LOCAL);
     rtcp_display_rect_t target; uint32_t generation;
     (void)carplay_fusion_set_mode(CARPLAY_FUSION);
     assert(carplay_fusion_video_target(800,480,&target,&generation));

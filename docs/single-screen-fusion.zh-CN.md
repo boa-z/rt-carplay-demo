@@ -4,6 +4,12 @@
 
 Ultra GUI 开发配置在 D213 1024×600 屏幕上启用 `RTCARPLAY_SINGLE_SCREEN_FUSION`。这是 Classic Main Display 视频与 LVGL 9 本地仪表的融合，不是 Apple Ultra Local UI 渲染器，也不能证明官方 Ultra 互操作能力。SDK 不引入板级或 LVGL 依赖，普通 Classic 和 Headless 配置保留原有显示策略。
 
+## 手机分辨率与黑边
+
+Ultra GUI 专用 defconfig 声明 768x600 Main Display，物理 framebuffer 和 LVGL 仍为 1024x600。此前将手机的 1024x600 画面等比例放入左侧 768x600 区域，会得到 768x450，上下各留 75 像素黑边。手机按声明的 768x600 渲染后即可完整填满左侧，无需拉伸或裁剪；实际输出分辨率和触摸仍需 iPhone 验证。普通 Classic 和 Headless defconfig 保留 1024x600。
+
+声明尺寸的修改需要重新构建、刷机并建立新的 CarPlay 会话。模式按钮只切换硬件合成方式：同一 768x600 会话切到 FULLSCREEN 时保持比例居中，左右各留 128 像素，不会重新协商为 1024x600。原生整屏输出需使用面板尺寸的配置及会话。启动页仍接收物理 1024x600 触摸坐标，再映射到已锁存的手机逻辑尺寸。
+
 ## 模式与操作
 
 | 模式 | 显示 | 输入 |
