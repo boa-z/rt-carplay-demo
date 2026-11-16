@@ -15,3 +15,5 @@
 Windows GUI 构建退出码为 0，保存镜像为 `C:/Project/Carplay/rt-carplay-artifacts/ultra-research/native-14d227a7/gui/d213-carplay-ultra-gui.img`，SHA256 为 `6ee3eea089479c8e6e41b5879e88e32793b0ecce688b72182a9196c007aa2b94`。准确源码提交、干净状态、全部六项 SHA256、九组件边界/CRC32 及配置/ELF 有线检查均通过。最终配置启用 DFS，ELF 包含真实配置 init/get/set 函数及 `fsync`。构建日志为 `C:/Project/Carplay/rt-carplay-artifacts/ultra-research/native-14d227a7-gui-build.log`。
 
 实机验收仍为 **NOT_RUN**：逐项修改设置，正常重启后检查语言/无线发现/麦克风/显示模式恢复；确认原生全屏没有浮层且手机触摸覆盖完整区域；分别在有线/无线下从设置页连接并确认自动跳转，再检查断连/重连及融合会话中主动打开设置。没有在 D213 注入存储写入失败或断电。历史手机观察不能作为此镜像验收，完整官方 Ultra、UI Sync 渲染和真实 Type 111 验收仍未证明。
+
+用户反馈与范围更新（2026-11-15）：用户确认上一版本 Fusion 显示效果可以。受测镜像/提交未明确，因此不改变本检查点新镜像及其全屏、持久化、触摸与生命周期检查的 NOT_RUN 状态。当前开发环境不再要求完整官方 Ultra，目标仍为可移植协议基础和 D213 融合 Demo。官方产品缺口属于范围外事项，尚未实测的真实手机交互继续明确保留未验证状态。

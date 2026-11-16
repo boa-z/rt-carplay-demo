@@ -2,9 +2,24 @@
 
 # CarPlay Ultra development and D213 fusion
 
-The final product objective is complete official CarPlay Ultra. This development profile is an intermediate protocol and integration bench. Classic video plus LVGL instruments, Ultra-related negotiation and the official product have separate acceptance criteria. No appearance, popup, Host simulation or second video stream proves complete Ultra support.
+Scope updated by the user on 2026-11-15: the current development environment no longer requires complete official CarPlay Ultra. The goal is portable Ultra protocol research/foundations and a useful D213 single-screen fusion demo. Official rendering/assets, HEVC/OpenGL integration and product access/qualification are outside the current acceptance scope and do not block this goal. Classic video plus LVGL instruments, Ultra-related negotiation and the official product have separate acceptance criteria. No appearance, popup, Host simulation or second video stream proves complete Ultra support.
 
-Current hardware decision: the D213 MPP/DE/LVGL path remains a fusion and protocol test bench. Apple's [public architecture](https://developer.apple.com/videos/play/wwdc2024/10111/) explicitly describes an OpenGL-based Local UI renderer, a dedicated OpenGL compositor and essential HEVC video support. The current D213 integration has no implemented/verified OpenGL backend, official asset/presentation renderer or HEVC media path. GE2D/DE composition and local LVGL instruments do not satisfy those contracts. Complete official Ultra requires a suitable graphics/codec platform plus the required software, assets, access and qualification; moving the portable SDK to that platform remains part of the product path. The no-black-bar photo confirms one visual outcome of the 8ac6f504 fusion image, while the reported compressed appearance, touch, reconnection and official acceptance remain separate.
+Current hardware decision: the D213 MPP/DE/LVGL path remains a fusion and protocol test bench. Apple's [public architecture](https://developer.apple.com/videos/play/wwdc2024/10111/) explicitly describes an OpenGL-based Local UI renderer, a dedicated OpenGL compositor and essential HEVC video support. The current D213 integration has no implemented/verified OpenGL backend, official asset/presentation renderer or HEVC media path. GE2D/DE composition and local LVGL instruments do not satisfy those contracts. Complete official Ultra requires a suitable graphics/codec platform plus the required software, assets, access and qualification; a future official product would require a separate platform investigation outside this goal. The no-black-bar photo confirms one visual outcome of the 8ac6f504 fusion image, while the reported compressed appearance, touch, reconnection and official acceptance remain separate.
+
+## Current scope and acceptance
+
+This section supersedes historical references below to a complete official product as the goal or an L1 blocker. On 2026-11-15 the user confirmed that the previous version's Fusion display effect was acceptable. The exact image/commit was not specified, so this is a user-reported visual confirmation and cannot be attributed to the latest image or extended to touch, persistence, reconnection or full protocol acceptance. The [latest build checkpoint](evidence/d213-persistent-fullscreen-20261115.md) retains the exact runtime/image identity and remaining checks.
+
+| Level | Current status | Evidence boundary |
+| --- | --- | --- |
+| L0 | PASS | LIVI source/test review, public architecture comparison and implementation gap reports are recorded. |
+| L1 | PASS for implemented foundations | Portable display, Vehicle State, authenticated DataStream and UI Sync foundations have recorded Host checks. This accepts the implemented foundation scope, not complete official protocol coverage or phone interoperability. Latest integration Host, GUI and Headless CI passed. |
+| L2 | PARTIAL | User confirms previous-version Fusion visuals. Exact image correlation, latest fullscreen/settings behavior, touch, lifecycle and controlled resource/latency measurements remain incomplete. |
+| L3 | PARTIAL | Historical real-phone Vehicle State offer/enable and Normal/HIGH lane connections; UI Sync and remaining negotiation checks are NOT_RUN. |
+| L4 | PARTIAL | Historical real-phone request processing and queued response; method/phone acceptance, read/write/subscription/notification semantics and UI Sync device interaction remain NOT_RUN. |
+| L5 | NOT_RUN on a real phone; optional | Independent Type 111 Host transport/Null Sink exists. Real-phone negotiation and independent cluster reception are unverified. |
+
+Prioritize the implemented single-screen experience and bounded Vehicle State interoperability, then UI Sync only when its actual host contract is ready. Unimplemented phone-facing capabilities remain disabled. Device tests are performed manually by the user; this scope update does not authorize board connections or flashing. Complete official Ultra is outside scope, rather than a BLOCKED item for this goal.
 
 ## Sources and implementation baseline
 

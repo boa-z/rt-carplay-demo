@@ -6,7 +6,7 @@
 
 ## 源码所有权
 
-[Ultra 开发](docs/ultra-development.zh-CN.md)记录 LIVI 源码研究、可移植 SDK 里程碑、专用 GUI/Headless 配置、CI 产物及独立 L0-L5 验收。最终目标是完整官方 Ultra，当前配置为开发验证平台，未实现能力保持不声明。Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI)。
+[Ultra 开发](docs/ultra-development.zh-CN.md)记录 LIVI 源码研究、可移植 SDK 里程碑、专用 GUI/Headless 配置、CI 产物及独立 L0-L5 验收。当前目标是可移植 Ultra 协议基础与实用的 D213 单屏融合 Demo，完整官方 Ultra 不属于当前验收范围，未实现能力保持不声明。用户已确认上一版本 Fusion 显示效果可以，具体受测镜像及剩余实机检查在开发报告中单独记录。Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI)。
 
 专用 Ultra 配置现包含显式的 [SIMULATED 发动机 Vehicle State 协议实验入口](docs/vehicle-protocol-demo.zh-CN.md)，用于后续手机互操作测试，普通 Classic 配置保持关闭。它不会将本地仪表的车速、挡位、电量随意映射成协议特征，也不启用 UI Sync 或官方 Local UI 渲染。
 

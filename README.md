@@ -6,7 +6,7 @@ The application integrates the independent portable rt-carplay SDK into Luban-Li
 
 ## Source ownership
 
-[Ultra development](docs/ultra-development.md) records the LIVI source review, portable SDK milestone, dedicated GUI/Headless profiles, CI artifacts and separate L0-L5 acceptance. The final objective is complete official Ultra; the current profile is a development bench with unimplemented features kept out of capability declarations. Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI).
+[Ultra development](docs/ultra-development.md) records the LIVI source review, portable SDK milestone, dedicated GUI/Headless profiles, CI artifacts and separate L0-L5 acceptance. The current goal is portable Ultra protocol foundations and a useful D213 single-screen fusion demo. Complete official Ultra is outside the current acceptance scope; unimplemented features stay absent from capability declarations. The user has confirmed the previous version's Fusion visual result; the exact tested image and remaining device checks are recorded separately in the development report. Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI).
 
 The dedicated Ultra profiles now include an explicit [SIMULATED engine Vehicle State protocol bench](docs/vehicle-protocol-demo.md) for future phone interoperability tests. Ordinary Classic profiles keep it disabled. It does not expose the local dashboard's speed, gear or battery as guessed protocol characteristics, and does not enable UI Sync or official Local UI rendering.
 

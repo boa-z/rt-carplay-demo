@@ -2,6 +2,8 @@
 
 # D213 codec and graphics feasibility for official Ultra
 
+Current scope update (2026-11-15): complete official Ultra is no longer required in this development environment. This report preserves the technical limits for a possible future official product; its missing codec, graphics, asset and qualification capabilities are not acceptance blockers for the current portable protocol foundations and D213 fusion demo. See the [current scope and acceptance record](ultra-development.md#current-scope-and-acceptance).
+
 Source review date: 2026-11-15. The current D213 development stack can host portable protocol experiments and the independent Classic video plus local instruments demo. The checked-in codec and graphics interfaces do not establish the complete official Ultra rendering pipeline. Implementing more negotiation messages cannot by itself close those gaps.
 
 ## Public architecture requirements
