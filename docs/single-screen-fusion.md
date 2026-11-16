@@ -6,6 +6,8 @@ The Ultra GUI development profile enables `RTCARPLAY_SINGLE_SCREEN_FUSION` on th
 
 ## Phone resolution and black bars
 
+The [viewport manual-test checkpoint](evidence/d213-fusion-viewport-20261115.md) records the exact 768x600 native image, verification, preceding fixed-alpha image and remaining manual tests.
+
 The dedicated Ultra GUI defconfig advertises a 768x600 Main Display while the physical framebuffer and LVGL remain 1024x600. Previously, a 1024x600 phone image fitted into the left 768x600 viewport became 768x450, leaving 75 pixels above and below. A phone stream rendered at the advertised 768x600 fills that viewport without stretching or cropping; its actual resolution and touch behavior still require iPhone validation. Ordinary Classic and Headless defconfigs retain 1024x600.
 
 A changed advertised size takes effect in a new CarPlay session after rebuilding/flashing. Mode buttons only change hardware composition. Switching this 768x600 session to FULLSCREEN centers the same image with 128-pixel bars on each side; it does not renegotiate 1024x600. Use a panel-sized profile/session for native full-panel output. Touch input remains physical 1024x600 at the launcher and maps to the latched logical phone dimensions.
