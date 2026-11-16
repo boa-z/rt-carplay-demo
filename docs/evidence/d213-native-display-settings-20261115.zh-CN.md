@@ -2,6 +2,8 @@
 
 [English and exact artifact evidence](d213-native-display-settings-20261115.md)
 
+> 历史记录：下文提到的 `.ci/build-ultra-demo.sh` 及 `_ultra_gui`/`_ultra_headless` 配置已在 D213 配置统一为 `d21x_demo128-nand_rt-thread_rtcarplay_defconfig` 时删除。产物身份对所述构建仍然有效。
+
 注意：用户随后报告 e17d8fa2 蓝牙反复重启，该版本撤回，不应继续刷写。源码确认融合连接管理器把 `status.wireless` 传给表示“有线”的参数，导致连接模式反向；现改为 `!status.wireless`。原有管理器测试的模拟接口也重复了同一个错误，现同步纠正，不新增测试。此前绿色 Host/CI 未检出此缺陷。没有读取实机日志，因此完整运行因果及修复效果仍待用户手动验证；e17d8fa2 本次运行回归记为 FAIL，替换镜像手机验收为 NOT_RUN。下列散列和构建记录用于追溯问题版本，不是下载推荐。
 
 修正版已提交并推送为 `ba46280ba73700d2514433db0d7bfc9b1cc13ba6`，SDK 版本不变。原有连接检查及完整应用 Host 检查通过，没有新增测试。Windows GUI 编译成功，替换镜像为 `C:/Project/Carplay/rt-carplay-artifacts/ultra-research/native-ba46280b/gui/d213-carplay-ultra-gui.img`，SHA256 为 `1a584f917ad53761efc3d9e4b9424741cdf7ea415dea644d0996ba15c984e770`。源码版本、干净工作区、全部六项散列、九个组件边界/CRC 和配置/ELF 检查通过。配置保留 Wi-Fi、蓝牙和有线支持；融合/全屏几何与有线/无线传输独立，两种连接均支持。修正版实机验收仍为 NOT_RUN。[修正 CI](https://github.com/boa-z/luban-lite-carplay/actions/runs/43793819201) 的 Host 已通过，记录时 GUI/Headless 尚在构建。

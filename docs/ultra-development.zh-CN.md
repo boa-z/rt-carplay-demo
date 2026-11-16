@@ -2,7 +2,7 @@
 
 # CarPlay Ultra 开发与 D213 融合
 
-当前应用里程碑：专用 Ultra GUI/Headless 配置已显式启用 [SIMULATED 发动机 Vehicle State 协议实验入口](vehicle-protocol-demo.zh-CN.md)，普通 Classic 配置保持不变。下文各节记录对应历史里程碑，其中“D213 尚未接入 Vehicle 处理器”的描述早于此次实验集成。D213 的 UI Sync 及其渲染器/资产/呈现能力仍保持关闭。
+当前应用里程碑：统一的 D213 配置包含单屏融合显示模式，并可按需启用默认关闭的 [SIMULATED 发动机 Vehicle State 协议实验入口](vehicle-protocol-demo.zh-CN.md)。下文各节记录对应历史里程碑，其中“D213 尚未接入 Vehicle 处理器”的描述早于此次实验集成。D213 的 UI Sync 及其渲染器/资产/呈现能力仍保持关闭。
 
 最新实机检查点：真实手机已提供并启用 Vehicle State，两条通道连接，处理器收到 1 条请求；用户确认 FULLSCREEN 视频正常，运行时改为逐像素 alpha 后 FUSION 左侧视频恢复。应用现对 FUSION 使用逐像素 alpha，避免空白 UI 区域遮住视频。[确切镜像、观察和限制](evidence/d213-vehicle-controls-flash-20261115.md)记录全部证据。L2–L4 根据有限实测记为 PARTIAL，固化修复的新镜像、输入/重连、完整协议交互及官方 Ultra 仍未完成；下文历史 NOT_RUN 属于较早里程碑。
 
@@ -67,21 +67,20 @@ SDK 路由里程碑通过了[对应 CI](https://github.com/boa-z/rt-carplay/acti
 
 D213 配置仍不注册新增应用协议，使用原有仅接收 iAP 路径。SDK 已支持将 Vehicle State 和 UI Sync 处理器显式接入 Receiver，但尚未组合对应 /info 声明。后续协议工作为由完整处理器及实际宿主目录门控的能力声明。开发开关不会增加 HEVC、displayPanels、altScreen 或未完成车辆/UI 能力。SDK 不依赖 LVGL、MPP、DE 或 D213。
 
-## 专用开发配置与产物
+## 统一配置与产物
 
 | 配置 | 文件 | 当前用途 |
 | --- | --- | --- |
-| GUI | d21x_demo128-nand_rt-thread_rtcarplay_ultra_gui_defconfig | 原有 LVGL launcher 和 Classic 媒体，明确的 Ultra 开发开关及署名，融合尚待实现。 |
-| Headless | d21x_demo128-nand_rt-thread_rtcarplay_ultra_headless_defconfig | 不带 LVGL 的自动 Classic 连接，用于协议及生命周期验证。 |
+| 单一配置 | d21x_demo128-nand_rt-thread_rtcarplay_defconfig | LVGL Mobility Cockpit V4、Classic 媒体、单屏 FULLSCREEN/FUSION/LOCAL 切换，以及作为显式选项的 SIMULATED 车辆协议实验入口。 |
+| Headless（历史） | 无 | D213 硬件不足以实现完整 Ultra，开发配置已统一；不带 LVGL 的协议实验可在本地 menuconfig 中关闭 `RTCARPLAY_DEMO_LAUNCHER` 重新生成配置，不再维护独立 defconfig。 |
 
-两者保留独占 native NCM、n0 身份和关闭诊断跟踪的设置。开发开关应用显式默认 Main Display 配置，不声明未实现协议。每次构建先验证匹配 bootloader，再检查有线配置及完整镜像。脚本退出时恢复共享生成配置和 bootloader 打包输入。Windows 使用现有原生工具链，不能通过 WSL 构建替换为 Linux 工具链。
+配置保留独占 native NCM、n0 身份和关闭诊断跟踪的设置。`RTCARPLAY_VEHICLE_PROTOCOL_DEMO` 仍是默认关闭的显式开发选项，普通发布镜像不含该模拟协议入口。每次构建先验证匹配 bootloader，再检查有线配置及完整镜像。
 
 ```sh
-bash .ci/build-ultra-demo.sh gui
-bash .ci/build-ultra-demo.sh headless
+bash .ci/build-firmware.sh
 ```
 
-ultra-demo workflow 在 SDK 和应用 Host 检查后构建两个变体。可下载的 Actions 产物在 output/ultra-ci/gui 或 output/ultra-ci/headless 中包含完整 IMG、ELF/map、bootloader、解析后的配置、源码/验收元数据、日志和 SHA256SUMS。这些是开发镜像，不是经过认证的 Ultra Release。推送里程碑使用提交标记 [ultra-dev]，使现有滚动 Classic Preview Release 任务跳过；专用构建及产物工作流仍执行。普通 Classic 提交保留原有发布行为。
+`D213 firmware` workflow 在 SDK 和应用 Host 检查（含 clang-format、完整 `make check` 和两个 LVGL 预览）之后构建同一个镜像，并作为滚动 `preview` Release 发布。推送里程碑使用提交标记 [ultra-dev] 时仅上传 Actions 产物而不替换滚动 Release，供复核后再发布。
 
 2026-11-15 两个配置的 Windows 本地构建均通过，包括有线配置检查及完整镜像全部九个组件的边界/CRC32 检查，构建后已恢复原有 Classic 配置。首个配置里程碑的提交前镜像使用 SDK 183fd91，在 acceptance.txt 中记录未提交源码清单：GUI SHA256 为 f3d0fddcd0a66d5985bfb68740cb9c4827a2885bc56524ae40b80c2479f31dfe，Headless 为 b5d7e36f78df5ec355bcc7f428b2d68207081ed2ae6a6b5ecf91c2055613ac17，两者均未刷写。完整应用 Host 测试与真实 LVGL 9 Settings 预览通过，已发布的首个 SDK 里程碑也通过了 [GitHub CI](https://github.com/boa-z/rt-carplay/actions/runs/43734899981)。
 
@@ -89,7 +88,7 @@ ultra-demo workflow 在 SDK 和应用 Host 检查后构建两个变体。可下�
 
 ## 单屏融合实现
 
-Ultra GUI 配置现已通过 DE 视频位置与 UI 图层裁剪实现 FULLSCREEN/FUSION/LOCAL，包含明确标注的模拟仪表、复制式车辆数据接口、共用已锁存几何的触摸映射、安全的扫描帧生命周期和接收端阶段统计。操作、约束、Host 覆盖和实机验收清单见[单屏融合文档](single-screen-fusion.zh-CN.md)。2026-11-15 原生 GUI/Headless 构建及实际 LVGL Host 预览通过，L2 在确切镜像实机验证前保持 NOT_RUN。该应用融合独立于官方 Ultra Local UI。
+统一镜像现已通过 DE 视频位置与 UI 图层裁剪实现 FULLSCREEN/FUSION/LOCAL，包含明确标注的模拟仪表、复制式车辆数据接口、共用已锁存几何的触摸映射、安全的扫描帧生命周期和接收端阶段统计。操作、约束、Host 覆盖和实机验收清单见[单屏融合文档](single-screen-fusion.zh-CN.md)。2026-11-15 原生 GUI/Headless 构建及实际 LVGL Host 预览通过，L2 在确切镜像实机验证前保持 NOT_RUN。该应用融合独立于官方 Ultra Local UI。
 
 ## 开发板准备与证据
 
@@ -198,7 +197,7 @@ GUI 镜像 SHA256：324226e2a572111d7943e743227960fecc10bc1097c4e64c2321999f29a3
 
 ## 应用 Vehicle State 实验
 
-专用 Ultra 配置接入车辆侧拥有的三项内燃机模拟模型，声明匹配的 /info 目录，并显式选择手机提议的 vehicleStateProtocol。应用在 Receiver 所有者上更新模型，每次新控制器接入前刷新当前初值，先销毁 Receiver 再释放模型。carplay_status 发布复制后的模拟/协议/交付观察值。不会从发动机模型推断车速、挡位、电池 SOC、UI Sync、显示面板、HEVC 或备用视频流，参见[模型、源码映射及实机步骤](vehicle-protocol-demo.zh-CN.md)。
+统一镜像可在 menuconfig 启用 `RTCARPLAY_VEHICLE_PROTOCOL_DEMO` 后接入车辆侧拥有的三项内燃机模拟模型，声明匹配的 /info 目录，并显式选择手机提议的 vehicleStateProtocol。应用在 Receiver 所有者上更新模型，每次新控制器接入前刷新当前初值，先销毁 Receiver 再释放模型。carplay_status 发布复制后的模拟/协议/交付观察值。不会从发动机模型推断车速、挡位、电池 SOC、UI Sync、显示面板、HEVC 或备用视频流，参见[模型、源码映射及实机步骤](vehicle-protocol-demo.zh-CN.md)。
 
 本地完整集成 Host 套件通过，包含开启/关闭选项的实际应用启停、元数据刷新、处理器生命周期、订阅/HIGH 通知、拒绝写入，以及独立 plistlib 对目录和缺省未支持声明的验证。专用镜像 CI 检查两份固件 ELF 中实际模型/协议符号，并在验收清单记录模拟数据源。本里程碑没有新增开发板或手机验收，L0 PASS、完整范围 L1 PARTIAL、L2-L5 NOT_RUN 不变。
 

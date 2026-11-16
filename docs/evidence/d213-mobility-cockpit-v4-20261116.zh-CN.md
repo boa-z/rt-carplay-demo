@@ -12,11 +12,13 @@
 | V4 工作前的基线版本 | `2917135e666025d315e6cc069734e9776df39024` |
 | 变更/新增文件 | 49 个路径（见提交信息中的变更报告和 `git show --stat`） |
 | 可移植 SDK | `packages/third-party/rt-carplay` 未改动；未加入 LVGL、HMI、Android Auto 或 CarLife 依赖 |
-| 新建应用或 defconfig | 无。就地修改现有 `rtcarplay` 应用及其两个 defconfig |
+| 新建应用或 defconfig | 无。就地修改现有 `rtcarplay` 应用及其 defconfig |
+
+> 后续更新（同日）：D213 硬件不足以实现完整 Ultra，原 `_ultra_gui` 和 `_ultra_headless` 配置已删除，通用能力（含 `RTCARPLAY_SINGLE_SCREEN_FUSION`）并入 `d21x_demo128-nand_rt-thread_rtcarplay_defconfig`。下文记录的镜像散列标识统一前的构建。
 
 ## 构建
 
-使用 `d21x_demo128-nand_rt-thread_rtcarplay_defconfig` 执行 `scons -j8` 退出码 0，生成 `output/d21x_demo128-nand_rt-thread_rtcarplay/images/d21x_demo128_nand_carplay_page_2k_block_128k_v1.0.0.img`（本版本 5,276,160 字节）。当前配置包含 `AIC_USING_PWM3`、`AIC_PWM_BACKLIGHT`、通道 3、1 kHz、`AIC_PWM_BRIGHTNESS_LEVEL=72`，且不再有 `AIC_PANEL_ENABLE_GPIO`；`AIC_SDMC1_HOTPLUG_PIN` 仍为 `PC.6`。
+使用 `d21x_demo128-nand_rt-thread_rtcarplay_defconfig` 执行 `scons -j8` 退出码 0，生成 `output/d21x_demo128-nand_rt-thread_rtcarplay/images/d21x_demo128_nand_carplay_page_2k_block_128k_v1.0.0.img`（统一配置前为 5,276,160 字节，散列 `f776ab8a…`）。配置统一后同一命令生成 5,306,880 字节镜像，SHA256 为 `0b26872e3e9187589cafa57cbe860b205107157b10cc67cb88854bc876a62a9a`；该构建增加 `RTCARPLAY_SINGLE_SCREEN_FUSION=y` 并移除 `RTCARPLAY_ULTRA_DEMO`。当前配置包含 `AIC_USING_PWM3`、`AIC_PWM_BACKLIGHT`、通道 3、1 kHz、`AIC_PWM_BRIGHTNESS_LEVEL=72`，且不再有 `AIC_PANEL_ENABLE_GPIO`；`AIC_SDMC1_HOTPLUG_PIN` 仍为 `PC.6`。
 
 ## 主机测试
 
@@ -28,6 +30,7 @@
 | `check-lubanlite-touch` | PASS | 所有权、中断、坐标、32 次重启 |
 | `launcher_preview` | PASS | 用真实 LVGL 9.1 在 1024×600 渲染四个页面、模态框和不支持音频状态 |
 | `fusion_preview` | PASS | 预置的投影侧字节保持不变；所有融合条控件满足 `x >= 768`；767/768 触摸分界正确 |
+| 统一配置复检 | PASS | 移除 `RTCARPLAY_ULTRA_DEMO` 后，整机以 `RTCARPLAY_SINGLE_SCREEN_FUSION=y` 构建通过；两个预览重新构建，23 张 PPM 渲染与已入库截图逐字节一致。`test_rtthread_app` 在融合+车辆实验、无 Ultra 宏时通过语法检查；`connection_manager.c` 在启用和不启用融合时均通过语法检查。 |
 | `check-internet-share`、`check-lubanlite-{bonds,handoff,reconnect,capabilities}`、`check-wired-{identity,trace}`、`check-iap2-endpoints`、`check-{usb,wireless}-iap2-worker` | NOT RUN（环境） | 这些目标需要本次 Windows 会话不具备的 Linux 主机条件：`-fsanitize=address,undefined` 运行时库、POSIX `sys/socket.h`/`O_CLOEXEC`，或 `PATH` 中的 `cc`。本次改动未触及它们，须在 Linux CI/`make check` 环境运行。 |
 | `check-udp-burst` | NOT RUN（环境） | `tests/udp_burst/run.sh` 调用 `cc` |
 

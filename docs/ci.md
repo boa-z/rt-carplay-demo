@@ -15,7 +15,7 @@ The upstream default branch is `master`. Fetching upstream does not automaticall
 
 ## Firmware builds
 
-The `D213 firmware` GitHub Actions workflow runs on pushes to `carplay-oss` and supports manual dispatch. It builds the GUI firmware, then publishes the resulting IMG, A/B OTA package and Bootloader as a rolling `preview` GitHub Release. Checkout enables Git LFS and recursive submodules; the SDK contains the Xuantie V2.6.1 Linux toolchain archive and the required Realtek library as LFS objects.
+The `D213 firmware` GitHub Actions workflow runs on pushes to `carplay-oss` and supports manual dispatch. It first runs the SDK and application Host regressions plus both actual-LVGL previews, then builds the single unified firmware and publishes the resulting IMG, A/B OTA package and Bootloader as a rolling `preview` GitHub Release. A push whose commit message contains `[ultra-dev]` skips only the release step: the image is still built and uploaded as an Actions artifact for review. Checkout enables Git LFS and recursive submodules; the SDK contains the Xuantie V2.6.1 Linux toolchain archive and the required Realtek library as LFS objects.
 
 ```sh
 python3 -m venv .ci-venv

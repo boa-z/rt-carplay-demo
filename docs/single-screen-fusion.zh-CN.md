@@ -2,7 +2,7 @@
 
 [English](single-screen-fusion.md)
 
-Ultra GUI 开发配置在 D213 1024×600 屏幕上启用 `RTCARPLAY_SINGLE_SCREEN_FUSION`。这是 Classic Main Display 视频与 LVGL 9 本地仪表的融合，不是 Apple Ultra Local UI 渲染器，也不能证明官方 Ultra 互操作能力。SDK 不引入板级或 LVGL 依赖，普通 Classic 和 Headless 配置保留原有显示策略。
+统一 D213 镜像在 1024×600 屏幕上启用 `RTCARPLAY_SINGLE_SCREEN_FUSION`。这是 Classic Main Display 视频与 LVGL 9 本地仪表的融合，不是 Apple Ultra Local UI 渲染器，也不能证明官方 Ultra 互操作能力。SDK 不引入板级或 LVGL 依赖；不启用 LVGL launcher 的构建保留原有按面板尺寸的显示策略。
 
 ## 原生全屏与融合显示设置
 
@@ -24,7 +24,7 @@ Ultra GUI 开发配置在 D213 1024×600 屏幕上启用 `RTCARPLAY_SINGLE_SCREE
 
 [区域适配手动测试记录](evidence/d213-fusion-viewport-20261115.zh-CN.md)包含本次 768x600 原生镜像身份、验证、上一版像素 alpha 镜像及剩余实机项目。
 
-Ultra GUI 专用 defconfig 声明 768x600 Main Display，物理 framebuffer 和 LVGL 仍为 1024x600。此前将手机的 1024x600 画面等比例放入左侧 768x600 区域，会得到 768x450，上下各留 75 像素黑边。手机按声明的 768x600 渲染后即可完整填满左侧，无需拉伸或裁剪；实际输出分辨率和触摸仍需 iPhone 验证。普通 Classic 和 Headless defconfig 保留 1024x600。
+统一镜像在融合模式声明 768x600 Main Display，物理 framebuffer 和 LVGL 仍为 1024x600。此前将手机的 1024x600 画面等比例放入左侧 768x600 区域，会得到 768x450，上下各留 75 像素黑边。手机按声明的 768x600 渲染后即可完整填满左侧，无需拉伸或裁剪；实际输出分辨率和触摸仍需 iPhone 验证。全屏模式重新声明原生 1024x600。
 
 构建配置中的尺寸变化需要新镜像及会话，运行时 Settings 现可按上述流程重建指定原生尺寸的会话。在现有 768x600 会话内仅修改合成布局到 FULLSCREEN，仍会居中并左右各留 128 像素；要建立 1024x600 会话，请用设置页或 `carplay_connection display fullscreen`。启动页仍接收物理 1024x600 触摸，再映射到已锁存的手机逻辑尺寸。
 
@@ -64,7 +64,7 @@ MPP 继续将 H.264 解码到自己的帧缓冲，DE 负责视频缩放和位置
 
 ## 验证与待完成实机项
 
-`make -C application/rt-thread/rtcarplay check` 在 ASan/UBSan 下测试实际协调层、DE UI 策略和视频后端，覆盖布局代次、坐标边界、触摸归属与取消、提供方数据复制、裁剪/alpha 回滚、帧缓冲地址保留、静态画面切换、失败屏障和重复生命周期。`tests/launcher_preview` 使用实际 LVGL 9 软件渲染器构建 `launcher_preview` 和 `fusion_preview`，后者验证控件边界、标签、按钮、提供方不可用和断连画面。预览左侧空白不代表手机视频截图。专用 Ultra workflow 运行两种预览，并随 Host 日志上传 PPM 图片。
+`make -C application/rt-thread/rtcarplay check` 在 ASan/UBSan 下测试实际协调层、DE UI 策略和视频后端，覆盖布局代次、坐标边界、触摸归属与取消、提供方数据复制、裁剪/alpha 回滚、帧缓冲地址保留、静态画面切换、失败屏障和重复生命周期。`tests/launcher_preview` 使用实际 LVGL 9 软件渲染器构建 `launcher_preview` 和 `fusion_preview`，后者验证控件边界、标签、按钮、提供方不可用和断连画面。预览左侧空白不代表手机视频截图。`D213 firmware` workflow 运行两种预览，并随 Host 日志上传 PPM 图片。
 
 2026-11-15 原生 Windows GUI/Headless 构建通过，每个完整镜像均通过九个组件的边界和 CRC 检查。完整应用 Host 测试也回归 Classic 行为；音频优先级测试只对接口允许的非阻塞锁忙结果有界重试，再断言优先级结果，生产音频逻辑未修改。
 

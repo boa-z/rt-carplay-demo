@@ -34,9 +34,6 @@ static void rtcarplay_autostart(void)
 
 int main(void)
 {
-#if defined(RTCARPLAY_ULTRA_DEMO)
-    rt_kprintf("CarPlay Ultra development demo: Main Display, H.264; phone validation pending\n");
-#endif
     rt_kprintf("Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI)\n");
 #if defined(RTCARPLAY_DEMO_LAUNCHER)
     rt_kprintf("rt-carplay: Launcher V2; automatic USB and wireless discovery\n");

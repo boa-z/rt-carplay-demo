@@ -2,7 +2,7 @@
 
 # Mobility Cockpit V4 native UI
 
-The V4 design package (`Mobility_Cockpit_UI/mobility_cockpit_v4`) replaces the Launcher V2 debug-first pages with four product-facing LVGL 9 screens at 1024×600. The change is confined to the existing `rtcarplay` application, its board pinmux and its two defconfigs. No new application, defconfig or SDK dependency is introduced, and the portable rt-carplay SDK remains a protocol library without LVGL or HMI code.
+The V4 design package (`Mobility_Cockpit_UI/mobility_cockpit_v4`) replaces the Launcher V2 debug-first pages with four product-facing LVGL 9 screens at 1024×600. The change is confined to the existing `rtcarplay` application, its board pinmux and its defconfig. No new application, defconfig or SDK dependency is introduced, and the portable rt-carplay SDK remains a protocol library without LVGL or HMI code.
 
 ## Scope
 
@@ -32,7 +32,7 @@ Both controls are bound to real backends and are disabled, with "Not supported o
 | Media volume | `platform/audio_volume_lubanlite.c` → `sound0`, `AUDIO_TYPE_MIXER` / `AUDIO_MIXER_VOLUME` | Range 0..100. The set performs `AUDIO_CTL_CONFIGURE`, then reads the value back; success requires the read-back to equal the request. A driver without mixer support answers the capability query negatively and the slider stays disabled. The AirPlay SET_PARAMETER volume is a separate remote control and is not overwritten. |
 | Display brightness | `platform/backlight_lubanlite.c` → PWM channel 3 (PC.7 / PWM3_B) | Range 5..100. `rt_pwm_set` at 1 kHz followed by `rt_pwm_enable`; read-back converts `pulse/period` to a percentage. The minimum of 5 keeps a visible floor and avoids a blackout. |
 
-The board schematic routes `GPC_P7/UART3_RTS/PWM3_B` as LCD_PWM into the LED boost converter, while `GPC_P6/SDC1_DET` is the SD card detect input. The previous image enabled the panel with a static GPIO level on PC.7 and left PC.6 unclaimed. Both defconfigs now select `AIC_USING_PWM3`, `AIC_PWM_BACKLIGHT`, channel 3 and 1 kHz instead of `CONFIG_AIC_PANEL_ENABLE_GPIO="PC.7"`, and `target/d21x/demo128-nand-carplay/pinmux.c` claims only PC.7 for PWM3 so card hotplug keeps working on PC.6.
+The board schematic routes `GPC_P7/UART3_RTS/PWM3_B` as LCD_PWM into the LED boost converter, while `GPC_P6/SDC1_DET` is the SD card detect input. The previous image enabled the panel with a static GPIO level on PC.7 and left PC.6 unclaimed. Both the unified `d21x_demo128-nand_rt-thread_rtcarplay_defconfig` and the historical Ultra GUI profile selected `AIC_USING_PWM3`, `AIC_PWM_BACKLIGHT`, channel 3 and 1 kHz instead of `CONFIG_AIC_PANEL_ENABLE_GPIO="PC.7"`, and `target/d21x/demo128-nand-carplay/pinmux.c` claims only PC.7 for PWM3 so card hotplug keeps working on PC.6. The Ultra profiles were removed when the configurations were unified; the remaining defconfig carries those settings.
 
 ## Projection modes
 

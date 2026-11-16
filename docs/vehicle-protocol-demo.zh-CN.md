@@ -2,7 +2,7 @@
 
 # D213 Vehicle State 协议实验入口
 
-RTCARPLAY_VEHICLE_PROTOCOL_DEMO 是依赖 RTCARPLAY_ULTRA_DEMO 的显式开发选项。专用 Ultra GUI 和 Headless defconfig 启用它，普通 Classic 配置保持关闭。它将模拟内燃机模型接入现有 Receiver 的认证 Vehicle State 通道，并显式选择 vehicleStateProtocol 协商，为后续真实 iPhone 协议实验提供应用入口。这不能证明官方 Ultra、真实车辆数据或官方 Local UI 渲染。
+RTCARPLAY_VEHICLE_PROTOCOL_DEMO 是默认关闭的显式开发选项。统一的 D213 defconfig 保持关闭，普通镜像不含模拟车辆；协议实验时在 menuconfig 中启用。它将模拟内燃机模型接入现有 Receiver 的认证 Vehicle State 通道，并显式选择 vehicleStateProtocol 协商，为后续真实 iPhone 协议实验提供应用入口。这不能证明官方 Ultra、真实车辆数据或官方 Local UI 渲染。
 
 Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI)。元数据参考版本 64a05b68358db52ed887169143afd5944fd6f1f7 的 native/crates/livi-cp/src/vehicle_state/engines.rs 及 vehicle_state.rs 中的 RPM 单位常量，以 C 重新表达，遵守 GPL-3.0-or-later 及 NOTICE 署名要求。参见随附 rt-carplay NOTICE 和应用可见法律声明。本功能没有包含主题资产、密钥或私有设备资料。
 

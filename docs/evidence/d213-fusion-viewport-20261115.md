@@ -2,6 +2,8 @@
 
 [简体中文](d213-fusion-viewport-20261115.zh-CN.md)
 
+> Historical record: the profiles and script named below were removed when the D213 configurations were unified into `d21x_demo128-nand_rt-thread_rtcarplay_defconfig`. The identities still identify the artifacts built at the time; they are not the current build command.
+
 ## Change and artifact identity
 
 The Ultra GUI profile advertises Main Display at 768x600 while the physical panel, LVGL framebuffer and raw launcher input remain 1024x600. The previous 1024x600 stream fitted into the left 768x600 viewport produced a 768x450 image and 75-pixel top/bottom bars. A phone stream rendered at the new advertised size fits that viewport without cropping or stretching. iPhone output and visual/input acceptance remain NOT_RUN for this image.

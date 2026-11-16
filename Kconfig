@@ -5,20 +5,11 @@ source "packages/third-party/rt-carplay/Kconfig"
 
 menu "rt-carplay application"
 
-config RTCARPLAY_ULTRA_DEMO
-    bool "CarPlay Ultra development demo"
-    default n
-    help
-      Separate development profile for portable protocol work and the D213
-      single-screen demo. Enables only capabilities implemented by this build.
-      This switch does not claim official Ultra interoperability, certification,
-      HEVC decoding, a second display, or Apple's Local UI renderer.
-
 config RTCARPLAY_SINGLE_SCREEN_FUSION
     select LV_FONT_MONTSERRAT_12
     bool "Single-screen CarPlay and local vehicle instruments"
-    default y if RTCARPLAY_ULTRA_DEMO
-    depends on RTCARPLAY_ULTRA_DEMO && RTCARPLAY_DEMO_LAUNCHER
+    default y if RTCARPLAY_DEMO_LAUNCHER
+    depends on RTCARPLAY_DEMO_LAUNCHER
     help
       Application display modes FULLSCREEN/FUSION/LOCAL. Uses hardware DE
       video positioning and UI-layer cropping on the single D213 panel.
@@ -28,7 +19,6 @@ config RTCARPLAY_SINGLE_SCREEN_FUSION
 config RTCARPLAY_VEHICLE_PROTOCOL_DEMO
     bool "Experimental Vehicle State protocol bench (SIMULATED engine RPM)"
     default n
-    depends on RTCARPLAY_ULTRA_DEMO
     help
       Attach a three-characteristic combustion-engine simulator to the real
       authenticated Vehicle State lanes. Advertises only this implemented
@@ -213,11 +203,11 @@ config RTCARPLAY_SCREEN_WIDTH
     default 1024
     help
       Main Display width advertised in /info and used for phone HID input.
-      The Ultra GUI fusion profile uses 768x600 for its left viewport on a
-      physical 1024x600 panel. The fusion launcher maps physical touches
-      through the latched video rectangle into this logical size.
-      Other profiles should retain panel-sized dimensions unless their
-      input adapter supports the corresponding coordinate mapping.
+      The single-screen fusion launcher asks for 768x600 in FUSION (the left
+      video viewport on a physical 1024x600 panel) and 1024x600 in FULLSCREEN,
+      and maps physical touches through the latched video rectangle into that
+      logical size. This value is only the fallback geometry for builds that
+      start the receiver without the connection manager; keep it panel-sized.
       Changing this setting requires rebuilding and a new CarPlay session;
       runtime display settings recreate the session through its owner.
 

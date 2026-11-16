@@ -2,6 +2,8 @@
 
 [简体中文](d213-native-display-settings-20261115.zh-CN.md)
 
+> Historical record: `.ci/build-ultra-demo.sh` and the `_ultra_gui`/`_ultra_headless` defconfigs named below were removed when the D213 configurations were unified into `d21x_demo128-nand_rt-thread_rtcarplay_defconfig`. The artifact identities remain valid for the builds described.
+
 The user requested true phone-rendered 1024x600 full screen, a launcher setting and an investigation of compressed-looking fusion video. This revision recreates the phone session when changing between native 1024x600 and fusion 768x600; it does not merely enlarge the existing 768x600 image. The physical panel and LVGL remain 1024x600. No board, serial, ADB, reset or flash operation was attempted after the user assigned manual testing to themselves.
 
 ## Withdrawn revision and regression

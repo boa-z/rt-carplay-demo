@@ -25,7 +25,7 @@ Prioritize the implemented single-screen experience and bounded Vehicle State in
 
 Development uses boa-z/luban-lite-carplay on the existing carplay-oss branch; luban-lite-jc-carplay-oss is abandoned. The implementation baseline is integration 7be401243ff9b64eb94a64cfaa082cb6dc398c27 and SDK d0bc5190807279c62d08f78c3c428f3ca8704540. The first SDK foundation milestone is 183fd91167b9d2ca20e1b5f53882d3a6f1bf1ce9. Existing native NCM and short bulk-IN fixes are retained. The parent gitlink identifies the selected SDK revision.
 
-Current application milestone: dedicated Ultra GUI/Headless configurations now opt into the [SIMULATED engine Vehicle State protocol bench](vehicle-protocol-demo.md). Ordinary Classic configurations remain unchanged. Earlier sections below describe their respective historical milestones; statements that D213 attaches no Vehicle processor predate this explicit experimental integration. UI Sync and its renderer/asset/presentation capabilities remain disabled on D213.
+Current application milestone: the unified D213 configuration carries the single-screen fusion display modes, and can opt into the [SIMULATED engine Vehicle State protocol bench](vehicle-protocol-demo.md) as a default-off development option. Earlier sections below describe their respective historical milestones; statements that D213 attaches no Vehicle processor predate this explicit experimental integration. UI Sync and its renderer/asset/presentation capabilities remain disabled on D213.
 
 Latest physical checkpoint: the real phone offered/enabled Vehicle State, connected both lanes and issued one processed request; the user confirmed FULLSCREEN video and restored FUSION video after a runtime pixel-alpha change. The application now selects pixel alpha for FUSION to prevent its empty UI region from hiding video. See the [exact image, observations and limitations](evidence/d213-vehicle-controls-flash-20261115.md). L2-L4 are PARTIAL for these bounded observations; new fixed-image acceptance, input/reconnect, full protocol interaction and official Ultra remain incomplete. Historical NOT_RUN statements below describe earlier milestones.
 
@@ -67,21 +67,20 @@ The SDK routing milestone passed [its CI](https://github.com/boa-z/rt-carplay/ac
 
 The D213 profiles still register no new application protocol and use the existing receive-only iAP path. The SDK supports explicit Vehicle State and UI Sync processor attachment to Receiver, but does not compose their /info declarations. The next protocol step is capability declarations gated by complete handlers and actual host inventory. HEVC, displayPanels, altScreen and unsupported vehicle/UI features are not added by the development flag. SDK code stays independent of LVGL, MPP, DE and D213.
 
-## Dedicated development profiles and artifacts
+## Unified configuration and artifacts
 
-| Profile | Configuration | Current purpose |
+| Configuration | File | Current purpose |
 | --- | --- | --- |
-| GUI | d21x_demo128-nand_rt-thread_rtcarplay_ultra_gui_defconfig | Existing LVGL launcher and Classic media, explicit Ultra development flag and attribution; fusion is pending. |
-| Headless | d21x_demo128-nand_rt-thread_rtcarplay_ultra_headless_defconfig | Automatic Classic connection without LVGL; protocol and lifecycle bench. |
+| Single image | d21x_demo128-nand_rt-thread_rtcarplay_defconfig | LVGL Mobility Cockpit V4, Classic media, the single-screen FULLSCREEN/FUSION/LOCAL switch and the SIMULATED Vehicle State bench as an explicit option. |
+| Headless (historical) | none | The D213 hardware cannot implement complete Ultra, so the development configurations are unified. A protocol-only bench can regenerate a configuration locally with `RTCARPLAY_DEMO_LAUNCHER` disabled; no separate defconfig is maintained. |
 
-Both preserve exclusive native NCM, n0 identity and disabled diagnostic tracing. The development flag applies an explicit default Main Display profile but advertises no unfinished protocol. Each build first verifies its matching bootloader, checks the wired profile and validates the complete image. The build script restores shared generated configuration and bootloader pack inputs on exit. Windows builds use the existing native toolchain; a WSL build must not replace it with a Linux toolchain.
+The configuration preserves exclusive native NCM, n0 identity and disabled diagnostic tracing. `RTCARPLAY_VEHICLE_PROTOCOL_DEMO` remains an explicit, default-off development option; ordinary release images do not contain the simulated protocol entry. Each build first verifies its bootloader, then checks the wired profile and validates the complete image.
 
 ```sh
-bash .ci/build-ultra-demo.sh gui
-bash .ci/build-ultra-demo.sh headless
+bash .ci/build-firmware.sh
 ```
 
-The ultra-demo workflow builds both variants after SDK and application Host checks. Downloadable Actions artifacts contain the complete IMG, ELF/map, bootloader, resolved configuration, source/acceptance metadata, logs and SHA256SUMS under output/ultra-ci/gui or output/ultra-ci/headless. These are development images, not qualified Ultra releases. Push milestones use the commit marker [ultra-dev] so the existing rolling Classic Preview Release job skips them; the dedicated build/artifact workflow still runs. Ordinary Classic pushes keep the original release behavior.
+The `D213 firmware` workflow runs the SDK and application Host checks (clang-format, the full `make check` and both LVGL previews) before building that same image, and publishes it as the rolling `preview` release. A push milestone marked `[ultra-dev]` still builds and uploads the Actions artifact but does not replace the rolling release until it is reviewed.
 
 Local Windows builds of both profiles passed on 2026-11-15, including the wired-profile check and all nine complete-image component bounds/CRC32 checks. The build restored the original Classic configuration afterward. The first profile milestone's pre-commit images used SDK 183fd91 and record the dirty source inventory in acceptance.txt: GUI SHA256 f3d0fddcd0a66d5985bfb68740cb9c4827a2885bc56524ae40b80c2479f31dfe and Headless SHA256 b5d7e36f78df5ec355bcc7f428b2d68207081ed2ae6a6b5ecf91c2055613ac17. Neither has been flashed. The full application Host suite and actual LVGL 9 Settings preview passed. The published first SDK milestone also passed [its GitHub CI](https://github.com/boa-z/rt-carplay/actions/runs/43734899981).
 
@@ -89,7 +88,7 @@ The committed profile milestone 096de7eb242aba84ab868fd6b1e0f127ddd5483b passed 
 
 ## Single-screen fusion implementation
 
-The Ultra GUI profile now implements FULLSCREEN/FUSION/LOCAL using DE video positioning and UI-layer crop, with explicit simulated instruments, a copied vehicle-provider API, shared latched touch geometry, lifecycle-safe scanout ownership and receiver-stage metrics. See [D213 single-screen fusion](single-screen-fusion.md) for controls, constraints, Host coverage and the physical acceptance checklist. Native GUI/Headless builds and actual LVGL Host previews passed on 2026-11-15; L2 remains NOT_RUN pending exact-image board validation. This application fusion is independent of official Ultra Local UI.
+The unified image implements FULLSCREEN/FUSION/LOCAL using DE video positioning and UI-layer crop, with explicit simulated instruments, a copied vehicle-provider API, shared latched touch geometry, lifecycle-safe scanout ownership and receiver-stage metrics. See [D213 single-screen fusion](single-screen-fusion.md) for controls, constraints, Host coverage and the physical acceptance checklist. Native GUI/Headless builds and actual LVGL Host previews passed on 2026-11-15; L2 remains NOT_RUN pending exact-image board validation. This application fusion is independent of official Ultra Local UI.
 
 ## Board preparation and evidence
 
@@ -198,7 +197,7 @@ GUI image SHA256: 324226e2a572111d7943e743227960fecc10bc1097c4e64c2321999f29a319
 
 ## Application Vehicle State experiment
 
-The dedicated Ultra profiles attach a car-owned three-characteristic combustion-engine simulator, declare the matching /info catalogue and opt into phone-offered vehicleStateProtocol. The application updates the model on the Receiver owner, refreshes current initial values before each controller and destroys the Receiver before releasing the model. carplay_status publishes copied simulation/protocol/delivery observations. Road speed, gear, battery SOC, UI Sync, display panels, HEVC and alternate video streams are not inferred from this engine model. See the [model, source mapping and board procedure](vehicle-protocol-demo.md).
+The unified image can attach a car-owned three-characteristic combustion-engine simulator, declare the matching /info catalogue and opt into phone-offered vehicleStateProtocol when `RTCARPLAY_VEHICLE_PROTOCOL_DEMO` is enabled in menuconfig. The application updates the model on the Receiver owner, refreshes current initial values before each controller and destroys the Receiver before releasing the model. carplay_status publishes copied simulation/protocol/delivery observations. Road speed, gear, battery SOC, UI Sync, display panels, HEVC and alternate video streams are not inferred from this engine model. See the [model, source mapping and board procedure](vehicle-protocol-demo.md).
 
 The complete integration Host suite passed locally, including enabled/disabled actual application startup/stop, metadata refresh and processor lifetime checks, subscription/HIGH notification and refused-write tests, plus independent plistlib validation of the generated catalogue and missing unsupported declarations. Dedicated image CI checks the actual model/protocol symbols in both firmware ELFs and records the simulated source in acceptance manifests. This milestone has no new board or phone acceptance; L0 PASS, full-scope L1 PARTIAL and L2-L5 NOT_RUN remain unchanged.
 

@@ -1390,15 +1390,6 @@ static int build_announcement_data(app_state_t *app)
 #if defined(RTCARPLAY_VEHICLE_PROTOCOL_DEMO)
     info.vehicle = app->vehicle_demo.model;
 #endif
-#if defined(RTCARPLAY_ULTRA_DEMO)
-    /* Profile storage is consumed synchronously by the plist builder. Keep
-     * the working Main Display geometry and codec until new sinks are proven. */
-    const rtcp_display_profile_t main_profile = {
-        .struct_size = sizeof(main_profile),
-        .draw_outside_safe_area = true,
-    };
-    info.main_display_profile = &main_profile;
-#endif
 #if defined(RTCARPLAY_AUDIO)
     if (app->audio_started)
     {

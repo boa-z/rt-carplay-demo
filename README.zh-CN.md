@@ -6,9 +6,9 @@
 
 ## 源码所有权
 
-[Ultra 开发](docs/ultra-development.zh-CN.md)记录 LIVI 源码研究、可移植 SDK 里程碑、专用 GUI/Headless 配置、CI 产物及独立 L0-L5 验收。当前目标是可移植 Ultra 协议基础与实用的 D213 单屏融合 Demo，完整官方 Ultra 不属于当前验收范围，未实现能力保持不声明。用户已确认上一版本 Fusion 显示效果可以，具体受测镜像及剩余实机检查在开发报告中单独记录。Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI)。
+[Ultra 开发](docs/ultra-development.zh-CN.md)记录 LIVI 源码研究、可移植 SDK 里程碑、统一 CI 产物及独立 L0-L5 验收。当前目标是可移植 Ultra 协议基础与实用的 D213 单屏融合 Demo，完整官方 Ultra 不属于当前验收范围，未实现能力保持不声明。用户已确认上一版本 Fusion 显示效果可以，具体受测镜像及剩余实机检查在开发报告中单独记录。Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI)。
 
-专用 Ultra 配置现包含显式的 [SIMULATED 发动机 Vehicle State 协议实验入口](docs/vehicle-protocol-demo.zh-CN.md)，用于后续手机互操作测试，普通 Classic 配置保持关闭。它不会将本地仪表的车速、挡位、电量随意映射成协议特征，也不启用 UI Sync 或官方 Local UI 渲染。
+统一 D213 配置可包含默认关闭的显式 [SIMULATED 发动机 Vehicle State 协议实验入口](docs/vehicle-protocol-demo.zh-CN.md)，用于后续手机互操作测试。它不会将本地仪表的车速、挡位、电量随意映射成协议特征，也不启用 UI Sync 或官方 Local UI 渲染。
 
 | 目录 | 职责 |
 | --- | --- |
@@ -86,7 +86,7 @@ Settings → FIRMWARE & UPDATES 显示当前版本、源码提交和 A/B 槽位�
 | `RTCARPLAY_MICROPHONE` | dmic0 上行，需要装机声学验证 |
 | `RTCARPLAY_MIC_AEC` | GUI 启用队列对齐的 AEC，支持运行时对比/校准 |
 | `RTCARPLAY_TOUCH_PANEL` | 独占面板 Reader 和 CarPlay HID 路由 |
-| `RTCARPLAY_SCREEN_WIDTH/HEIGHT` | 通常 1024 / 600；Ultra GUI 融合配置为 768 / 600 逻辑像素 |
+| `RTCARPLAY_SCREEN_WIDTH/HEIGHT` | 回退逻辑尺寸 1024 / 600；连接管理器在融合模式请求 768 / 600，全屏模式请求 1024 / 600 |
 | `RTCARPLAY_OTA` | Settings 版本显示与有线以太网 A/B 更新 |
 
 Pinmux、时钟和分区布局归属[板级目录](../../../target/d21x/demo128-nand-carplay/)。修改媒体或输入时同时核对板级和应用配置。Launcher V2 保留了此前音频行为，后续[音频恢复](docs/zh-CN/audio-recovery.md)修改应用缓冲、时钟保护及 AEC 集成，不改变可移植 SDK 协议或编解码行为。

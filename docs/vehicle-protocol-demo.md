@@ -2,7 +2,7 @@
 
 # D213 Vehicle State protocol bench
 
-RTCARPLAY_VEHICLE_PROTOCOL_DEMO is an explicit development option requiring RTCARPLAY_ULTRA_DEMO. The dedicated Ultra GUI and Headless defconfigs enable it; ordinary Classic profiles leave it disabled. It attaches a simulated combustion-engine model to the existing authenticated Receiver Vehicle State lanes and opts into vehicleStateProtocol negotiation. This makes the application available for future real-iPhone protocol experiments. It does not establish official Ultra, actual vehicle data or official Local UI rendering.
+RTCARPLAY_VEHICLE_PROTOCOL_DEMO is an explicit, default-off development option. The unified D213 defconfig leaves it disabled, so ordinary images contain no simulated vehicle; enable it in menuconfig for protocol experiments. It attaches a simulated combustion-engine model to the existing authenticated Receiver Vehicle State lanes and opts into vehicleStateProtocol negotiation. This makes the application available for future real-iPhone protocol experiments. It does not establish official Ultra, actual vehicle data or official Local UI rendering.
 
 Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI). The metadata is re-expressed from native/crates/livi-cp/src/vehicle_state/engines.rs and the RPM unit constant in vehicle_state.rs at revision 64a05b68358db52ed887169143afd5944fd6f1f7, under GPL-3.0-or-later and its NOTICE attribution requirement. See the bundled rt-carplay NOTICE and the application's visible legal notices. No theme assets, keys or private device material are included.
 

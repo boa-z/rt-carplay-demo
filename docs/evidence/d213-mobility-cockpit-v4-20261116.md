@@ -11,13 +11,15 @@ The user asked to rebuild the demo UI in place against the locked V4 design pack
 | Integration branch | `carplay-oss` |
 | Base revision before the V4 work | `2917135e666025d315e6cc069734e9776df39024` |
 | Changed/new files | 49 paths (see the change report in the commit message and `git show --stat`) |
-| Image SHA256 (working tree) | `f776ab8a7fc548195fd71b593b51881254b1df081042e059f8bd64ddc03a7b1b` |
+| Image SHA256 (working tree) | `f776ab8a7fc548195fd71b593b51881254b1df081042e059f8bd64ddc03a7b1b` (pre-unification); `0b26872e3e9187589cafa57cbe860b205107157b10cc67cb88854bc876a62a9a` (unified defconfig, 5,306,880 bytes) |
 | Portable SDK | Unmodified `packages/third-party/rt-carplay`; no LVGL, HMI, Android Auto or CarLife dependency added |
-| New application or defconfig | None. The existing `rtcarplay` app and its two defconfigs were edited in place |
+| New application or defconfig | None. The existing `rtcarplay` app and its defconfig were edited in place |
+
+> Later update (same day): the D213 hardware cannot implement complete Ultra, so the `_ultra_gui` and `_ultra_headless` defconfigs were removed and their common capabilities (including `RTCARPLAY_SINGLE_SCREEN_FUSION`) merged into `d21x_demo128-nand_rt-thread_rtcarplay_defconfig`. The image hash below identifies the pre-unification build.
 
 ## Build
 
-`scons -j8` with `d21x_demo128-nand_rt-thread_rtcarplay_defconfig` completed with exit 0 and produced `output/d21x_demo128-nand_rt-thread_rtcarplay/images/d21x_demo128_nand_carplay_page_2k_block_128k_v1.0.0.img` (5,276,160 bytes at this revision; the SHA256 above identifies that exact artifact). The active configuration contains `AIC_USING_PWM3`, `AIC_PWM_BACKLIGHT`, channel 3 at 1 kHz, `AIC_PWM_BRIGHTNESS_LEVEL=72`, and no `AIC_PANEL_ENABLE_GPIO`; `AIC_SDMC1_HOTPLUG_PIN` remains `PC.6`.
+`scons -j8` with `d21x_demo128-nand_rt-thread_rtcarplay_defconfig` completed with exit 0 and produced `output/d21x_demo128-nand_rt-thread_rtcarplay/images/d21x_demo128_nand_carplay_page_2k_block_128k_v1.0.0.img` (5,276,160 bytes before the configuration was unified; the `f776ab8a…` hash identifies that artifact). The same command with the unified defconfig produced the 5,306,880-byte image hashed above; that build adds `RTCARPLAY_SINGLE_SCREEN_FUSION=y` and drops `RTCARPLAY_ULTRA_DEMO`. The active configuration contains `AIC_USING_PWM3`, `AIC_PWM_BACKLIGHT`, channel 3 at 1 kHz, `AIC_PWM_BRIGHTNESS_LEVEL=72`, and no `AIC_PANEL_ENABLE_GPIO`; `AIC_SDMC1_HOTPLUG_PIN` remains `PC.6`.
 
 ## Host tests
 
@@ -29,6 +31,7 @@ The user asked to rebuild the demo UI in place against the locked V4 design pack
 | `check-lubanlite-touch` | PASS | Ownership, IRQ, coordinates, 32 restarts |
 | `launcher_preview` | PASS | Renders all four pages, modals and the unsupported-audio state at 1024×600 with real LVGL 9.1 |
 | `fusion_preview` | PASS | Seeded projection-side bytes unchanged; every strip widget satisfies `x >= 768`; touch at 767/768 splits correctly |
+| Unified-config re-check | PASS | After removing `RTCARPLAY_ULTRA_DEMO`, the whole firmware builds with `RTCARPLAY_SINGLE_SCREEN_FUSION=y`; both previews rebuild and their 23 PPM renders are byte-identical to the checked-in shots. `test_rtthread_app` syntax-checks with fusion plus the vehicle bench and no Ultra macro, and `connection_manager.c` syntax-checks with and without fusion. |
 | `check-internet-share`, `check-lubanlite-{bonds,handoff,reconnect,capabilities}`, `check-wired-{identity,trace}`, `check-iap2-endpoints`, `check-{usb,wireless}-iap2-worker` | NOT RUN (environment) | These targets need Linux host facilities this Windows session does not provide: `-fsanitize=address,undefined` runtime libraries, POSIX `sys/socket.h`/`O_CLOEXEC`, or a bare `cc` in `PATH`. They are untouched by this change and must run in the Linux CI/`make check` environment. |
 | `check-udp-burst` | NOT RUN (environment) | `tests/udp_burst/run.sh` invokes `cc` |
 

@@ -2,6 +2,8 @@
 
 [English and exact artifact evidence](d213-fusion-viewport-20261115.md)
 
+> 历史记录：下文提到的专用配置与脚本已在 D213 配置统一为 `d21x_demo128-nand_rt-thread_rtcarplay_defconfig` 时删除。这些身份仍标识当时构建的产物，但不是当前的构建命令。
+
 Ultra GUI 配置将 Main Display 协商尺寸改为 768x600，物理面板、LVGL framebuffer 和启动页原始触摸保持 1024x600。此前 1024x600 视频缩放到左侧后为 768x450，上下各留 75 像素；手机按新尺寸渲染后可完整填满左侧。实际 iPhone 输出、视觉和触摸验收仍为 NOT_RUN。
 
 集成版本为 `8ac6f5044df68073c19cf1d3b7d88b0a5775778a`，SDK 为 `0692be508dfd84a1adb170f6bcbb390740a30963`。原生 Windows GUI 构建及完整应用 Host 回归通过，镜像 SHA256 为 `0c32245094b143f99838c36e5cbc90d0d17e04aefb877e5561f7988c57e5dbca`。六项文件散列、九个镜像组件边界/CRC32、源码版本、干净工作区记录和配置/ELF 校验均通过。镜像保存在 `C:/Project/Carplay/rt-carplay-artifacts/ultra-research/native-8ac6f504/gui/d213-carplay-ultra-gui.img`，CI 镜像与此本地镜像须分别记录身份。[CI 43786904059](https://github.com/boa-z/luban-lite-carplay/actions/runs/43786904059) 的 Host、GUI 和 Headless 均通过；两个固件产物已下载并通过源码版本、干净工作区、六项文件散列和九个组件边界/CRC32 校验，GUI 保持逻辑宽度 768，Headless 保持 1024。CI 镜像散列见英文记录，两者均未记录为已刷写。

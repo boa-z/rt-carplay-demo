@@ -2,7 +2,7 @@
 
 [简体中文](single-screen-fusion.zh-CN.md)
 
-The Ultra GUI development profile enables `RTCARPLAY_SINGLE_SCREEN_FUSION` on the D213 1024×600 panel. This is Classic Main Display video combined with local LVGL 9 instruments. It does not implement Apple's Ultra Local UI renderer or establish official Ultra interoperability. The portable SDK gains no board or LVGL dependency. The normal Classic and Headless profiles retain their existing display policy.
+The unified D213 image enables `RTCARPLAY_SINGLE_SCREEN_FUSION` on the 1024×600 panel. This is Classic Main Display video combined with local LVGL 9 instruments. It does not implement Apple's Ultra Local UI renderer or establish official Ultra interoperability. The portable SDK gains no board or LVGL dependency. A build without the LVGL launcher keeps the older panel-sized display policy.
 
 ## Native full-screen and fusion settings
 
@@ -24,7 +24,7 @@ Physical size metadata now follows the viewport: `RTCARPLAY_PANEL_WIDTH_MM` and 
 
 The [viewport manual-test checkpoint](evidence/d213-fusion-viewport-20261115.md) records the exact 768x600 native image, verification, preceding fixed-alpha image and remaining manual tests.
 
-The dedicated Ultra GUI defconfig advertises a 768x600 Main Display while the physical framebuffer and LVGL remain 1024x600. Previously, a 1024x600 phone image fitted into the left 768x600 viewport became 768x450, leaving 75 pixels above and below. A phone stream rendered at the advertised 768x600 fills that viewport without stretching or cropping; its actual resolution and touch behavior still require iPhone validation. Ordinary Classic and Headless defconfigs retain 1024x600.
+The unified image advertises a 768x600 Main Display in FUSION while the physical framebuffer and LVGL remain 1024x600. Previously, a 1024x600 phone image fitted into the left 768x600 viewport became 768x450, leaving 75 pixels above and below. A phone stream rendered at the advertised 768x600 fills that viewport without stretching or cropping; its actual resolution and touch behavior still require iPhone validation. FULLSCREEN advertises the native 1024x600 again.
 
 Changing build-time dimensions requires a new image/session. Runtime Settings now recreates the session at the requested native size as described above. A composition-only diagnostic change to FULLSCREEN within an existing 768x600 session centers that same image with 128-pixel side bars. Use Settings or `carplay_connection display fullscreen` for a new 1024x600 session. Touch remains physical 1024x600 at the launcher and maps to the latched logical phone dimensions.
 
@@ -64,7 +64,7 @@ The dashboard updates every 250 ms, independently of connection-manager availabi
 
 ## Validation and remaining board work
 
-`make -C application/rt-thread/rtcarplay check` includes actual coordinator, DE UI-policy and video-sink Host tests under ASan/UBSan. Coverage includes layout generations, coordinate boundaries, pointer ownership/cancellation, copied provider values, crop/alpha rollback, framebuffer address preservation, static-image mode changes, failure fences and repeat lifecycle regressions. `tests/launcher_preview` builds `launcher_preview` and `fusion_preview` against the actual LVGL 9 software renderer; the latter checks widget bounds, labels, mode buttons, provider unavailability and disconnect rendering. Its empty left viewport is not a captured phone image. The dedicated Ultra workflow runs both previews and uploads their PPM screenshots with Host logs.
+`make -C application/rt-thread/rtcarplay check` includes actual coordinator, DE UI-policy and video-sink Host tests under ASan/UBSan. Coverage includes layout generations, coordinate boundaries, pointer ownership/cancellation, copied provider values, crop/alpha rollback, framebuffer address preservation, static-image mode changes, failure fences and repeat lifecycle regressions. `tests/launcher_preview` builds `launcher_preview` and `fusion_preview` against the actual LVGL 9 software renderer; the latter checks widget bounds, labels, mode buttons, provider unavailability and disconnect rendering. Its empty left viewport is not a captured phone image. The `D213 firmware` workflow runs both previews and uploads their PPM screenshots with the Host logs.
 
 Native Windows GUI and Headless builds passed on 2026-11-15, with nine component bounds/CRC checks per complete image. The full application Host suite also checks Classic behavior. Its audio priority test retries only the documented nonblocking lock-busy result before asserting the priority result; production audio behavior is unchanged.
 

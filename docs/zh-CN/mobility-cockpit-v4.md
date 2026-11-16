@@ -2,7 +2,7 @@
 
 # Mobility Cockpit V4 原生 UI
 
-V4 设计包（`Mobility_Cockpit_UI/mobility_cockpit_v4`）在 1024×600 上用四个面向产品的 LVGL 9 页面替换 Launcher V2 以调试信息为主的页面。改动限定在现有 `rtcarplay` 应用、板级 pinmux 和两个 defconfig 内。没有新建应用、新建 defconfig 或加入 SDK 依赖，可移植的 rt-carplay SDK 仍是纯协议库，不包含 LVGL 或 HMI 代码。
+V4 设计包（`Mobility_Cockpit_UI/mobility_cockpit_v4`）在 1024×600 上用四个面向产品的 LVGL 9 页面替换 Launcher V2 以调试信息为主的页面。改动限定在现有 `rtcarplay` 应用、板级 pinmux 和 defconfig 内。没有新建应用、新建 defconfig 或加入 SDK 依赖，可移植的 rt-carplay SDK 仍是纯协议库，不包含 LVGL 或 HMI 代码。
 
 ## 范围
 
@@ -32,7 +32,7 @@ V4 设计包（`Mobility_Cockpit_UI/mobility_cockpit_v4`）在 1024×600 上用�
 | 媒体音量 | `platform/audio_volume_lubanlite.c` → `sound0`，`AUDIO_TYPE_MIXER` / `AUDIO_MIXER_VOLUME` | 范围 0..100。设置时执行 `AUDIO_CTL_CONFIGURE` 后回读；只有回读等于请求值才算成功。驱动不支持 Mixer 时能力查询失败，滑块保持禁用。AirPlay SET_PARAMETER 音量是独立的远端控制，不会被覆盖。 |
 | 屏幕亮度 | `platform/backlight_lubanlite.c` → PWM 通道 3（PC.7 / PWM3_B） | 范围 5..100。1 kHz 下 `rt_pwm_set` 后 `rt_pwm_enable`，回读按 `pulse/period` 换算百分比。最小值 5 保留可见下限并避免黑屏。 |
 
-板级原理图将 `GPC_P7/UART3_RTS/PWM3_B` 作为 LCD_PWM 送入 LED 升压，而 `GPC_P6/SDC1_DET` 是 SD 卡检测输入。此前镜像用 PC.7 的固定 GPIO 电平点屏，且未占用 PC.6。现在两个 defconfig 都改为选择 `AIC_USING_PWM3`、`AIC_PWM_BACKLIGHT`、通道 3 和 1 kHz，替代 `CONFIG_AIC_PANEL_ENABLE_GPIO="PC.7"`；`target/d21x/demo128-nand-carplay/pinmux.c` 只为 PWM3 占用 PC.7，PC.6 继续用于热插拔检测。
+板级原理图将 `GPC_P7/UART3_RTS/PWM3_B` 作为 LCD_PWM 送入 LED 升压，而 `GPC_P6/SDC1_DET` 是 SD 卡检测输入。此前镜像用 PC.7 的固定 GPIO 电平点屏，且未占用 PC.6。此前统一的 `d21x_demo128-nand_rt-thread_rtcarplay_defconfig` 和历史 Ultra GUI 配置都改为选择 `AIC_USING_PWM3`、`AIC_PWM_BACKLIGHT`、通道 3 和 1 kHz，替代 `CONFIG_AIC_PANEL_ENABLE_GPIO="PC.7"`；`target/d21x/demo128-nand-carplay/pinmux.c` 只为 PWM3 占用 PC.7，PC.6 继续用于热插拔检测。配置统一后 Ultra 配置已删除，保留的 defconfig 继续携带这些设置。
 
 ## 显示模式
 

@@ -15,7 +15,7 @@ git fetch upstream master
 
 ## 固件构建
 
-`D213 firmware` GitHub Actions 工作流在推送到 `carplay-oss` 时运行，也支持手动触发。它构建 GUI 固件，然后把生成的 IMG、A/B OTA 包和 Bootloader 作为滚动 `preview` GitHub Release 发布。检出启用 Git LFS 和递归子模块；SDK 通过 LFS 保存 Xuantie V2.6.1 Linux 工具链压缩包及所需 Realtek 库。
+`D213 firmware` GitHub Actions 工作流在推送到 `carplay-oss` 时运行，也支持手动触发。它先运行 SDK 与应用 Host 回归及两个实际 LVGL 预览，再构建唯一的统一固件，然后把生成的 IMG、A/B OTA 包和 Bootloader 作为滚动 `preview` GitHub Release 发布。提交信息含 `[ultra-dev]` 的推送只跳过发布步骤：镜像仍会构建并作为 Actions 产物上传供复核。检出启用 Git LFS 和递归子模块；SDK 通过 LFS 保存 Xuantie V2.6.1 Linux 工具链压缩包及所需 Realtek 库。
 
 ```sh
 python3 -m venv .ci-venv

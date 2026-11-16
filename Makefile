@@ -101,7 +101,7 @@ $(BUILD)/test_rtthread_app: tests/unit/test_rtthread_app.c app/carplay_app.c \
 .PHONY: check-vehicle-protocol-demo
 check-vehicle-protocol-demo: $(BUILD)/test_rtthread_app
 	$(CC) $(CFLAGS) $(CPPFLAGS) -Itests/support/rtthread_app -Iplatform \
-	  -DRTCARPLAY_ULTRA_DEMO -DRTCARPLAY_VEHICLE_PROTOCOL_DEMO -DRTCARPLAY_SINGLE_SCREEN_FUSION \
+	  -DRTCARPLAY_VEHICLE_PROTOCOL_DEMO -DRTCARPLAY_SINGLE_SCREEN_FUSION \
 	  -Wno-unused-function -ffunction-sections -fdata-sections tests/unit/test_rtthread_app.c \
 	  app/vehicle_protocol_demo.c $(BUILD)/rtthread-app/os.o $(BUILD)/rtthread-app/net.o \
 	  $(LIB) $(MBEDTLS_LIB) $(LDLIBS) -pthread -Wl,--gc-sections -o $(BUILD)/test_rtthread_app_vehicle
