@@ -24,6 +24,10 @@ src = Glob('main.c') + Glob('app/carplay_app.c')
 if GetDepend('RTCARPLAY_DEMO_LAUNCHER'):
     src += Glob('ui/*.c')
     src += Glob('ui/fonts/*.c')
+    # Real local backends used by the Settings page; both compile to a
+    # disabled stub when the image has no audio/PWM driver.
+    src += Glob('platform/audio_volume_lubanlite.c')
+    src += Glob('platform/backlight_lubanlite.c')
 if GetDepend('RTCARPLAY_SINGLE_SCREEN_FUSION'):
     src += Glob('app/fusion_display.c')
 if GetDepend('RTCARPLAY_VEHICLE_PROTOCOL_DEMO'):
@@ -67,8 +71,6 @@ if GetDepend('RTCARPLAY_VIDEO'):
     src += Glob('platform/video_sink_lubanlite.c')
 if GetDepend('RTCARPLAY_AUDIO'):
     src += Glob('platform/audio_sink_lubanlite.c')
-    if GetDepend('RTCARPLAY_AUTO_CONNECT'):
-        src += Glob('platform/audio_test_lubanlite.c')
 if GetDepend('RTCARPLAY_MICROPHONE'):
     src += Glob('platform/audio_input_lubanlite.c')
 if GetDepend('RTCARPLAY_TOUCH_PANEL'):
