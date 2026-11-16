@@ -14,6 +14,8 @@ uint32_t rt_tick_get_millisecond(void) { return now; }
 int rt_kprintf(const char *format, ...) { (void)format; return 0; }
 int carplay_launcher_fusion_apply(const carplay_fusion_snapshot_t *s)
 { assert(s->initialized && !irq_depth); return RTCP_OK; }
+bool carplay_connection_set_display_mode(carplay_display_mode_t mode)
+{ return carplay_fusion_set_mode(mode)==RTCP_OK; } /* Modeled owner request. */
 void carplay_video_sink_perf(carplay_video_perf_t *p) { memset(p,0,sizeof(*p)); }
 static void flush(lv_display_t *d, const lv_area_t *area, uint8_t *data)
 { (void)area; (void)data; lv_display_flush_ready(d); }

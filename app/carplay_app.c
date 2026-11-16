@@ -1217,6 +1217,18 @@ static int build_announcement_data(app_state_t *app)
     info.model = app->model;
     info.width_pixels = app->width;
     info.height_pixels = app->height;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    /* Physical viewport metadata must shrink with the viewport, too. These
+     * configurable defaults preserve the old estimate; measure the panel. */
+#ifndef RTCARPLAY_PANEL_WIDTH_MM
+#define RTCARPLAY_PANEL_WIDTH_MM 200
+#endif
+#ifndef RTCARPLAY_PANEL_HEIGHT_MM
+#define RTCARPLAY_PANEL_HEIGHT_MM 120
+#endif
+    info.width_physical_mm=(uint16_t)(((uint32_t)RTCARPLAY_PANEL_WIDTH_MM*app->width+512U)/1024U);
+    info.height_physical_mm=(uint16_t)(((uint32_t)RTCARPLAY_PANEL_HEIGHT_MM*app->height+300U)/600U);
+#endif
     info.max_fps = 30U;
 #if defined(RTCARPLAY_VEHICLE_PROTOCOL_DEMO)
     info.vehicle=app->vehicle_demo.model;
@@ -1785,12 +1797,12 @@ int carplay_app_touch(uint8_t phase, uint16_t pointer_id,
     return enqueue_touch(&event);
 }
 
-static int app_autostart(bool wired)
+int carplay_app_autostart_display(bool wired, uint16_t width, uint16_t height)
 {
     carplay_app_config_t config;
     carplay_app_config_defaults(&config);
-    config.width_pixels = CARPLAY_APP_DEFAULT_WIDTH;
-    config.height_pixels = CARPLAY_APP_DEFAULT_HEIGHT;
+    config.width_pixels = width;
+    config.height_pixels = height;
     config.rotation_degrees = CARPLAY_APP_DEFAULT_ROTATION;
     config.wired = wired;
     return carplay_app_start(&config);
@@ -1798,12 +1810,12 @@ static int app_autostart(bool wired)
 
 int carplay_app_autostart(void)
 {
-    return app_autostart(false);
+    return carplay_app_autostart_display(false,CARPLAY_APP_DEFAULT_WIDTH,CARPLAY_APP_DEFAULT_HEIGHT);
 }
 
 int carplay_app_autostart_wired(void)
 {
-    return app_autostart(true);
+    return carplay_app_autostart_display(true,CARPLAY_APP_DEFAULT_WIDTH,CARPLAY_APP_DEFAULT_HEIGHT);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1879,6 +1891,14 @@ static int carplay_status_owned(int argc, char **argv)
                (unsigned)vehicle.normal.state,(unsigned)vehicle.high.state,
                vehicle.model.requests,vehicle.model.rejected_messages,
                (unsigned)vehicle.model.subscribed,vehicle.model.notifications);
+    static const char *const methods[]={"unknown","config","read","register","write","control"};
+    for (unsigned method=0; method<RTCP_VEHICLE_METHOD_COUNT; ++method)
+        rt_kprintf("vehicle method %s: requests=%u responses=%u\n",methods[method],
+            vehicle.model.method_requests[method],vehicle.model.method_responses[method]);
+    rt_kprintf("vehicle last: method=%s lane=%s result=%d valid=%u\n",
+        methods[(unsigned)vehicle.model.last_method<RTCP_VEHICLE_METHOD_COUNT ? vehicle.model.last_method : 0],
+        vehicle.model.last_lane==RTCP_VEHICLE_HIGH ? "HIGH" : "NORMAL",vehicle.model.last_result,
+        vehicle.model.requests ? 1U : 0U);
     rt_kprintf("vehicle delivery: queued=%u retries=%u rejected=%u abandoned_replies=%u abandoned_notify=%u error=%d\n",
                (unsigned)vehicle.delivery.queued_messages,(unsigned)vehicle.delivery.queue_retries,
                (unsigned)vehicle.delivery.rejected_requests,(unsigned)vehicle.delivery.abandoned_replies,

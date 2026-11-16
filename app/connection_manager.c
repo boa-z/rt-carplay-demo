@@ -19,6 +19,11 @@ static atomic_bool automatic = true, wireless_enabled = DEMO_HAS_WIRELESS;
 static bool usb_armed;
 static uint32_t usb_open_at;
 static bool retry_requested;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+static uint16_t requested_width=768, applied_width=768;
+static carplay_display_mode_t requested_display=CARPLAY_FUSION;
+static bool display_pending;
+#endif
 /* Worker-owned backoff; only copied summaries cross the UI boundary. */
 static uint32_t retry_at[2];
 static bool retry_waiting[2];
@@ -114,6 +119,14 @@ static bool audio_service(void)
 #include <finsh.h>
 static int connection_command(int argc, char **argv)
 {
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    if (argc==3 && !strcmp(argv[1],"display")) {
+        const char *names[]={"fullscreen","fusion","local"};
+        for (unsigned i=0;i<3;++i) if (!strcmp(argv[2],names[i]))
+            return carplay_connection_set_display_mode((carplay_display_mode_t)i) ? RTCP_OK : RTCP_ESTATE;
+        return RTCP_EINVAL;
+    }
+#endif
     if (argc == 2 && !strcmp(argv[1], "retry")) {
         carplay_connection_retry();
         return RTCP_OK;
@@ -138,6 +151,11 @@ static int connection_command(int argc, char **argv)
                s.receiver.transport_connected, s.receiver.authenticated,
                s.receiver.session_established, s.receiver.video_ready,
                s.receiver.audio_ready, s.receiver.input_ready);
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    rt_kprintf("[display] requested=%s size=%ux%u reconfiguring=%u\n",
+        carplay_fusion_mode_name(s.display_requested),(unsigned)s.display_width,
+        (unsigned)s.display_height,s.display_reconfiguring ? 1U : 0U);
+#endif
     return RTCP_OK;
 }
 MSH_CMD_EXPORT_ALIAS(connection_command, carplay_connection,
@@ -148,13 +166,20 @@ static bool mode_changed(void)
 {
     (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
     bool changed = requested_wireless != status.wireless;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    changed |= display_pending;
+#endif
     (void)rt_mutex_release(status_lock);
     return changed;
 }
 
 static int start_receiver(void)
 {
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    return carplay_app_autostart_display(status.wireless,applied_width,600);
+#else
     return status.wireless ? carplay_app_autostart() : carplay_app_autostart_wired();
+#endif
 }
 
 static unsigned displayed_frames(void)
@@ -433,6 +458,12 @@ static void demo_worker(void *argument)
             status.stage = DEMO_BOOT;
             if (!automatic) status.last_error = 0;
             status.storage_error = 0;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+            applied_width=requested_width; display_pending=false;
+            (void)carplay_fusion_set_mode(requested_display);
+            memset(retry_waiting,0,sizeof(retry_waiting));
+            memset(failures,0,sizeof(failures));
+#endif
             (void)rt_mutex_release(status_lock);
         }
         if (automatic) {
@@ -623,6 +654,11 @@ bool carplay_connection_status(demo_status_t *out)
     if (out == NULL || status_lock == NULL) return false;
     if (rt_mutex_take(status_lock, RT_WAITING_NO) != RT_EOK) return false;
     *out = status;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    out->display_requested=requested_display;
+    out->display_width=applied_width; out->display_height=600;
+    out->display_reconfiguring=display_pending;
+#endif
     (void)rt_mutex_release(status_lock);
     return true;
 }
@@ -636,6 +672,27 @@ int carplay_connection_touch(uint8_t phase, uint16_t id, uint16_t x, uint16_t y)
     (void)rt_mutex_release(status_lock);
     return result;
 }
+
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+bool carplay_connection_set_display_mode(carplay_display_mode_t mode)
+{
+    if (!status_lock || mode < CARPLAY_FULLSCREEN || mode > CARPLAY_LOCAL) return false;
+    (void)rt_mutex_take(status_lock,RT_WAITING_FOREVER);
+    bool allowed=!manager_open && file_action==FILE_NONE;
+#if defined(RTCARPLAY_AUDIO)
+    allowed &= !audio_open;
+#endif
+    if (allowed) {
+        requested_display=mode;
+        if (mode!=CARPLAY_LOCAL) requested_width=mode==CARPLAY_FULLSCREEN ? 1024 : 768;
+        display_pending=requested_width!=applied_width;
+        /* Hold local instruments until the old session is retired. */
+        (void)carplay_fusion_set_mode(display_pending ? CARPLAY_LOCAL : mode);
+    }
+    (void)rt_mutex_release(status_lock);
+    return allowed;
+}
+#endif
 
 void carplay_connection_select_mode(bool wireless)
 {

@@ -119,6 +119,10 @@ int main(int argc, char **argv)
     carplay_vehicle_protocol_demo_snapshot(&demo,NULL,&snapshot);
     assert(snapshot.rpm==250 && snapshot.model.characteristics==3 && snapshot.model.subscribed==0);
     assert(snapshot.model.refused_writes==3 && !snapshot.delivery.attached);
+    assert(snapshot.model.method_requests[RTCP_VEHICLE_METHOD_REGISTER]==1);
+    assert(snapshot.model.method_responses[RTCP_VEHICLE_METHOD_WRITE]==1);
+    assert(snapshot.model.last_method==RTCP_VEHICLE_METHOD_WRITE && snapshot.model.last_result==RTCP_OK);
+    assert(snapshot.model.last_lane==RTCP_VEHICLE_HIGH); /* Response contains per-IID refusals. */
     carplay_vehicle_protocol_demo_destroy(&demo);
     assert(!demo.model);
     carplay_vehicle_protocol_demo_destroy(&demo);

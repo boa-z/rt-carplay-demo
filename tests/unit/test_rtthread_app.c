@@ -349,8 +349,35 @@ static void test_bt_lifetime(void)
     delays = 0;
 }
 
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+static void test_viewport_metadata(void)
+{
+    app_state_t *app=calloc(1,sizeof(*app)); assert(app);
+    strcpy(app->device_id,"02:00:00:00:00:01"); strcpy(app->bluetooth_id,"02:00:00:00:00:02");
+    strcpy(app->name,"Host display test"); strcpy(app->model,"Host test");
+    for (unsigned i=0;i<2;++i) {
+        app->width=i ? 1024 : 768; app->height=600;
+        assert(build_announcement_data(app)==RTCP_OK);
+        airplay_bplist_doc_t doc; airplay_bplist_object_t root,displays,display,object; uint64_t value;
+        assert(airplay_bplist_open(app->info_plist,app->info_plist_len,&doc)==AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_root(&doc,&root)==AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_dict_get(&doc,root,"displays",&displays)==AIRPLAY_BPLIST_OK);
+        assert(airplay_bplist_array_get(&doc,displays,0,&display)==AIRPLAY_BPLIST_OK);
+        const char *keys[]={"widthPixels","heightPixels","widthPhysical","heightPhysical"};
+        const uint64_t expected[]={app->width,600,i ? 200 : 150,120};
+        for (unsigned k=0;k<4;++k) {
+            assert(airplay_bplist_dict_get(&doc,display,keys[k],&object)==AIRPLAY_BPLIST_OK);
+            assert(airplay_bplist_get_uint(&doc,object,&value)==AIRPLAY_BPLIST_OK && value==expected[k]);
+        }
+    }
+    free(app);
+}
+#endif
 int main(void)
 {
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    test_viewport_metadata();
+#endif
     test_bt_lifetime();
     thread_deletes = 0;
     char directory[] = "/tmp/rtcp-rtthread-lifecycle-XXXXXX";

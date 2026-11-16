@@ -60,6 +60,9 @@ int carplay_app_start(const carplay_app_config_t *config);
  * carplay_start command use these. */
 int carplay_app_autostart(void);
 int carplay_app_autostart_wired(void);
+/* Connection-owner-only session creation with an explicit Main Display size.
+ * Stop iAP2 borrowers and the old Receiver before calling this. */
+int carplay_app_autostart_display(bool wired, uint16_t width, uint16_t height);
 
 /* Asks the poll thread to tear everything down and waits for its last state
  * access. Calling from that worker (including its callbacks) returns

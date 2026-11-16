@@ -5,6 +5,9 @@
 #include <stdint.h>
 #include "rtcp_lubanlite.h"
 #include "pairing_manager.h"
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+#include "fusion_display.h"
+#endif
 #include "rtcp/events.h"
 #if defined(RTCARPLAY_AUDIO)
 #include "audio_test_lubanlite.h"
@@ -39,6 +42,11 @@ typedef struct {
     int trust, storage_error;
     demo_stage_t previous;
     int last_error;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    carplay_display_mode_t display_requested;
+    uint16_t display_width, display_height;
+    bool display_reconfiguring;
+#endif
 } demo_status_t;
 
 
@@ -53,6 +61,11 @@ void carplay_connection_select_mode(bool wireless);
 bool carplay_connection_set_wireless_enabled(bool enabled);
 void carplay_connection_pairing_reply(uint32_t request, bool accept);
 void carplay_connection_retry(void);
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+/* Asynchronous: geometry changes close/recreate the session on its owner.
+ * LOCAL keeps the selected phone geometry; settings reset at reboot. */
+bool carplay_connection_set_display_mode(carplay_display_mode_t mode);
+#endif
 bool carplay_connection_files_open(void);
 void carplay_connection_files_close(void);
 void carplay_connection_files_refresh(void);

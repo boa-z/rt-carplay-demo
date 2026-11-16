@@ -6,6 +6,27 @@
 #include "../../ui/lvgl_launcher.c"
 
 static demo_status_t model;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+static unsigned display_requests;
+static carplay_display_mode_t last_display;
+bool carplay_connection_set_display_mode(carplay_display_mode_t mode)
+{ ++display_requests; last_display=mode; return true; }
+void carplay_fusion_ui_init(lv_obj_t *screen,uint16_t w,uint16_t h)
+{ assert(screen && w==1024 && h==600); }
+bool carplay_fusion_ui_update(const demo_status_t *status) { (void)status; return false; }
+carplay_fusion_touch_t carplay_fusion_cancel_touch(void) { return (carplay_fusion_touch_t){0}; }
+carplay_fusion_touch_t carplay_fusion_touch(uint8_t phase,uint16_t id,uint16_t x,uint16_t y)
+{ (void)phase; (void)id; (void)x; (void)y; return (carplay_fusion_touch_t){0}; }
+static lv_obj_t *find_button(lv_obj_t *parent,const char *caption)
+{
+    for (uint32_t i=0;i<lv_obj_get_child_count(parent);++i) {
+        lv_obj_t *obj=lv_obj_get_child(parent,(int32_t)i);
+        if (lv_obj_check_type(obj,&lv_button_class) && lv_obj_get_child_count(obj) &&
+            !strcmp(lv_label_get_text(lv_obj_get_child(obj,0)),caption)) return obj;
+    }
+    assert(!"button missing"); return NULL;
+}
+#endif
 static uint8_t pixels[1024 * 600 * 4];
 static bool files_opened, audio_opened, microphone_muted;
 static unsigned file_version, replies, audio_selection;
@@ -145,6 +166,24 @@ int main(int argc, char **argv)
     lv_obj_send_event(microphone_setting, LV_EVENT_CLICKED, NULL);
     assert(!model.wireless_enabled && microphone_muted);
     screenshot(argv[1], "settings");
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    model.stage=DEMO_LIVE; preview_video_active=true; update_page(NULL);
+    assert(!lv_obj_has_state(settings_button,LV_STATE_DISABLED));
+    lv_obj_send_event(settings_button,LV_EVENT_CLICKED,NULL);
+    lv_obj_send_event(find_button(settings_panel,"Display mode"),LV_EVENT_CLICKED,NULL);
+    assert(!lv_obj_has_flag(display_panel,LV_OBJ_FLAG_HIDDEN));
+    lv_obj_send_event(find_button(display_panel,"Full screen 1024 x 600"),LV_EVENT_CLICKED,NULL);
+    assert(display_requests==1 && last_display==CARPLAY_FULLSCREEN);
+    assert(strstr(lv_label_get_text(display_note),"1024 x 600"));
+    screenshot(argv[1],"display-settings"); inside(display_note);
+    lv_obj_send_event(find_button(display_panel,"Video + meters 768 x 600"),LV_EVENT_CLICKED,NULL);
+    assert(display_requests==2 && last_display==CARPLAY_FUSION);
+    lv_obj_send_event(find_button(display_panel,"Local instruments"),LV_EVENT_CLICKED,NULL);
+    assert(display_requests==3 && last_display==CARPLAY_LOCAL);
+    lv_obj_send_event(find_button(display_panel,"Back to settings"),LV_EVENT_CLICKED,NULL);
+    assert(lv_obj_has_flag(display_panel,LV_OBJ_FLAG_HIDDEN));
+    model.stage=DEMO_WAIT; preview_video_active=false; update_page(NULL);
+#endif
     inside(wireless_setting); inside(microphone_setting);
     inside(ota_check_button); inside(ota_install_button); inside(ota_state_label);
     snprintf(ota_model.current, sizeof(ota_model.current), "1.0.0");

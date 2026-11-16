@@ -39,7 +39,7 @@ static lv_obj_t *make_label(lv_obj_t *parent, uint32_t color, bool large)
 static void show_dashboard(lv_event_t *event)
 {
     (void)event; showing_launcher=false;
-    (void)carplay_fusion_set_mode(CARPLAY_FUSION);
+    (void)carplay_connection_set_display_mode(CARPLAY_FUSION);
 }
 static void show_connections(lv_event_t *event)
 {
@@ -50,10 +50,10 @@ static void change_view(lv_event_t *event)
 {
     (void)event;
     carplay_fusion_snapshot_t s; carplay_fusion_snapshot(rt_tick_get_millisecond(),&s);
-    (void)carplay_fusion_set_mode(s.requested == CARPLAY_FUSION ? CARPLAY_LOCAL : CARPLAY_FUSION);
+    (void)carplay_connection_set_display_mode(s.requested == CARPLAY_FUSION ? CARPLAY_LOCAL : CARPLAY_FUSION);
 }
 static void fullscreen(lv_event_t *event)
-{ (void)event; (void)carplay_fusion_set_mode(CARPLAY_FULLSCREEN); }
+{ (void)event; (void)carplay_connection_set_display_mode(CARPLAY_FULLSCREEN); }
 
 static lv_obj_t *make_button(lv_obj_t *parent, const char *caption, lv_event_cb_t callback)
 {
@@ -117,7 +117,7 @@ void carplay_fusion_ui_init(lv_obj_t *launcher, uint16_t width, uint16_t height)
     connection=make_label(dashboard,0xB1C9DB,false); metrics=make_label(dashboard,0x8FA8B9,false);
     view_button=make_button(dashboard,"Video + meters / Local",change_view);
     connections_button=make_button(dashboard,"Connections",show_connections);
-    full_button=make_button(dashboard,"Video fullscreen",fullscreen);
+    full_button=make_button(dashboard,"Fullscreen 1024x600",fullscreen);
 }
 
 bool carplay_fusion_ui_update(const demo_status_t *status)

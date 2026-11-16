@@ -4,13 +4,21 @@
 
 The Ultra GUI development profile enables `RTCARPLAY_SINGLE_SCREEN_FUSION` on the D213 1024×600 panel. This is Classic Main Display video combined with local LVGL 9 instruments. It does not implement Apple's Ultra Local UI renderer or establish official Ultra interoperability. The portable SDK gains no board or LVGL dependency. The normal Classic and Headless profiles retain their existing display policy.
 
+## Native full-screen and fusion settings
+
+Open **Connections > Settings > Display mode**, then select **Full screen 1024 x 600**, **Video + meters 768 x 600** or **Local instruments**. The instrument dashboard full-screen button now uses the same native-resolution request. Geometry changes are asynchronous: the connection owner closes USB/iAP2 borrowers before stopping the old Receiver, recreates the Receiver/HID/sink and `/info` at the selected size, then allows reconnection on the same wired/wireless owner. Local instruments remain selected during retirement; LOCAL retains the chosen phone geometry. Repeated same-size requests do not restart the session, and pending requests coalesce. Device/audio tools can temporarily refuse a change. Settings are kept in RAM and reset at reboot. Real-iPhone reconnection and native output remain NOT_RUN for this revision.
+
+The equivalent owner requests are `carplay_connection display fullscreen`, `carplay_connection display fusion` and `carplay_connection display local`. `carplay_connection status` shows the selected size and whether retirement is pending. `carplay_display status` reports the actual latched video/input geometry. The older `carplay_display fullscreen/fusion/local` commands remain composition-only diagnostics; they do not rebuild the session.
+
+Physical size metadata now follows the viewport: `RTCARPLAY_PANEL_WIDTH_MM` and `RTCARPLAY_PANEL_HEIGHT_MM` describe the full LCD active area, and the application scales them into each phone viewport. Their defaults preserve the previous estimated 200x120 mm; a 768x600 fusion viewport therefore reports 150x120 mm, while native full screen reports 200x120 mm. These estimates are not measured panel calibration. Configure measured active width/height, excluding the bezel, for correct layout density and physical proportions. This fixes the earlier mismatch of a smaller pixel viewport with a full-panel physical width; actual improvement of the reported compressed appearance still needs a phone test.
+
 ## Phone resolution and black bars
 
 The [viewport manual-test checkpoint](evidence/d213-fusion-viewport-20261115.md) records the exact 768x600 native image, verification, preceding fixed-alpha image and remaining manual tests.
 
 The dedicated Ultra GUI defconfig advertises a 768x600 Main Display while the physical framebuffer and LVGL remain 1024x600. Previously, a 1024x600 phone image fitted into the left 768x600 viewport became 768x450, leaving 75 pixels above and below. A phone stream rendered at the advertised 768x600 fills that viewport without stretching or cropping; its actual resolution and touch behavior still require iPhone validation. Ordinary Classic and Headless defconfigs retain 1024x600.
 
-A changed advertised size takes effect in a new CarPlay session after rebuilding/flashing. Mode buttons only change hardware composition. Switching this 768x600 session to FULLSCREEN centers the same image with 128-pixel bars on each side; it does not renegotiate 1024x600. Use a panel-sized profile/session for native full-panel output. Touch input remains physical 1024x600 at the launcher and maps to the latched logical phone dimensions.
+Changing build-time dimensions requires a new image/session. Runtime Settings now recreates the session at the requested native size as described above. A composition-only diagnostic change to FULLSCREEN within an existing 768x600 session centers that same image with 128-pixel side bars. Use Settings or `carplay_connection display fullscreen` for a new 1024x600 session. Touch remains physical 1024x600 at the launcher and maps to the latched logical phone dimensions.
 
 ## Modes and controls
 

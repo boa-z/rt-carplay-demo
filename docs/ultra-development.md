@@ -4,6 +4,8 @@
 
 The final product objective is complete official CarPlay Ultra. This development profile is an intermediate protocol and integration bench. Classic video plus LVGL instruments, Ultra-related negotiation and the official product have separate acceptance criteria. No appearance, popup, Host simulation or second video stream proves complete Ultra support.
 
+Current hardware decision: the D213 MPP/DE/LVGL path remains a fusion and protocol test bench. Apple's [public architecture](https://developer.apple.com/videos/play/wwdc2024/10111/) explicitly describes an OpenGL-based Local UI renderer, a dedicated OpenGL compositor and essential HEVC video support. The current D213 integration has no implemented/verified OpenGL backend, official asset/presentation renderer or HEVC media path. GE2D/DE composition and local LVGL instruments do not satisfy those contracts. Complete official Ultra requires a suitable graphics/codec platform plus the required software, assets, access and qualification; moving the portable SDK to that platform remains part of the product path. The no-black-bar photo confirms one visual outcome of the 8ac6f504 fusion image, while the reported compressed appearance, touch, reconnection and official acceptance remain separate.
+
 ## Sources and implementation baseline
 
 Development uses boa-z/luban-lite-carplay on the existing carplay-oss branch; luban-lite-jc-carplay-oss is abandoned. The implementation baseline is integration 7be401243ff9b64eb94a64cfaa082cb6dc398c27 and SDK d0bc5190807279c62d08f78c3c428f3ca8704540. The first SDK foundation milestone is 183fd91167b9d2ca20e1b5f53882d3a6f1bf1ce9. Existing native NCM and short bulk-IN fixes are retained. The parent gitlink identifies the selected SDK revision.

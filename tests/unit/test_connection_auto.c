@@ -8,12 +8,24 @@
 
 enum { USB_AFTER_IDLE, WIRELESS_RESERVATION, USB_RETRY, RADIO_FAILURE,
        ENUM_RETRY, NO_PICTURE, EVENT_LOSS, USB_START_FAILURE, NO_NETWORK,
-       ATTACHED_TIMEOUT };
+       ATTACHED_TIMEOUT, USB_DISPLAY_SWITCH, WIRELESS_DISPLAY_SWITCH };
 static unsigned scenario, now, boot, radio_at, pairs, opens, starts, closes;
 static unsigned radio_starts, radio_stops, first_pair_at;
 static unsigned network_samples;
 static bool receiver, wired, radio, usb_session, seen_live;
 static jmp_buf done;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+static unsigned display_step, started_width;
+static carplay_display_mode_t displayed_mode;
+int carplay_fusion_set_mode(carplay_display_mode_t mode)
+{ displayed_mode=mode; return RTCP_OK; }
+int carplay_app_autostart_display(bool usb_wireless, uint16_t width, uint16_t height)
+{
+    assert((width==768 || width==1024) && height==600);
+    started_width=width;
+    return usb_wireless ? carplay_app_autostart() : carplay_app_autostart_wired();
+}
+#endif
 static unsigned elapsed(void) { return now - boot; }
 uint32_t rt_tick_get_millisecond(void) { return now; }
 rt_mutex_t rt_mutex_create(const char *n, int f) { (void)n; (void)f; return (void *)1; }
@@ -28,7 +40,11 @@ int rt_thread_delete(rt_thread_t t) { (void)t; return 0; }
 static bool wireless_event(void)
 {
     unsigned age = now - radio_at;
-    return radio && scenario == WIRELESS_RESERVATION && age >= 800 && age < 1800;
+    return radio && ((scenario == WIRELESS_RESERVATION && age >= 800 && age < 1800)
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+        || (scenario==WIRELESS_DISPLAY_SWITCH && age>=800)
+#endif
+        );
 }
 void rt_thread_mdelay(int ms)
 {
@@ -36,6 +52,29 @@ void rt_thread_mdelay(int ms)
     assert(elapsed() < 200000); /* An owner that wedges fails the test. */
     if (status.stage == DEMO_LIVE) {
         seen_live = true;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+        if (scenario==USB_DISPLAY_SWITCH || scenario==WIRELESS_DISPLAY_SWITCH) {
+            if (!display_step) {
+                assert(started_width==768);
+                assert(carplay_connection_set_display_mode(CARPLAY_FULLSCREEN));
+                assert(display_pending && displayed_mode==CARPLAY_LOCAL);
+                display_step=1;
+            } else if (display_step==1) {
+                assert(started_width==1024 && closes && displayed_mode==CARPLAY_FULLSCREEN);
+                assert(carplay_connection_set_display_mode(CARPLAY_FUSION));
+                assert(display_pending && displayed_mode==CARPLAY_LOCAL);
+                display_step=2;
+            } else {
+                assert(started_width==768 && starts>=3 && displayed_mode==CARPLAY_FUSION);
+                demo_status_t sample;
+                assert(carplay_connection_status(&sample) && !sample.display_reconfiguring);
+                assert(sample.display_width==768 && sample.display_requested==CARPLAY_FUSION);
+                assert(carplay_connection_set_display_mode(CARPLAY_LOCAL) && !display_pending);
+                assert(displayed_mode==CARPLAY_LOCAL);
+                longjmp(done,1);
+            }
+        }
+#endif
         if (scenario == USB_RETRY || scenario == RADIO_FAILURE ||
             scenario == ENUM_RETRY || scenario == USB_START_FAILURE)
             longjmp(done, 1);
@@ -48,6 +87,7 @@ int carplay_usb_open(void)
 }
 bool carplay_usb_attached(void)
 {
+    if (scenario==WIRELESS_DISPLAY_SWITCH) return false;
     if (scenario == USB_AFTER_IDLE)
         return elapsed() >= 600 && !seen_live;
     if (scenario == WIRELESS_RESERVATION) return elapsed() >= 600;
@@ -188,9 +228,15 @@ int rtcp_bt_lubanlite_forget_bonds(void) { return RTCP_OK; }
 int main(void)
 {
     for (unsigned cycle = 0; cycle < 32; ++cycle) {
-        for (scenario = USB_AFTER_IDLE; scenario <= ATTACHED_TIMEOUT; ++scenario) {
+        for (scenario = USB_AFTER_IDLE; scenario <= WIRELESS_DISPLAY_SWITCH; ++scenario) {
 #if !defined(RTCARPLAY_VIDEO)
             if (scenario == NO_PICTURE || scenario == ATTACHED_TIMEOUT) continue;
+#endif
+#if !defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+            if (scenario>=USB_DISPLAY_SWITCH) continue;
+#else
+            display_step=started_width=0; requested_width=applied_width=768;
+            requested_display=displayed_mode=CARPLAY_FUSION; display_pending=false;
 #endif
             now = boot = cycle & 1 ? UINT32_MAX - 1000U : 0;
             pairs = opens = starts = closes = radio_starts = radio_stops = 0;
@@ -203,7 +249,7 @@ int main(void)
             wireless_enabled = scenario != USB_RETRY && scenario != NO_PICTURE &&
                 scenario != EVENT_LOSS && scenario != USB_START_FAILURE;
             requested_wireless = status.wireless = wireless_enabled;
-            if (scenario == ATTACHED_TIMEOUT)
+            if (scenario == ATTACHED_TIMEOUT || scenario==USB_DISPLAY_SWITCH)
                 requested_wireless = status.wireless = false;
             status_lock = (void *)1; manager_open = retry_requested = false;
             file_action = FILE_NONE;
@@ -235,6 +281,15 @@ int main(void)
     assert(idle_actions() && !retry_requested && retry_due(false));
     assert(carplay_connection_set_wireless_enabled(true));
     assert(wireless_enabled);
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    assert(!carplay_connection_set_display_mode((carplay_display_mode_t)99));
+    manager_open=true;
+    assert(!carplay_connection_set_display_mode(CARPLAY_FULLSCREEN));
+    manager_open=false;
+    assert(carplay_connection_set_display_mode(CARPLAY_FULLSCREEN) && display_pending);
+    assert(carplay_connection_set_display_mode(CARPLAY_FUSION) && !display_pending);
+    puts("Native display session changes: USB/wireless 768->1024->768, local preservation, blocked tools and coalesced requests passed (Host only)");
+#endif
     puts("Actual automatic owner: simultaneous boot discovery, first-contender reservation, USB/radio failures, cooldown/retry, first-frame timeout, attached AirPlay loss, recovery and clock wrap passed over 32 cycles");
     return 0;
 }

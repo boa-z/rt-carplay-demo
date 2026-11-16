@@ -4,13 +4,21 @@
 
 Ultra GUI 开发配置在 D213 1024×600 屏幕上启用 `RTCARPLAY_SINGLE_SCREEN_FUSION`。这是 Classic Main Display 视频与 LVGL 9 本地仪表的融合，不是 Apple Ultra Local UI 渲染器，也不能证明官方 Ultra 互操作能力。SDK 不引入板级或 LVGL 依赖，普通 Classic 和 Headless 配置保留原有显示策略。
 
+## 原生全屏与融合显示设置
+
+进入 **Connections > Settings > Display mode**，选择 **Full screen 1024 x 600**、**Video + meters 768 x 600** 或 **Local instruments**。仪表页全屏按钮也改为同一原生尺寸请求。几何变化异步执行：连接管理器先关闭 USB/iAP2 借用者，再停止旧 Receiver，以新尺寸重建 Receiver、HID、视频接收器和 `/info`，随后在同一有线/无线连接所有者上等待重连。退出期间保持本地仪表，LOCAL 保留已选手机几何；重复同尺寸请求不重连，待处理请求合并。设备/音频工具打开时可暂时拒绝切换。设置保存在 RAM，重启恢复默认。本版本真实 iPhone 重连和原生尺寸输出仍为 NOT_RUN。
+
+对应命令为 `carplay_connection display fullscreen`、`carplay_connection display fusion`、`carplay_connection display local`。`carplay_connection status` 显示选定尺寸和是否等待退出，`carplay_display status` 显示实际锁存的视频/输入尺寸。旧 `carplay_display fullscreen/fusion/local` 命令保留为仅修改合成布局的诊断，不重建会话。
+
+物理尺寸也随区域变化：`RTCARPLAY_PANEL_WIDTH_MM`、`RTCARPLAY_PANEL_HEIGHT_MM` 描述整块 LCD 有效区，应用再按手机区域缩放。默认保留此前估计的 200x120 mm，因此融合 768x600 声明 150x120 mm，原生全屏声明 200x120 mm。默认值不是实测校准；请使用不含边框的有效区宽、高来配置密度和比例。本次修正较小像素区域仍声明整屏物理宽度的问题，是否改善用户报告的压缩感仍需手机实测。
+
 ## 手机分辨率与黑边
 
 [区域适配手动测试记录](evidence/d213-fusion-viewport-20261115.zh-CN.md)包含本次 768x600 原生镜像身份、验证、上一版像素 alpha 镜像及剩余实机项目。
 
 Ultra GUI 专用 defconfig 声明 768x600 Main Display，物理 framebuffer 和 LVGL 仍为 1024x600。此前将手机的 1024x600 画面等比例放入左侧 768x600 区域，会得到 768x450，上下各留 75 像素黑边。手机按声明的 768x600 渲染后即可完整填满左侧，无需拉伸或裁剪；实际输出分辨率和触摸仍需 iPhone 验证。普通 Classic 和 Headless defconfig 保留 1024x600。
 
-声明尺寸的修改需要重新构建、刷机并建立新的 CarPlay 会话。模式按钮只切换硬件合成方式：同一 768x600 会话切到 FULLSCREEN 时保持比例居中，左右各留 128 像素，不会重新协商为 1024x600。原生整屏输出需使用面板尺寸的配置及会话。启动页仍接收物理 1024x600 触摸坐标，再映射到已锁存的手机逻辑尺寸。
+构建配置中的尺寸变化需要新镜像及会话，运行时 Settings 现可按上述流程重建指定原生尺寸的会话。在现有 768x600 会话内仅修改合成布局到 FULLSCREEN，仍会居中并左右各留 128 像素；要建立 1024x600 会话，请用设置页或 `carplay_connection display fullscreen`。启动页仍接收物理 1024x600 触摸，再映射到已锁存的手机逻辑尺寸。
 
 ## 模式与操作
 

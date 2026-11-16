@@ -219,11 +219,30 @@ config RTCARPLAY_SCREEN_WIDTH
       Other profiles should retain panel-sized dimensions unless their
       input adapter supports the corresponding coordinate mapping.
       Changing this setting requires rebuilding and a new CarPlay session;
-      display mode buttons do not renegotiate the phone resolution.
+      runtime display settings recreate the session through its owner.
 
 config RTCARPLAY_SCREEN_HEIGHT
     int "AirPlay logical display height"
     default 600
+
+config RTCARPLAY_PANEL_WIDTH_MM
+    int "Full panel active width in millimetres"
+    range 1 1000
+    default 200
+    depends on RTCARPLAY_SINGLE_SCREEN_FUSION
+    help
+      Measure the LCD active area, excluding the bezel. 200 mm preserves the
+      previous SDK estimate and is not panel calibration. The application
+      scales this width to the selected phone viewport before /info.
+
+config RTCARPLAY_PANEL_HEIGHT_MM
+    int "Full panel active height in millimetres"
+    range 1 1000
+    default 120
+    depends on RTCARPLAY_SINGLE_SCREEN_FUSION
+    help
+      Measure the LCD active area. 120 mm preserves the previous estimate;
+      configure measured width and height for correct physical geometry.
 
 config RTCARPLAY_ROTATION
     int "Display rotation (0, 90, 180 or 270)"

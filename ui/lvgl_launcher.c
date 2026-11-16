@@ -26,6 +26,9 @@ static lv_obj_t *steps[3];
 static lv_obj_t *step_labels[3], *path_labels[2], *session_note, *uptime_label;
 static lv_obj_t *settings_panel, *settings_note, *wireless_setting, *microphone_setting;
 static lv_obj_t *settings_button, *diagnostics_panel, *modal_scrim;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+static lv_obj_t *display_panel, *display_note;
+#endif
 static lv_obj_t *network_panel, *network_button, *network_summary, *network_detail, *network_check, *network_note;
 static lv_obj_t *bt_panel, *bt_text, *bt_accept;
 static uint32_t visible_pairing_request;
@@ -57,6 +60,9 @@ static void update_scrim(void)
 {
     if (!modal_scrim) return;
     lv_obj_t *pages[] = {settings_panel, diagnostics_panel, network_panel, file_panel, bt_panel,
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+        display_panel,
+#endif
 #if defined(RTCARPLAY_OTA)
         ota_confirm_panel,
 #endif
@@ -274,6 +280,18 @@ static void open_panel(lv_event_t *event)
     lv_obj_t *panel = lv_event_get_user_data(event);
     show_modal(panel);
 }
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+static void select_display(lv_event_t *event)
+{
+    carplay_display_mode_t mode=(carplay_display_mode_t)(uintptr_t)lv_event_get_user_data(event);
+    bool accepted=carplay_connection_set_display_mode(mode);
+    lv_label_set_text(display_note,!accepted ? "Display change unavailable. Close device/audio tools and retry." :
+        mode==CARPLAY_FULLSCREEN ? "Full screen: reconnecting CarPlay at 1024 x 600. Settings reset at reboot." :
+        mode==CARPLAY_FUSION ? "Video + meters: reconnecting CarPlay at 768 x 600. Settings reset at reboot." :
+        "Local instruments selected. Phone geometry is retained.");
+}
+#endif
+
 static void toggle_wireless(lv_event_t *event)
 {
     (void)event;
@@ -566,7 +584,11 @@ static void update_page(lv_timer_t *timer)
         carplay_audio_input_is_muted() ? "Microphone: MUTED" : "Microphone: ENABLED");
 #endif
     bool idle = s.stage == DEMO_WAIT || s.stage == DEMO_FAILED;
-    lv_obj_t *idle_buttons[] = {manage_button, retry_button, settings_button, wireless_setting};
+    lv_obj_t *idle_buttons[] = {manage_button, retry_button, wireless_setting,
+#if !defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+        settings_button,
+#endif
+    };
     for (unsigned i = 0; i < sizeof(idle_buttons) / sizeof(idle_buttons[0]); ++i) {
         if (idle) lv_obj_remove_state(idle_buttons[i], LV_STATE_DISABLED);
         else lv_obj_add_state(idle_buttons[i], LV_STATE_DISABLED);
@@ -767,6 +789,26 @@ void carplay_demo_launcher_init(void)
     label(settings_panel, "SYSTEM", 10, 280, 500, 0x58E0BF, false);
     lv_obj_t *system = label(settings_panel, "", 10, 316, width - 140, 0xC1CFDF, false);
     lv_label_set_text_fmt(system, "Launcher V2  |  ArtInChip D213  |  LVGL 9\nDisplay: %d x %d  |  One active CarPlay session", width, height);
+#endif
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    lv_obj_t *display_settings=button(settings_panel,"Display mode",width-312,0,190,NULL);
+    display_panel=panel(screen,30,25,width-60,height-50);
+    label(display_panel,"CARPLAY DISPLAY",10,0,width-140,0xF2F7FF,true);
+    label(display_panel,"Choose the phone layout. Changing resolution reconnects CarPlay.",
+        10,52,width-140,0xC1CFDF,false);
+    lv_obj_t *display_full=button(display_panel,"Full screen 1024 x 600",10,110,380,NULL);
+    lv_obj_add_event_cb(display_full,select_display,LV_EVENT_CLICKED,(void *)(uintptr_t)CARPLAY_FULLSCREEN);
+    lv_obj_t *display_fusion=button(display_panel,"Video + meters 768 x 600",10,190,380,NULL);
+    lv_obj_add_event_cb(display_fusion,select_display,LV_EVENT_CLICKED,(void *)(uintptr_t)CARPLAY_FUSION);
+    lv_obj_t *display_local=button(display_panel,"Local instruments",10,270,380,NULL);
+    lv_obj_add_event_cb(display_local,select_display,LV_EVENT_CLICKED,(void *)(uintptr_t)CARPLAY_LOCAL);
+    display_note=label(display_panel,"Full screen uses the entire 1024 x 600 panel.\nVideo + meters reserves the right 256 pixels for local instruments.",
+        10,360,width-140,0x8FA5BF,false);
+    lv_obj_t *display_back=button(display_panel,"Back to settings",10,440,230,NULL);
+    lv_obj_add_event_cb(display_back,close_panel,LV_EVENT_CLICKED,display_panel);
+    lv_obj_add_event_cb(display_back,open_panel,LV_EVENT_CLICKED,settings_panel);
+    lv_obj_add_event_cb(display_settings,open_panel,LV_EVENT_CLICKED,display_panel);
+    lv_obj_add_flag(display_panel,LV_OBJ_FLAG_HIDDEN);
 #endif
     lv_obj_t *legal = label(settings_panel,
         "Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI)",

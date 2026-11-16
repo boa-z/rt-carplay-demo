@@ -24,3 +24,14 @@ target_include_directories(fusion_preview PRIVATE ../support/lubanlite_video ../
 target_compile_definitions(fusion_preview PRIVATE RTCARPLAY_SINGLE_SCREEN_FUSION)
 target_compile_options(fusion_preview PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(fusion_preview PRIVATE lvgl m)
+
+# Actual Settings widgets with modeled owner requests; Classic preview retained.
+add_executable(launcher_fusion_settings_preview main.c)
+target_include_directories(launcher_fusion_settings_preview PRIVATE
+    ../support/lubanlite_demo ../../app ../../platform
+    "${SDK_ROOT}/packages/third-party/rt-carplay/include"
+    "${SDK_ROOT}/packages/third-party/rt-carplay/core/airplay/include")
+target_compile_definitions(launcher_fusion_settings_preview PRIVATE RTCARPLAY_INTERNET_SHARE RTCARPLAY_AUDIO RTCARPLAY_MICROPHONE
+    RTCARPLAY_IAP2 LPKG_RT_CARPLAY_LUBANLITE_WIFI RTCP_AUDIO_CODECS RTCARPLAY_OTA RTCARPLAY_SINGLE_SCREEN_FUSION)
+target_compile_options(launcher_fusion_settings_preview PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(launcher_fusion_settings_preview PRIVATE lvgl m)

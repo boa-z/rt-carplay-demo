@@ -8,6 +8,8 @@
 
 最终产品目标是完整官方 CarPlay Ultra。本开发配置是中间阶段的协议与集成验证平台。Classic 视频加 LVGL 仪表、Ultra 相关协商和完整官方产品采用不同验收标准。外观、弹窗、Host 模拟或第二路视频均不能证明完整 Ultra 支持。
 
+当前硬件判断：D213 的 MPP/DE/LVGL 路径继续用于融合显示和协议验证。Apple [公开架构](https://developer.apple.com/videos/play/wwdc2024/10111/)明确描述基于 OpenGL 的 Local UI 渲染器、专用 OpenGL 合成器和必需的 HEVC 视频能力。当前 D213 集成没有已实现并验证的 OpenGL 后端、官方资产/呈现渲染器及 HEVC 媒体路径，GE2D/DE 二维合成和 LVGL 仪表不能证明具备这些能力。完整官方 Ultra 需要合适的图形/编解码平台，以及相应软件、资产、访问权限和认证；可移植 SDK 向适合平台迁移仍属于产品路径。用户照片确认 8ac6f504 融合镜像没有上下黑边；压缩感、触摸、重连及官方验收须分别验证。
+
 ## 参考来源与实现基线
 
 开发使用 boa-z/luban-lite-carplay 的现有 carplay-oss 分支，luban-lite-jc-carplay-oss 已废弃。实现基线为集成仓库 7be401243ff9b64eb94a64cfaa082cb6dc398c27 和 SDK d0bc5190807279c62d08f78c3c428f3ca8704540；首个 SDK 基础里程碑为 183fd91167b9d2ca20e1b5f53882d3a6f1bf1ce9。保留已有 native NCM 和短 bulk-IN 修复，父仓库 gitlink 标识实际选择的 SDK 版本。
