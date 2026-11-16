@@ -14,7 +14,7 @@ This section supersedes historical references below to a complete official produ
 | --- | --- | --- |
 | L0 | PASS | LIVI source/test review, public architecture comparison and implementation gap reports are recorded. |
 | L1 | PASS for implemented foundations | Portable display, Vehicle State, authenticated DataStream and UI Sync foundations have recorded Host checks. This accepts the implemented foundation scope, not complete official protocol coverage or phone interoperability. Latest integration Host, GUI and Headless CI passed. |
-| L2 | PARTIAL | User confirms previous-version Fusion visuals. Exact image correlation, latest fullscreen/settings behavior, touch, lifecycle and controlled resource/latency measurements remain incomplete. |
+| L2 | PARTIAL | User confirms previous-version Fusion visuals and latest-version fullscreen, settings persistence and automatic handoff. These are manual device confirmations; the installed image hash was not supplied. Touch, remaining lifecycle/fault behavior and controlled resource/latency measurements remain incomplete. |
 | L3 | PARTIAL | Historical real-phone Vehicle State offer/enable and Normal/HIGH lane connections; UI Sync and remaining negotiation checks are NOT_RUN. |
 | L4 | PARTIAL | Historical real-phone request processing and queued response; method/phone acceptance, read/write/subscription/notification semantics and UI Sync device interaction remain NOT_RUN. |
 | L5 | NOT_RUN on a real phone; optional | Independent Type 111 Host transport/Null Sink exists. Real-phone negotiation and independent cluster reception are unverified. |

@@ -18,7 +18,7 @@
 | --- | --- | --- |
 | L0 | PASS | 已记录 LIVI 源码/测试研究、公开架构对比及实现差距报告。 |
 | L1 | 已实现基础范围 PASS | 可移植显示、Vehicle State、认证 DataStream 和 UI Sync 基础有 Host 检查记录，仅验收已实现基础，不代表完整官方协议覆盖或手机互操作。最新集成 Host、GUI、Headless CI 通过。 |
-| L2 | PARTIAL | 用户确认上一版本 Fusion 视觉效果。准确镜像关联、最新全屏/设置行为、触摸、生命周期和受控资源/延迟测量尚未完成。 |
+| L2 | PARTIAL | 用户确认上一版本 Fusion 视觉效果，以及最新版本全屏、设置持久化和自动跳转正常。这些为手动实机确认，未提供安装镜像哈希。触摸、剩余生命周期/异常行为和受控资源/延迟测量尚未完成。 |
 | L3 | PARTIAL | 历史真实手机提供/启用 Vehicle State，Normal/HIGH 通道连接；UI Sync 及剩余协商检查为 NOT_RUN。 |
 | L4 | PARTIAL | 历史真实手机请求被处理、响应入队；请求方法/手机接受、读写/订阅/通知语义及 UI Sync 实机交互仍为 NOT_RUN。 |
 | L5 | 真实手机 NOT_RUN；可选 | 已有独立 Type 111 Host 传输/Null Sink；真实手机协商及独立 Cluster 接收未验证。 |
