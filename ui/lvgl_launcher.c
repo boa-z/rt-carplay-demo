@@ -1,8 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-/* LVGL presentation and launcher input only. Connection policy lives in app/. */
+/* V4 native pages: Dashboard, Connectivity, Settings, System Update.
+ * Presentation only. Connection policy lives in app/; theme, language,
+ * volume, backlight, display mode and OTA state come from their real owners. */
 #include <rtthread.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 #include "lvgl.h"
 #include "connection_manager.h"
 #include "internet_share_lubanlite.h"
@@ -15,44 +18,38 @@
 #include "rtcp/input.h"
 #include "ui_language.h"
 #include "launcher_preferences.h"
+#include "carplay_ui_theme.h"
+#include "audio_volume_lubanlite.h"
+#include "backlight_lubanlite.h"
 #define lv_label_set_text     carplay_ui_set_text
 #define lv_label_set_text_fmt carplay_ui_set_text_fmt
 #define TR                    carplay_ui_translate
-#if defined(RTCARPLAY_MICROPHONE)
-#include "audio_input_lubanlite.h"
-#endif
 #if defined(RTCARPLAY_OTA)
 #include "ota_lubanlite.h"
 #endif
+#if defined(RT_USING_RTC)
+#include <drivers/rtc.h>
+#endif
+
+LV_FONT_DECLARE(carplay_display_220);
+LV_FONT_DECLARE(carplay_display_110);
+LV_FONT_DECLARE(carplay_ui_34);
+LV_FONT_DECLARE(carplay_ui_21);
+LV_FONT_DECLARE(carplay_ui_18);
+LV_FONT_DECLARE(carplay_ui_17);
+LV_FONT_DECLARE(carplay_ui_15);
+LV_FONT_DECLARE(carplay_ui_14);
+
+typedef enum
+{
+    PAGE_DASHBOARD,
+    PAGE_CONNECTIVITY,
+    PAGE_SETTINGS,
+    PAGE_OTA,
+    PAGE_COUNT
+} page_t;
 
 static rt_mutex_t pointer_lock;
-static lv_obj_t *heading, *description, *pin_label, *badge, *debug_label;
-static lv_obj_t *steps[3];
-static lv_obj_t *step_labels[3], *path_labels[2], *session_note, *uptime_label;
-static lv_obj_t *settings_panel, *settings_note, *wireless_setting, *microphone_setting;
-static lv_obj_t *settings_button, *diagnostics_panel, *modal_scrim;
-#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
-static lv_obj_t *display_panel, *display_note, *display_modes[3];
-static carplay_display_mode_t display_choice = CARPLAY_FUSION;
-#endif
-static lv_obj_t *language_buttons[2];
-static void update_page(lv_timer_t *timer);
-static lv_obj_t *network_panel, *network_button, *network_summary, *network_detail, *network_check, *network_note;
-static lv_obj_t *bt_panel, *bt_text, *bt_accept;
-static uint32_t visible_pairing_request;
-static bool network_ready;
-
-#if defined(RTCARPLAY_OTA)
-static lv_obj_t *ota_version_label, *ota_state_label;
-static lv_obj_t *ota_check_button, *ota_install_button;
-static lv_obj_t *ota_confirm_panel, *ota_confirm_text;
-static char ota_confirm_commit[41];
-static const char *ota_notice;
-#endif
-
-static lv_obj_t *manage_button, *retry_button, *file_panel, *file_list, *file_note;
-static lv_obj_t *confirm_panel, *confirm_text;
-static char selected_file[CARPLAY_PAIR_FILENAME_MAX];
 typedef struct
 {
     uint16_t x, y;
@@ -63,46 +60,278 @@ static unsigned pointer_head, pointer_tail;
 static bool pointer_active;
 static uint16_t pointer_id;
 
-#if defined(RTCARPLAY_AUDIO)
-static lv_obj_t *audio_button, *audio_panel, *audio_note, *audio_settings;
-static lv_obj_t *audio_play, *audio_mode_buttons[5], *audio_meters[2];
-#endif
+static lv_obj_t *pages[PAGE_COUNT];
+static lv_obj_t *modal_scrim;
 
-static void update_scrim(void)
-{
-    if (!modal_scrim)
-        return;
-    lv_obj_t *pages[] = {
-        settings_panel,
-        diagnostics_panel,
-        network_panel,
-        file_panel,
-        bt_panel,
-#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
-        display_panel,
-#endif
+/* Dashboard */
+static lv_obj_t *dash_dot, *dash_status, *dash_clock, *dash_note;
+static lv_obj_t *dash_speed, *dash_soc, *dash_bar;
+
+/* Connectivity */
+static lv_obj_t *conn_dot, *conn_state, *conn_action;
+
+/* Settings */
+static lv_obj_t *volume_value, *volume_slider, *brightness_value, *brightness_slider;
+static lv_obj_t *theme_buttons[3], *language_buttons[2], *display_buttons[2];
+static lv_obj_t *display_note, *settings_hint;
+static bool volume_dragging, brightness_dragging;
+static unsigned theme_choice, display_choice;
+
+/* OTA */
+static lv_obj_t *ota_version, *ota_detail, *ota_state, *ota_progress;
+static lv_obj_t *ota_check_button, *ota_install_button, *ota_backend;
 #if defined(RTCARPLAY_OTA)
-        ota_confirm_panel,
+static lv_obj_t *ota_confirm_panel, *ota_confirm_text;
+static char ota_confirm_commit[41];
 #endif
-#if defined(RTCARPLAY_AUDIO)
-        audio_panel,
-#endif
-    };
-    bool visible = false;
-    for (unsigned i = 0; i < sizeof(pages) / sizeof(pages[0]); ++i)
-        visible |= pages[i] && !lv_obj_has_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
-    if (visible)
-        lv_obj_remove_flag(modal_scrim, LV_OBJ_FLAG_HIDDEN);
-    else
-        lv_obj_add_flag(modal_scrim, LV_OBJ_FLAG_HIDDEN);
+static bool network_ready;
+
+/* Pairing */
+static lv_obj_t *bt_panel, *bt_text, *bt_accept;
+static uint32_t visible_pairing_request;
+
+/* lv_line keeps this array by reference for the life of the object. */
+static lv_point_precise_t line_points[32][4];
+static unsigned line_used;
+
+static void update_page(lv_timer_t *timer);
+
+/* ---------------- primitives ---------------- */
+
+static lv_obj_t *panel(lv_obj_t *parent, int x, int y, int w, int h, int radius,
+                       carplay_style_role_t role)
+{
+    lv_obj_t *obj = lv_obj_create(parent);
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_pos(obj, x, y);
+    lv_obj_set_size(obj, w, h);
+    lv_obj_set_style_radius(obj, radius, 0);
+    lv_obj_set_style_pad_all(obj, 0, 0);
+    lv_obj_set_style_shadow_width(obj, 0, 0);
+    lv_obj_set_style_outline_width(obj, 0, 0);
+    carplay_ui_style(obj, role);
+    return obj;
 }
 
-static void show_modal(lv_obj_t *page)
+/* Top of the text box is chosen so the alphabetic baseline lands on the
+ * reference coordinate: top = baseline - (line_height - base_line). */
+static lv_obj_t *text(lv_obj_t *parent, const char *value, int x, int top, int w,
+                      const lv_font_t *font, carplay_style_role_t role)
 {
-    lv_obj_remove_flag(page, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(page);
-    update_scrim();
+    lv_obj_t *obj = lv_label_create(parent);
+    lv_obj_set_style_text_font(obj, font, 0);
+    lv_obj_set_style_text_line_space(obj, 0, 0);
+    carplay_ui_style(obj, role);
+    lv_obj_set_pos(obj, x, top);
+    if (w > 0)
+    {
+        lv_obj_set_width(obj, w);
+        lv_label_set_long_mode(obj, LV_LABEL_LONG_CLIP);
+    }
+    lv_label_set_text(obj, value);
+    return obj;
 }
+
+/* An lv_line's box spans every point, so an icon fill role would paint a
+ * rectangle; translate it to the matching stroke-only role. */
+static carplay_style_role_t line_role(carplay_style_role_t role)
+{
+    if (role == CARPLAY_STYLE_GRAPHIC)
+        return CARPLAY_STYLE_LINE_ACCENT;
+    if (role == CARPLAY_STYLE_GRAPHIC_TEXT)
+        return CARPLAY_STYLE_LINE_TEXT;
+    return role;
+}
+
+static lv_obj_t *polyline(lv_obj_t *parent, int width, carplay_style_role_t role,
+                          unsigned count, const int xy[][2])
+{
+    if (count < 2 || count > 4 || line_used >= sizeof(line_points) / sizeof(line_points[0]))
+        return NULL;
+    lv_point_precise_t *points = line_points[line_used++];
+    for (unsigned i = 0; i < count; ++i)
+    {
+        points[i].x = xy[i][0];
+        points[i].y = xy[i][1];
+    }
+    lv_obj_t *obj = lv_line_create(parent);
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_pos(obj, 0, 0);
+    lv_obj_set_style_line_width(obj, width, 0);
+    lv_obj_set_style_line_rounded(obj, true, 0);
+    carplay_ui_style(obj, line_role(role));
+    lv_line_set_points(obj, points, count);
+    return obj;
+}
+
+static lv_obj_t *divider(lv_obj_t *parent, int x, int y, int w, int h)
+{
+    return panel(parent, x, y, w, h, 0, CARPLAY_STYLE_LINE_BORDER);
+}
+
+static lv_obj_t *stroke(lv_obj_t *parent, int x, int y, int w, int h, int radius,
+                        carplay_style_role_t role)
+{
+    return panel(parent, x, y, w, h, radius, role);
+}
+
+static void icon_phone(lv_obj_t *parent, int x, int y, int w, int h)
+{
+    stroke(parent, x, y, w, h, (w * 2) / 9, CARPLAY_STYLE_OUTLINE_ACCENT);
+    stroke(parent, x + (w - w / 2) / 2, y + h - 4, w / 2, 2, 1, CARPLAY_STYLE_BAR_FILL);
+}
+
+static void icon_mixer(lv_obj_t *parent, int x, int y, int w, int h,
+                       carplay_style_role_t role)
+{
+    for (unsigned i = 0; i < 3; ++i)
+    {
+        int row = y + (int)i * (h / 2) / 2 + h / 8;
+        stroke(parent, x, row, w, 2, 1, role);
+    }
+    stroke(parent, x + w / 5, y + h / 8 - 2, 6, 6, LV_RADIUS_CIRCLE, role);
+    stroke(parent, x + (w * 3) / 5, y + h / 2 - 2, 6, 6, LV_RADIUS_CIRCLE, role);
+    stroke(parent, x + w / 2, y + (h * 7) / 8 - 2, 6, 6, LV_RADIUS_CIRCLE, role);
+}
+
+static void icon_speaker(lv_obj_t *parent, int x, int y, int w, int h,
+                         carplay_style_role_t role)
+{
+    lv_obj_t *body = stroke(parent, x, y + h / 3, w / 3, h / 3, 1, CARPLAY_STYLE_OUTLINE_ACCENT);
+    (void)body;
+    const int cone[][2] = { { x + w / 3, y + h / 3 }, { x + w - 3, y + 1 }, { x + w - 3, y + h - 1 } };
+    (void)polyline(parent, 2, role, 3, cone);
+    const int wave[][2] = { { x + w - 6, y + h / 3 }, { x + w - 1, y + h / 2 }, { x + w - 6, y + (h * 2) / 3 } };
+    (void)polyline(parent, 2, role, 3, wave);
+}
+
+static void icon_sun(lv_obj_t *parent, int x, int y, int w, int h,
+                     carplay_style_role_t role)
+{
+    (void)stroke(parent, x + w / 3, y + h / 3, w / 3, h / 3, LV_RADIUS_CIRCLE,
+                 CARPLAY_STYLE_OUTLINE_ACCENT);
+    int cx = x + w / 2, cy = y + h / 2;
+    const int seg[][4] = {
+        { cx, y + 1, cx, y + 5 },
+        { cx, y + h - 5, cx, y + h - 1 },
+        { x + 1, cy, x + 5, cy },
+        { x + w - 5, cy, x + w - 1, cy },
+    };
+    for (unsigned i = 0; i < 4; ++i)
+    {
+        const int ray[][2] = { { seg[i][0], seg[i][1] }, { seg[i][2], seg[i][3] } };
+        (void)polyline(parent, 2, role, 2, ray);
+    }
+}
+
+static void icon_download(lv_obj_t *parent, int x, int y, int w, int h,
+                          carplay_style_role_t role)
+{
+    int cx = x + w / 2;
+    const int arrow[][2] = { { cx, y + 2 }, { cx, y + h - 8 } };
+    (void)polyline(parent, 2, role, 2, arrow);
+    const int head[][2] = { { cx - 6, y + h - 14 }, { cx, y + h - 7 }, { cx + 6, y + h - 14 } };
+    (void)polyline(parent, 2, role, 3, head);
+    const int tray[][2] = { { x + 3, y + h - 2 }, { x + w - 3, y + h - 2 } };
+    (void)polyline(parent, 2, role, 2, tray);
+}
+
+#if defined(RTCARPLAY_OTA)
+/* Only the OTA check button draws this glyph. */
+static void icon_refresh(lv_obj_t *parent, int x, int y, int w, int h,
+                         carplay_style_role_t role)
+{
+    lv_obj_t *arc = lv_arc_create(parent);
+    lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(arc, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(arc, 0, LV_PART_MAIN);
+    lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_pos(arc, x, y);
+    lv_obj_set_size(arc, w, h);
+    lv_arc_set_rotation(arc, 40);
+    lv_arc_set_bg_angles(arc, 0, 360);
+    lv_arc_set_angles(arc, 30, 300);
+    lv_obj_set_style_arc_opa(arc, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(arc, 2, LV_PART_INDICATOR);
+    carplay_ui_style_part(arc, role, LV_PART_INDICATOR);
+    const int tip[][2] = { { x + w - 8, y + 1 }, { x + w - 1, y + 3 }, { x + w - 3, y + 9 } };
+    (void)polyline(parent, 2, role, 3, tip);
+}
+#endif
+
+static void chevron(lv_obj_t *parent, int x, int y, int w, int h, bool left,
+                    carplay_style_role_t role)
+{
+    int cx = x + w / 2;
+    int cy = y + h / 2;
+    int dx = left ? -1 : 1;
+    const int pts[][2] = { { cx - 3 * dx, cy - 5 }, { cx + 3 * dx, cy }, { cx - 3 * dx, cy + 5 } };
+    (void)polyline(parent, 2, role, 3, pts);
+}
+
+static lv_obj_t *button_text(lv_obj_t *parent, const char *caption, int x, int y,
+                             int w, int h, int radius, carplay_style_role_t role,
+                             carplay_style_role_t text_role, const lv_font_t *font,
+                             lv_event_cb_t callback, void *user)
+{
+    lv_obj_t *obj = panel(parent, x, y, w, h, radius, role);
+    lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_t *caption_obj = text(obj, caption, 0, 0, 0, font, text_role);
+    lv_obj_center(caption_obj);
+    if (callback)
+        lv_obj_add_event_cb(obj, callback, LV_EVENT_CLICKED, user);
+    return obj;
+}
+
+static void set_text_if_changed(lv_obj_t *label, const char *value)
+{
+    if (!label || !strcmp(lv_label_get_text(label), value))
+        return;
+    lv_label_set_text(label, value);
+}
+
+/* ---------------- page navigation ---------------- */
+
+static void show_page(page_t target)
+{
+    for (unsigned i = 0; i < PAGE_COUNT; ++i)
+    {
+        if (!pages[i])
+            continue;
+        if (i == (unsigned)target)
+            lv_obj_remove_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
+        else
+            lv_obj_add_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+void carplay_launcher_show_dashboard(void)
+{
+    show_page(PAGE_DASHBOARD);
+}
+
+static void open_connectivity(lv_event_t *event)
+{
+    (void)event;
+    show_page(PAGE_CONNECTIVITY);
+}
+static void open_settings(lv_event_t *event)
+{
+    (void)event;
+    show_page(PAGE_SETTINGS);
+}
+static void open_ota(lv_event_t *event)
+{
+    (void)event;
+    show_page(PAGE_OTA);
+}
+static void open_dashboard(lv_event_t *event)
+{
+    (void)event;
+    show_page(PAGE_DASHBOARD);
+}
+
+/* ---------------- touch plumbing (unchanged contract) ---------------- */
 
 /* Called only by the existing GT911 reader. No LVGL calls here. */
 bool carplay_demo_touch(uint8_t phase, uint16_t id, uint16_t x, uint16_t y)
@@ -190,312 +419,412 @@ static void pointer_read(lv_indev_t *indev, lv_indev_data_t *data)
     (void)rt_mutex_release(pointer_lock);
 }
 
-static const char *stage_name(demo_stage_t stage)
+static void update_scrim(void)
 {
-    static const char *names[] = { "Starting", "Waiting for phone", "iAP2 pairing", "Network setup",
-                                   "AirPlay pairing", "Video active", "Closing", "Failed" };
-    return stage <= DEMO_FAILED ? names[stage] : "Unknown";
-}
-
-static lv_obj_t *label(lv_obj_t *parent, const char *text, int x, int y,
-                       int width, uint32_t color, bool large)
-{
-    lv_obj_t *obj = lv_label_create(parent);
-    lv_label_set_text(obj, text);
-    lv_obj_set_pos(obj, x, y);
-    lv_obj_set_width(obj, width);
-    lv_obj_set_style_text_color(obj, lv_color_hex(color), 0);
-#if LV_FONT_MONTSERRAT_24
-    if (large)
-        lv_obj_set_style_text_font(obj, &lv_font_montserrat_24, 0);
-#else
-    (void)large;
-#endif
-    return obj;
-}
-
-static lv_obj_t *button(lv_obj_t *parent, const char *text, int x, int y,
-                        int width, lv_event_cb_t callback)
-{
-    lv_obj_t *obj = lv_button_create(parent);
-    lv_obj_set_pos(obj, x, y);
-    lv_obj_set_size(obj, width, 44);
-    lv_obj_set_style_bg_color(obj, lv_color_hex(0x20344B), 0);
-    lv_obj_set_style_radius(obj, 14, 0);
-    lv_obj_set_style_border_width(obj, 1, 0);
-    lv_obj_set_style_border_color(obj, lv_color_hex(0x30465E), 0);
-    lv_obj_set_style_shadow_width(obj, 0, 0);
-    lv_obj_set_style_text_color(obj, lv_color_hex(0xE5EEF8), 0);
-    lv_obj_t *caption = lv_label_create(obj);
-    lv_obj_set_width(caption, width - 20);
-    lv_label_set_long_mode(caption, LV_LABEL_LONG_DOT);
-    lv_obj_set_style_text_align(caption, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(caption, text);
-    lv_obj_center(caption);
-    if (callback)
-        lv_obj_add_event_cb(obj, callback, LV_EVENT_CLICKED, NULL);
-    return obj;
-}
-
-#if defined(RTCARPLAY_AUDIO)
-static void audio_open_page(lv_event_t *event)
-{
-    (void)event;
-    if (carplay_connection_audio_open())
-        show_modal(audio_panel);
-}
-static void audio_select(lv_event_t *event)
-{
-    unsigned id = (unsigned)(uintptr_t)lv_obj_get_user_data(lv_event_get_target(event));
-    carplay_connection_audio_select(id);
-}
-static lv_obj_t *audio_control(lv_obj_t *parent, const char *text, int x, int y, int w, unsigned id)
-{
-    lv_obj_t *b = button(parent, text, x, y, w, audio_select);
-    lv_obj_set_user_data(b, (void *)(uintptr_t)id);
-    return b;
-}
-static void audio_update(void)
-{
-    bool open, ready, exiting;
-    audio_test_config_t config;
-    int result;
-    audio_test_status_t s;
-    carplay_connection_audio_snapshot(&open, &ready, &exiting, &config, &result, &s);
-    if (!open)
-    {
-        lv_obj_add_flag(audio_panel, LV_OBJ_FLAG_HIDDEN);
+    if (!modal_scrim)
         return;
-    }
-    const char *names[] = { "PCM tone", "PCM silence", "AAC fixture", "Mic level", "Mic loopback" };
-    lv_label_set_text_fmt(audio_settings, "Selected: %s | %u Hz | %s | Volume %u%% %s",
-                          TR(names[config.mode]), config.mode == AUDIO_TEST_AAC ? 44100 : config.mode >= AUDIO_TEST_MIC_LEVEL ? 48000
-                                                                                                                              : config.rate,
-                          TR(config.channel == 1 ? "Left" : config.channel == 2 ? "Right"
-                                                                                : "Both"),
-                          s.volume, s.muted ? TR("MUTED") : "");
-    lv_label_set_text_fmt(audio_note,
-                          "%s | Error %d\nInput L/R: %u / %u",
-                          TR(exiting ? "Stopping..." : !ready  ? "Starting..."
-                                                   : s.running ? "Running"
-                                                               : "Ready"),
-                          result ? result : s.error, s.peak_left, s.peak_right);
-    if (ready && !exiting)
-        lv_obj_remove_state(audio_play, LV_STATE_DISABLED);
-    else
-        lv_obj_add_state(audio_play, LV_STATE_DISABLED);
-    lv_bar_set_value(audio_meters[0], (int)s.peak_left, LV_ANIM_OFF);
-    lv_bar_set_value(audio_meters[1], (int)s.peak_right, LV_ANIM_OFF);
-    for (unsigned i = 0; i < 5; ++i) lv_obj_set_style_bg_color(audio_mode_buttons[i],
-                                                               lv_color_hex(config.mode == i ? 0x236859 : 0x20344B), 0);
-}
+    lv_obj_t *modals[] = { bt_panel,
+#if defined(RTCARPLAY_OTA)
+                           ota_confirm_panel,
 #endif
+                           NULL };
+    bool visible = false;
+    for (unsigned i = 0; i < sizeof(modals) / sizeof(modals[0]); ++i)
+        visible |= modals[i] && !lv_obj_has_flag(modals[i], LV_OBJ_FLAG_HIDDEN);
+    if (visible)
+        lv_obj_remove_flag(modal_scrim, LV_OBJ_FLAG_HIDDEN);
+    else
+        lv_obj_add_flag(modal_scrim, LV_OBJ_FLAG_HIDDEN);
+}
 
-static void files_back(lv_event_t *event)
+static void show_modal(lv_obj_t *modal)
 {
-    (void)event;
-    lv_obj_add_flag(file_panel, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(confirm_panel, LV_OBJ_FLAG_HIDDEN);
-    carplay_connection_files_close();
+    lv_obj_remove_flag(modal, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(modal);
     update_scrim();
 }
-static void files_refresh(lv_event_t *event)
+
+/* ---------------- dashboard ---------------- */
+
+static void dashboard_sample(uint16_t *speed, uint8_t *soc, bool *valid, bool *simulated)
 {
-    (void)event;
-    carplay_connection_files_refresh();
-    lv_label_set_text(file_note, "Reading pairing files...");
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    carplay_fusion_snapshot_t snapshot;
+    carplay_fusion_snapshot(rt_tick_get_millisecond(), &snapshot);
+    *speed = snapshot.vehicle.speed_kph;
+    *soc = snapshot.vehicle.battery_percent;
+    *valid = snapshot.vehicle.available;
+    *simulated = snapshot.vehicle.simulated;
+#else
+    /* No vehicle provider in this profile; the V4 reference sample is shown
+     * and labelled as demo data rather than implied to be measured. */
+    *speed = 26;
+    *soc = 78;
+    *valid = true;
+    *simulated = true;
+#endif
 }
-static void files_open(lv_event_t *event)
+
+static void clock_text(char *out, size_t size)
 {
-    (void)event;
-    if (!carplay_connection_files_open())
+#if defined(RT_USING_RTC)
+    rt_device_t device = rt_device_find("rtc");
+    time_t seconds = 0;
+    if (!device || rt_device_control(device, RT_DEVICE_CTRL_RTC_GET_TIME, &seconds) != RT_EOK ||
+        seconds <= 0)
+    {
+        snprintf(out, size, "--:--");
         return;
-    show_modal(file_panel);
-    lv_label_set_text(file_note, "Reading pairing files...");
+    }
+#if defined(RT_LIBC_DEFAULT_TIMEZONE)
+    seconds += (time_t)RT_LIBC_DEFAULT_TIMEZONE * 3600;
+#endif
+    long rem = (long)(seconds % 86400);
+    snprintf(out, size, "%02ld:%02ld", rem / 3600, rem / 60 % 60);
+#else
+    snprintf(out, size, "--:--");
+#endif
 }
-static void retry_connection(lv_event_t *event)
+
+static void build_dashboard(lv_obj_t *parent)
+{
+    text(parent, "Dashboard", 64, 54, 520, &carplay_ui_34, CARPLAY_STYLE_TEXT);
+    dash_dot = stroke(parent, 824, 63, 11, 11, LV_RADIUS_CIRCLE, CARPLAY_STYLE_DOT_OFF);
+    dash_status = text(parent, "Not connected", 847, 64, 210, &carplay_ui_14, CARPLAY_STYLE_MUTED);
+    dash_clock = text(parent, "--:--", 760, 62, 204, &carplay_ui_17, CARPLAY_STYLE_MUTED);
+    lv_obj_set_style_text_align(dash_clock, LV_TEXT_ALIGN_RIGHT, 0);
+    dash_note = text(parent, "Demo values", 64, 92, 300, &carplay_ui_14, CARPLAY_STYLE_FAINT);
+
+    text(parent, "Speed", 70, 160, 300, &carplay_ui_21, CARPLAY_STYLE_MUTED);
+    dash_speed = text(parent, "--", 62, 236, 380, &carplay_display_220, CARPLAY_STYLE_TEXT);
+    text(parent, "km/h", 473, 353, 160, &carplay_ui_34, CARPLAY_STYLE_MUTED);
+
+    divider(parent, 649, 152, 1, 316);
+    text(parent, "Battery", 711, 160, 260, &carplay_ui_21, CARPLAY_STYLE_MUTED);
+    dash_soc = text(parent, "--", 699, 247, 240, &carplay_display_110, CARPLAY_STYLE_TEXT);
+    text(parent, "%", 880, 301, 80, &carplay_ui_34, CARPLAY_STYLE_MUTED);
+    dash_bar = lv_bar_create(parent);
+    lv_obj_remove_flag(dash_bar, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_pos(dash_bar, 718, 367);
+    lv_obj_set_size(dash_bar, 224, 8);
+    lv_bar_set_range(dash_bar, 0, 100);
+    lv_obj_set_style_radius(dash_bar, 4, 0);
+    lv_obj_set_style_radius(dash_bar, 4, LV_PART_INDICATOR);
+    carplay_ui_style_part(dash_bar, CARPLAY_STYLE_BAR_BG, LV_PART_MAIN);
+    carplay_ui_style_part(dash_bar, CARPLAY_STYLE_BAR_FILL, LV_PART_INDICATOR);
+
+    divider(parent, 64, 485, 896, 1);
+
+    lv_obj_t *connectivity = panel(parent, 64, 505, 437, 67, 14, CARPLAY_STYLE_ACCENT_CARD);
+    lv_obj_add_flag(connectivity, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(connectivity, open_connectivity, LV_EVENT_CLICKED, NULL);
+    icon_phone(connectivity, 19, 23, 18, 22);
+    lv_obj_t *connectivity_text = text(connectivity, "Connectivity", 0, 0, 0,
+                                       &carplay_ui_18, CARPLAY_STYLE_ACCENT_TEXT);
+    lv_obj_center(connectivity_text);
+
+    lv_obj_t *settings = panel(parent, 523, 505, 437, 67, 14, CARPLAY_STYLE_CARD);
+    lv_obj_add_flag(settings, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(settings, open_settings, LV_EVENT_CLICKED, NULL);
+    icon_mixer(settings, 19, 22, 22, 24, CARPLAY_STYLE_GRAPHIC_TEXT);
+    lv_obj_t *settings_text = text(settings, "Settings", 0, 0, 0, &carplay_ui_18,
+                                   CARPLAY_STYLE_TEXT);
+    lv_obj_center(settings_text);
+}
+
+/* Header shared by the three inner pages. */
+static void build_header(lv_obj_t *parent, const char *title)
+{
+    lv_obj_t *back = panel(parent, 54, 42, 44, 44, 13, CARPLAY_STYLE_CARD_ALT);
+    lv_obj_add_flag(back, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(back, open_dashboard, LV_EVENT_CLICKED, NULL);
+    chevron(parent, 64, 53, 24, 22, true, CARPLAY_STYLE_LINE_TEXT);
+    text(parent, title, 64, 88, 700, &carplay_ui_34, CARPLAY_STYLE_TEXT);
+}
+
+/* ---------------- connectivity ---------------- */
+
+static void connect_action(lv_event_t *event)
 {
     (void)event;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    demo_status_t status = { 0 };
+    if (carplay_connection_status(&status) && status.stage == DEMO_LIVE &&
+        !status.display_reconfiguring && !carplay_launcher_video_is_active())
+    {
+        /* A live session is held in LOCAL while the local pages are open. */
+        carplay_fusion_ui_resume();
+        return;
+    }
+#endif
     carplay_connection_retry();
 }
-static void close_panel(lv_event_t *event)
+
+static void build_connectivity(lv_obj_t *parent)
 {
-    lv_obj_t *panel = lv_event_get_user_data(event);
-    lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
-    update_scrim();
+    build_header(parent, "Connectivity");
+
+    panel(parent, 64, 153, 896, 310, 24, CARPLAY_STYLE_CARD);
+    panel(parent, 96, 183, 84, 84, 20, CARPLAY_STYLE_TILE);
+    icon_phone(parent, 127, 210, 22, 30);
+    text(parent, "Apple CarPlay", 207, 198, 500, &carplay_ui_34, CARPLAY_STYLE_TEXT);
+    text(parent, "Wired / wireless", 208, 245, 500, &carplay_ui_18, CARPLAY_STYLE_MUTED);
+    divider(parent, 96, 306, 830, 1);
+
+    conn_dot = stroke(parent, 104, 342, 12, 12, LV_RADIUS_CIRCLE, CARPLAY_STYLE_DOT_OFF);
+    conn_state = text(parent, "Waiting for phone", 131, 337, 520, &carplay_ui_21,
+                      CARPLAY_STYLE_MUTED);
+    conn_action = button_text(parent, "Connect phone", 674, 371, 252, 61, 14,
+                              CARPLAY_STYLE_ACCENT_CARD, CARPLAY_STYLE_ACCENT_TEXT,
+                              &carplay_ui_18, connect_action, NULL);
+
+    panel(parent, 64, 481, 896, 91, 17, CARPLAY_STYLE_CARD_ALT);
+    stroke(parent, 88, 509, 26, 6, 3, CARPLAY_STYLE_DOT_OFF);
+    text(parent, "Other protocols", 133, 502, 400, &carplay_ui_17, CARPLAY_STYLE_MUTED);
+    text(parent, "Android Auto  /  CarLife+", 133, 531, 560, &carplay_ui_17,
+         CARPLAY_STYLE_TEXT);
+    lv_obj_t *planned = text(parent, "Planned", 700, 518, 218, &carplay_ui_14,
+                             CARPLAY_STYLE_FAINT);
+    lv_obj_set_style_text_align(planned, LV_TEXT_ALIGN_RIGHT, 0);
+    /* Informational only: no mock Android Auto or CarLife backend exists. */
 }
-static void open_panel(lv_event_t *event)
+
+/* ---------------- settings ---------------- */
+
+static void settings_status(const char *english, bool error)
 {
-    lv_obj_t *panel = lv_event_get_user_data(event);
-    show_modal(panel);
+    if (!settings_hint)
+        return;
+    lv_label_set_text(settings_hint, english);
+    carplay_ui_style(settings_hint, error ? CARPLAY_STYLE_WARN_TEXT : CARPLAY_STYLE_FAINT);
 }
-#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
-static void select_display(lv_event_t *event)
+
+static void volume_event(lv_event_t *event)
 {
-    display_choice = (carplay_display_mode_t)(uintptr_t)lv_event_get_user_data(event);
-    for (unsigned i = 0; i < 3; ++i)
-        lv_obj_set_style_bg_color(display_modes[i], lv_color_hex(i == (unsigned)display_choice ? 0x236859 : 0x20344B), 0);
-    lv_label_set_text(display_note, "Resolution changes reconnect CarPlay.");
-}
-void carplay_launcher_open_display_settings(void)
-{
-    demo_status_t status = { 0 };
-    if (carplay_connection_status(&status))
-        display_choice = status.display_requested;
-    /* Pause composition only while the shared menu is visible. The selected
-     * receiver geometry and wired/wireless transport do not change here. */
-    carplay_fusion_ui_show_launcher();
-    lv_obj_add_flag(settings_panel, LV_OBJ_FLAG_HIDDEN);
-    for (unsigned i = 0; i < 3; ++i)
-        lv_obj_set_style_bg_color(display_modes[i], lv_color_hex(i == (unsigned)display_choice ? 0x236859 : 0x20344B), 0);
-    lv_label_set_text(display_note, status.display_reconfiguring ? "Reconnecting..." : "Resolution changes reconnect CarPlay.");
-    show_modal(display_panel);
-}
-static void open_display(lv_event_t *event)
-{
-    (void)event;
-    carplay_launcher_open_display_settings();
-}
-static void resume_display(lv_event_t *event)
-{
-    (void)event;
-    lv_obj_add_flag(display_panel, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(settings_panel, LV_OBJ_FLAG_HIDDEN);
-    update_scrim();
-    carplay_fusion_ui_resume();
-}
-static void apply_display(lv_event_t *event)
-{
-    if (!carplay_connection_set_display_mode(display_choice))
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_PRESSED)
     {
-        lv_label_set_text(display_note, "Close device/audio tools first.");
+        volume_dragging = true;
         return;
     }
-    if (carplay_preferences_error())
+    unsigned value = (unsigned)lv_slider_get_value(volume_slider);
+    if (code == LV_EVENT_RELEASED)
+        volume_dragging = false;
+    if (code != LV_EVENT_VALUE_CHANGED && code != LV_EVENT_RELEASED)
+        return;
+    char buffer[48];
+    snprintf(buffer, sizeof(buffer), TR("Volume %u%%"), value);
+    lv_label_set_text(volume_value, buffer);
+    if (!carplay_volume_set(value))
     {
-        lv_label_set_text(display_note, "Settings not saved.");
+        settings_status("Not supported on this device", true);
         return;
     }
-    resume_display(event);
+    if (code == LV_EVENT_RELEASED)
+    {
+        int result = carplay_preferences_set(CARPLAY_PREF_VOLUME, value);
+        settings_status(result ? "Settings not saved." : "Settings saved.", result != 0);
+    }
 }
-#endif
+
+static void brightness_event(lv_event_t *event)
+{
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_PRESSED)
+    {
+        brightness_dragging = true;
+        return;
+    }
+    unsigned value = (unsigned)lv_slider_get_value(brightness_slider);
+    if (code == LV_EVENT_RELEASED)
+        brightness_dragging = false;
+    if (code != LV_EVENT_VALUE_CHANGED && code != LV_EVENT_RELEASED)
+        return;
+    char buffer[48];
+    snprintf(buffer, sizeof(buffer), TR("Brightness %u%%"), value);
+    lv_label_set_text(brightness_value, buffer);
+    if (!carplay_backlight_set(value))
+    {
+        settings_status("Not supported on this device", true);
+        return;
+    }
+    if (code == LV_EVENT_RELEASED)
+    {
+        int result = carplay_preferences_set(CARPLAY_PREF_BRIGHTNESS, value);
+        settings_status(result ? "Settings not saved." : "Settings saved.", result != 0);
+    }
+}
+
+static void apply_segments(lv_obj_t * const *buttons, unsigned count, unsigned selected)
+{
+    for (unsigned i = 0; i < count; ++i)
+    {
+        if (!buttons[i])
+            continue;
+        carplay_ui_style(buttons[i], i == selected ? CARPLAY_STYLE_SEGMENT_ON
+                                                   : CARPLAY_STYLE_SEGMENT);
+        lv_obj_t *caption = lv_obj_get_child(buttons[i], 0);
+        if (caption)
+            carplay_ui_style(caption, i == selected ? CARPLAY_STYLE_SEGMENT_TEXT_ON
+                                                    : CARPLAY_STYLE_SEGMENT_TEXT);
+    }
+}
+
+static lv_obj_t *segment(lv_obj_t *parent, const char *caption, int x, int y, int w, int h,
+                         lv_event_cb_t callback, void *user, const lv_font_t *font)
+{
+    lv_obj_t *obj = panel(parent, x, y, w, h, 9, CARPLAY_STYLE_SEGMENT);
+    lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(obj, callback, LV_EVENT_CLICKED, user);
+    lv_obj_t *caption_obj = text(obj, caption, 0, 0, 0, font, CARPLAY_STYLE_SEGMENT_TEXT);
+    lv_obj_center(caption_obj);
+    return obj;
+}
+
+static void select_theme(lv_event_t *event)
+{
+    unsigned index = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    if (index > 1)
+        return; /* Auto needs an ambient-light input this board does not have. */
+    theme_choice = index;
+    carplay_ui_set_dark(index == 1);
+    int result = carplay_preferences_set(CARPLAY_PREF_THEME, index);
+    apply_segments(theme_buttons, 3, theme_choice);
+    settings_status(result ? "Settings not saved." : "Settings saved.", result != 0);
+}
+
 static void select_language(lv_event_t *event)
 {
     bool chinese = (uintptr_t)lv_event_get_user_data(event) != 0;
     carplay_ui_set_chinese(chinese);
     int result = carplay_preferences_set(CARPLAY_PREF_LANGUAGE, chinese ? 1U : 0U);
-    lv_label_set_text(settings_note, result ? "Settings not saved." : "Settings saved.");
-    for (unsigned i = 0; i < 2; ++i)
-        lv_obj_set_style_bg_color(language_buttons[i], lv_color_hex(i == (unsigned)chinese ? 0x236859 : 0x20344B), 0);
+    apply_segments(language_buttons, 2, chinese ? 0U : 1U);
+    settings_status(result ? "Settings not saved." : "Settings saved.", result != 0);
     update_page(NULL);
 }
 
-static void toggle_wireless(lv_event_t *event)
+static void select_display(lv_event_t *event)
 {
-    (void)event;
-    demo_status_t state;
-    if (carplay_connection_status(&state) &&
-        carplay_connection_set_wireless_enabled(!state.wireless_enabled))
-        lv_label_set_text(settings_note, carplay_preferences_error() ? "Settings not saved." : "Settings saved.");
-    else
-        lv_label_set_text(settings_note, "Wait until the connection is idle, then try again.");
-}
-static void toggle_microphone(lv_event_t *event)
-{
-    (void)event;
-#if defined(RTCARPLAY_MICROPHONE)
-    carplay_audio_input_mute(!carplay_audio_input_is_muted());
-    int result = carplay_preferences_set(CARPLAY_PREF_MIC_MUTED, carplay_audio_input_is_muted() ? 1U : 0U);
-    lv_label_set_text(settings_note, result ? "Settings not saved." : "Settings saved.");
+    unsigned index = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    display_choice = index;
+    apply_segments(display_buttons, 2, display_choice);
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    carplay_display_mode_t mode = index ? CARPLAY_FUSION : CARPLAY_FULLSCREEN;
+    if (!carplay_connection_set_display_mode(mode))
+    {
+        settings_status("Settings not saved.", true);
+        return;
+    }
+    int result = carplay_preferences_error();
+    settings_status(result ? "Settings not saved." : "Settings saved.", result != 0);
+    lv_label_set_text(display_note, "");
+#else
+    /* This image has no single-screen compositor to switch. */
+    settings_status("Not supported on this device", true);
 #endif
 }
-/* Names are presentation only; deletion still uses the validated exact key. */
-static void device_title(const char *name, char *out, size_t size)
+
+typedef void (*icon_fn)(lv_obj_t *, int, int, int, int, carplay_style_role_t);
+
+static void build_slider_card(lv_obj_t *parent, int y, const char *title, icon_fn icon,
+                              lv_obj_t **value_out, lv_obj_t **slider_out,
+                              unsigned minimum, unsigned maximum,
+                              lv_event_cb_t callback, const char *hint)
 {
-    size_t n = strlen(name);
-    if (!strcmp(name, "Bluetooth bonds"))
-        snprintf(out, size, "%s", TR("All Bluetooth phones"));
-    else if (!strcmp(name, "rt-carplay-pairings.bin"))
-        snprintf(out, size, "%s", TR("CarPlay trusted phones"));
-    else if (n > 26 && !strncmp(name, "rt-carplay-usb-", 14))
-        snprintf(out, size, TR("Wired iPhone  /  %.8s"), name + n - 12);
-    else
-        snprintf(out, size, "%s", TR("Saved phone record"));
-}
-static void answer_bluetooth(lv_event_t *event)
-{
-    carplay_connection_pairing_reply(visible_pairing_request,
-                                     lv_event_get_target(event) == bt_accept);
-    lv_obj_add_flag(bt_panel, LV_OBJ_FLAG_HIDDEN);
-    update_scrim();
-}
-static void cancel_forget(lv_event_t *event)
-{
-    (void)event;
-    lv_obj_add_flag(confirm_panel, LV_OBJ_FLAG_HIDDEN);
-}
-static void confirm_forget(lv_event_t *event)
-{
-    (void)event;
-    carplay_connection_files_forget(selected_file);
-    lv_obj_add_flag(confirm_panel, LV_OBJ_FLAG_HIDDEN);
-    lv_label_set_text(file_note, "Forgetting selected record and restarting receiver...");
-}
-static void select_file(lv_event_t *event)
-{
-    lv_obj_t *target = lv_event_get_target(event);
-    const char *name = lv_obj_get_user_data(target);
-    snprintf(selected_file, sizeof(selected_file), "%s", name);
-    char title[96];
-    device_title(name, title, sizeof(title));
-    lv_label_set_text_fmt(confirm_text,
-                          "Forget %s?\n\n%s", title,
-                          !strcmp(name, "Bluetooth bonds") ? TR("All Bluetooth phones will need to pair again.") : !strcmp(name, "rt-carplay-pairings.bin") ? TR("All CarPlay phones will need to pair again.")
-                                                                                                                                                            : TR("This iPhone may ask you to tap Trust again."));
-    lv_obj_remove_flag(confirm_panel, LV_OBJ_FLAG_HIDDEN);
-}
-static void select_bluetooth_bonds(lv_event_t *event)
-{
-    lv_obj_set_user_data(lv_event_get_target(event), "Bluetooth bonds");
-    select_file(event);
-}
-static void update_files(void)
-{
-    static unsigned revision;
-    /* UI owns this copy: button user-data stays stable until list rebuilt. */
-    static carplay_pair_file_t visible[CARPLAY_PAIR_FILES_MAX];
-    unsigned count;
-    bool more;
-    int result;
-    if (!carplay_connection_files_snapshot(&revision, visible, &count, &more, &result))
-        return;
-    lv_obj_clean(file_list);
-    for (unsigned i = 0; i < count; ++i)
-    {
-        char text[140];
-        device_title(visible[i].name, text, sizeof(text));
-        lv_obj_t *row = button(file_list, text, 0, (int)i * 50,
-                               lv_obj_get_width(file_list) - 20, select_file);
-        lv_obj_set_user_data(row, visible[i].name);
-    }
-    lv_label_set_text_fmt(file_note,
-                          "Saved devices: %u%s | Error %d",
-                          count, more ? "+" : "", result);
+    panel(parent, 64, y, 438, 177, 21, CARPLAY_STYLE_CARD);
+    icon(parent, 87, y + 23, 24, 24, CARPLAY_STYLE_GRAPHIC);
+    text(parent, title, 132, y + 30, 300, &carplay_ui_21, CARPLAY_STYLE_TEXT);
+    *value_out = text(parent, "", 330, y + 33, 136, &carplay_ui_18, CARPLAY_STYLE_TEXT);
+    lv_obj_set_style_text_align(*value_out, LV_TEXT_ALIGN_RIGHT, 0);
+
+    lv_obj_t *slider = lv_slider_create(parent);
+    lv_obj_set_pos(slider, 95, y + 84);
+    lv_obj_set_size(slider, 367, 20);
+    lv_slider_set_range(slider, (int32_t)minimum, (int32_t)maximum);
+    lv_obj_set_style_pad_top(slider, 6, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(slider, 6, LV_PART_MAIN);
+    /* An 8 px track: the radius must fit its short side, otherwise LVGL's
+     * indicator clipping path misplaces the mask and corrupts the layer. */
+    lv_obj_set_style_radius(slider, 4, LV_PART_MAIN);
+    lv_obj_set_style_radius(slider, 4, LV_PART_INDICATOR);
+    carplay_ui_style_part(slider, CARPLAY_STYLE_BAR_BG, LV_PART_MAIN);
+    carplay_ui_style_part(slider, CARPLAY_STYLE_BAR_FILL, LV_PART_INDICATOR);
+    lv_obj_set_style_pad_all(slider, 0, LV_PART_KNOB);
+    lv_obj_set_style_radius(slider, LV_RADIUS_CIRCLE, LV_PART_KNOB);
+    carplay_ui_style_part(slider, CARPLAY_STYLE_SLIDER_KNOB, LV_PART_KNOB);
+    lv_obj_add_event_cb(slider, callback, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_add_event_cb(slider, callback, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(slider, callback, LV_EVENT_RELEASED, NULL);
+    *slider_out = slider;
+
+    text(parent, hint, 93, y + 137, 380, &carplay_ui_14, CARPLAY_STYLE_MUTED);
 }
 
-static void network_check_now(lv_event_t *event)
+static void build_settings(lv_obj_t *parent)
 {
-    (void)event;
-    (void)carplay_internet_check(); /* Queue only; never wait in the LVGL task. */
+    build_header(parent, "Settings");
+
+    build_slider_card(parent, 149, "Media volume", icon_speaker, &volume_value,
+                      &volume_slider, 0, CARPLAY_PREF_VOLUME_MAX, volume_event,
+                      "Adjust local audio output");
+    build_slider_card(parent, 345, "Display brightness", icon_sun, &brightness_value,
+                      &brightness_slider, CARPLAY_PREF_BRIGHTNESS_MIN,
+                      CARPLAY_PREF_BRIGHTNESS_MAX, brightness_event,
+                      "Adjust panel backlight");
+
+    /* Appearance */
+    panel(parent, 520, 149, 440, 90, 17, CARPLAY_STYLE_CARD);
+    text(parent, "Appearance", 540, 163, 120, &carplay_ui_18, CARPLAY_STYLE_TEXT);
+    panel(parent, 664, 162, 273, 55, 11, CARPLAY_STYLE_SEGMENT);
+    theme_buttons[0] = segment(parent, "Light", 666, 164, 89, 50, select_theme, (void *)0,
+                               &carplay_ui_15);
+    theme_buttons[1] = segment(parent, "Dark", 755, 164, 89, 50, select_theme, (void *)1,
+                               &carplay_ui_15);
+    theme_buttons[2] = segment(parent, "Auto", 844, 164, 89, 50, select_theme, (void *)2,
+                               &carplay_ui_15);
+    lv_obj_add_state(theme_buttons[2], LV_STATE_DISABLED);
+
+    /* Language */
+    panel(parent, 520, 249, 440, 90, 17, CARPLAY_STYLE_CARD);
+    text(parent, "Language", 540, 264, 140, &carplay_ui_18, CARPLAY_STYLE_TEXT);
+    panel(parent, 687, 262, 250, 55, 11, CARPLAY_STYLE_SEGMENT);
+    language_buttons[0] = segment(parent, "简体中文", 689, 264, 123, 50, select_language,
+                                  (void *)1, &carplay_ui_15);
+    language_buttons[1] = segment(parent, "English", 812, 264, 123, 50, select_language,
+                                  (void *)0, &carplay_ui_15);
+
+    /* CarPlay display */
+    panel(parent, 520, 349, 440, 101, 17, CARPLAY_STYLE_CARD);
+    text(parent, "CarPlay display", 539, 362, 150, &carplay_ui_18, CARPLAY_STYLE_TEXT);
+    panel(parent, 684, 361, 252, 53, 11, CARPLAY_STYLE_SEGMENT);
+    display_buttons[0] = segment(parent, "Fullscreen", 686, 363, 124, 49, select_display,
+                                 (void *)0, &carplay_ui_15);
+    display_buttons[1] = segment(parent, "Fusion", 810, 363, 124, 49, select_display,
+                                 (void *)1, &carplay_ui_15);
+    display_note = text(parent, "", 539, 424, 400, &carplay_ui_14, CARPLAY_STYLE_FAINT);
+
+    /* OTA entry: children sit inside the clickable row so the whole card,
+     * label included, routes to the page. */
+    lv_obj_t *ota_row = panel(parent, 520, 461, 440, 61, 15, CARPLAY_STYLE_ACCENT_CARD);
+    lv_obj_add_flag(ota_row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(ota_row, open_ota, LV_EVENT_CLICKED, NULL);
+    icon_download(ota_row, 18, 17, 22, 24, CARPLAY_STYLE_GRAPHIC);
+    text(ota_row, "System update", 60, 25, 300, &carplay_ui_18, CARPLAY_STYLE_TEXT);
+    chevron(ota_row, 394, 19, 18, 22, false, CARPLAY_STYLE_LINE_TEXT);
+
+    settings_hint = text(parent, "Changes apply immediately and survive reboot", 64, 545,
+                         720, &carplay_ui_14, CARPLAY_STYLE_FAINT);
 }
+
+/* ---------------- OTA ---------------- */
 
 #if defined(RTCARPLAY_OTA)
 static void ota_check_now(lv_event_t *event)
 {
     (void)event;
-    ota_notice = carplay_ota_check() == RT_EOK ? NULL : "Update service busy.";
+    (void)carplay_ota_check(); /* Queue only; never wait in the LVGL task. */
 }
-/* Nightly channel: the download starts only after this explicit confirmation. */
+
 static void ota_install_now(lv_event_t *event)
 {
     (void)event;
@@ -504,129 +833,429 @@ static void ota_install_now(lv_event_t *event)
     if (ota.busy || ota.state != CARPLAY_OTA_AVAILABLE)
         return;
     snprintf(ota_confirm_commit, sizeof(ota_confirm_commit), "%s", ota.remote_commit);
-    char target[48];
-    if (ota.remote_commit[0])
-        snprintf(target, sizeof(target), "preview build %.8s", ota.remote_commit);
-    else
-        snprintf(target, sizeof(target), "version %s", ota.remote);
-    lv_label_set_text_fmt(ota_confirm_text,
-                          "Install %s?\n\nCurrent: %s (%.8s)\n\nDisconnect CarPlay. Keep power connected.\nRestart after installation.",
-                          target, ota.current, ota.current_commit);
-    lv_obj_remove_flag(ota_confirm_panel, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(ota_confirm_panel);
-    update_scrim();
+    char body[192];
+    snprintf(body, sizeof(body), TR("Version %s"), ota.remote[0] ? ota.remote : ota.remote_commit);
+    lv_label_set_text_fmt(
+        ota_confirm_text, "%s\n\n%s\n\n%s", body,
+        TR("Disconnect CarPlay and keep power connected before installing."),
+        TR("Install this update and restart?"));
+    show_modal(ota_confirm_panel);
 }
+
 static void ota_confirm_install(lv_event_t *event)
 {
     (void)event;
     lv_obj_add_flag(ota_confirm_panel, LV_OBJ_FLAG_HIDDEN);
     update_scrim();
-    ota_notice = carplay_ota_install(ota_confirm_commit) == RT_EOK ? NULL : "Update changed or busy. Check again.";
+    if (carplay_ota_install(ota_confirm_commit) != RT_EOK)
+        lv_label_set_text(ota_state, "Update changed or busy. Check again.");
 }
+
 static void ota_confirm_cancel(lv_event_t *event)
 {
     (void)event;
     lv_obj_add_flag(ota_confirm_panel, LV_OBJ_FLAG_HIDDEN);
     update_scrim();
 }
-/* Mirrors the OTA service state; runs in the GUI timer only. */
-static void ota_update(void)
-{
-    if (lv_obj_has_flag(settings_panel, LV_OBJ_FLAG_HIDDEN))
-        return;
 
-    carplay_ota_status_t ota;
-    carplay_ota_status(&ota);
-    lv_label_set_text_fmt(ota_version_label, "Firmware %s (%.8s) | %s",
-                          ota.current,
-                          ota.current_commit[0] ? ota.current_commit : "unknown",
-                          ota.slot);
-    char text[160];
-    switch (ota.state)
+static const char *ota_state_text(const carplay_ota_status_t *ota, char *buffer, size_t size)
+{
+    switch (ota->state)
     {
     case CARPLAY_OTA_CHECKING:
-        snprintf(text, sizeof(text), "Checking the release server...");
-        break;
+        return TR("Checking the update service...");
+    case CARPLAY_OTA_UP_TO_DATE:
+        return TR("Up to date");
+    case CARPLAY_OTA_AVAILABLE:
+        return TR("Update available");
     case CARPLAY_OTA_DOWNLOADING:
     case CARPLAY_OTA_APPLYING:
-        if (ota.progress >= 0)
-            snprintf(text, sizeof(text), "%s  %d%%", TR(ota.state == CARPLAY_OTA_DOWNLOADING ? "Downloading" : "Installing"), ota.progress);
-        else
-            snprintf(text, sizeof(text), "%s", TR(ota.state == CARPLAY_OTA_DOWNLOADING ? "Downloading" : "Installing"));
-        break;
-    case CARPLAY_OTA_UP_TO_DATE:
-    case CARPLAY_OTA_AVAILABLE:
-    case CARPLAY_OTA_FAILED:
+        if (ota->progress >= 0)
+        {
+            snprintf(buffer, size, "%s  ", TR(ota->state == CARPLAY_OTA_DOWNLOADING ? "Downloading" : "Installing"));
+            size_t used = strlen(buffer);
+            snprintf(buffer + used, size - used, TR("progress %d%%"), ota->progress);
+            return buffer;
+        }
+        return TR(ota->state == CARPLAY_OTA_DOWNLOADING ? "Downloading" : "Installing");
     case CARPLAY_OTA_REBOOTING:
-        snprintf(text, sizeof(text), "%s", TR(ota.state == CARPLAY_OTA_UP_TO_DATE ? "Up to date" : ota.state == CARPLAY_OTA_AVAILABLE ? "Update available"
-                                                                                               : ota.state == CARPLAY_OTA_FAILED      ? "Update failed"
-                                                                                                                                      : "Restarting"));
-        break;
+        return TR("Restarting");
+    case CARPLAY_OTA_FAILED:
+        return TR("Update failed");
     default:
-        snprintf(text, sizeof(text),
-                 "Not checked yet. Connect Ethernet, then check for updates.");
-        break;
+        return TR("Not checked");
     }
-    lv_label_set_text(ota_state_label, ota_notice ? ota_notice : text);
-    lv_obj_set_style_text_color(ota_state_label, lv_color_hex(0xC1CFDF), 0);
-    if (ota.state == CARPLAY_OTA_UP_TO_DATE || ota.state == CARPLAY_OTA_AVAILABLE)
-        lv_obj_set_style_text_color(ota_state_label, lv_color_hex(0x58E0BF), 0);
-    else if (ota.state == CARPLAY_OTA_FAILED)
-        lv_obj_set_style_text_color(ota_state_label, lv_color_hex(0xE08A8A), 0);
-    bool busy = ota.busy || !lv_obj_has_flag(ota_confirm_panel, LV_OBJ_FLAG_HIDDEN);
-    if (network_ready && !busy)
+}
+
+static void ota_update(void)
+{
+    carplay_ota_status_t ota;
+    carplay_ota_status(&ota);
+
+    set_text_if_changed(ota_version, ota.current[0] ? ota.current : "unknown");
+    char line[160];
+    if (ota.remote[0])
+        snprintf(line, sizeof(line), "%s -> %s", ota.current[0] ? ota.current : "unknown",
+                 ota.remote);
+    else
+        snprintf(line, sizeof(line), TR("Slot %s"), ota.slot);
+    set_text_if_changed(ota_detail, line);
+
+    char state_buffer[96];
+    set_text_if_changed(ota_state, ota_state_text(&ota, state_buffer, sizeof(state_buffer)));
+
+    bool show_progress = (ota.state == CARPLAY_OTA_DOWNLOADING ||
+                          ota.state == CARPLAY_OTA_APPLYING) &&
+                         ota.progress >= 0;
+    if (show_progress)
+    {
+        lv_obj_remove_flag(ota_progress, LV_OBJ_FLAG_HIDDEN);
+        lv_bar_set_value(ota_progress, ota.progress, LV_ANIM_OFF);
+    }
+    else
+        lv_obj_add_flag(ota_progress, LV_OBJ_FLAG_HIDDEN);
+
+    bool busy = ota.busy != 0;
+    if (!busy && network_ready)
         lv_obj_remove_state(ota_check_button, LV_STATE_DISABLED);
     else
         lv_obj_add_state(ota_check_button, LV_STATE_DISABLED);
-    if (network_ready && !busy && ota.state == CARPLAY_OTA_AVAILABLE)
+    if (!busy && network_ready && ota.state == CARPLAY_OTA_AVAILABLE)
+    {
+        lv_obj_remove_flag(ota_install_button, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_state(ota_install_button, LV_STATE_DISABLED);
+    }
     else
+    {
+        lv_obj_add_flag(ota_install_button, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_state(ota_install_button, LV_STATE_DISABLED);
+    }
+    set_text_if_changed(ota_backend, network_ready ? "Update backend available"
+                                                   : "Update backend unavailable");
+}
+#else
+static void ota_update(void)
+{
+    if (!ota_state)
+        return;
+    set_text_if_changed(ota_state, "Update backend unavailable");
+    lv_obj_add_state(ota_check_button, LV_STATE_DISABLED);
+    lv_obj_add_flag(ota_install_button, LV_OBJ_FLAG_HIDDEN);
 }
 #endif
 
-static void network_update(void)
+static void build_ota(lv_obj_t *parent)
 {
-    carplay_internet_status_t n;
-    carplay_internet_status(&n);
-    network_ready = n.available && n.route_ready;
-    const char *state = !n.available ? "Unavailable" : !n.device       ? "No adapter"
-                                                   : !n.link           ? "Cable disconnected"
-                                                   : !n.addressed      ? "Getting address"
-                                                   : !n.route_ready    ? "No gateway"
-                                                   : n.checking        ? "Checking..."
-                                                   : !n.checked        ? "Not checked"
-                                                   : n.reachable       ? "Internet verified"
-                                                   : n.age_ms > 45000U ? "Check expired"
-                                                                       : "Check failed";
-    lv_label_set_text_fmt(network_summary, "Ethernet: %s", TR(state));
-    lv_obj_set_style_text_color(network_summary, lv_color_hex(n.reachable ? 0x58E0BF : 0xC1CFDF), 0);
-    if (n.available && n.route_ready && !n.checking)
-        lv_obj_remove_state(network_check, LV_STATE_DISABLED);
-    else
-        lv_obj_add_state(network_check, LV_STATE_DISABLED);
-    char age[32];
-    if (n.checked)
-        snprintf(age, sizeof(age), "%lu s", (unsigned long)(n.age_ms / 1000U));
-    else
-        snprintf(age, sizeof(age), "%s", TR("Never"));
-    lv_label_set_text_fmt(network_note, "HTTP 204: %s",
-                          n.available ? n.probe_url : "Not built or service unavailable");
-    lv_label_set_text_fmt(network_detail,
-                          "%s\n\nIPv4       %s\nMask      %s\nGateway %s\nDNS       %s\n\nHTTP 204: %s | %s\nCarPlay sharing: %s",
-                          TR(state), n.address, n.mask, n.gateway, n.dns, TR(n.checking ? "Running" : n.checked ? (n.reachable ? "Passed" : "Failed / expired")
-                                                                                                                : "Not run"),
-                          age, TR(n.sharing ? "Active" : "Inactive"));
+    build_header(parent, "System update");
+
+    panel(parent, 64, 153, 896, 282, 22, CARPLAY_STYLE_CARD);
+    panel(parent, 93, 181, 76, 76, 19, CARPLAY_STYLE_TILE);
+    icon_download(parent, 118, 205, 26, 28, CARPLAY_STYLE_GRAPHIC);
+    text(parent, "Installed version", 194, 199, 400, &carplay_ui_17, CARPLAY_STYLE_MUTED);
+    ota_version = text(parent, "unknown", 193, 231, 420, &carplay_ui_34, CARPLAY_STYLE_TEXT);
+    ota_detail = text(parent, "", 193, 281, 700, &carplay_ui_14, CARPLAY_STYLE_FAINT);
+    divider(parent, 97, 323, 830, 1);
+
+    ota_state = text(parent, "Not checked", 97, 354, 290, &carplay_ui_21,
+                     CARPLAY_STYLE_MUTED);
+
+    ota_progress = lv_bar_create(parent);
+    lv_obj_remove_flag(ota_progress, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_pos(ota_progress, 97, 388);
+    lv_obj_set_size(ota_progress, 540, 6);
+    lv_bar_set_range(ota_progress, 0, 100);
+    lv_obj_set_style_radius(ota_progress, 3, 0);
+    lv_obj_set_style_radius(ota_progress, 3, LV_PART_INDICATOR);
+    carplay_ui_style_part(ota_progress, CARPLAY_STYLE_BAR_BG, LV_PART_MAIN);
+    carplay_ui_style_part(ota_progress, CARPLAY_STYLE_BAR_FILL, LV_PART_INDICATOR);
+    lv_obj_add_flag(ota_progress, LV_OBJ_FLAG_HIDDEN);
+
+#if defined(RTCARPLAY_OTA)
+    ota_install_button = button_text(parent, "Install update", 403, 351, 250, 59, 14,
+                                     CARPLAY_STYLE_ACCENT_CARD, CARPLAY_STYLE_ACCENT_TEXT,
+                                     &carplay_ui_18, ota_install_now, NULL);
+    lv_obj_add_flag(ota_install_button, LV_OBJ_FLAG_HIDDEN);
+    ota_check_button = button_text(parent, "Check for updates", 667, 351, 258, 59, 14,
+                                   CARPLAY_STYLE_ACCENT_CARD, CARPLAY_STYLE_ACCENT_TEXT,
+                                   &carplay_ui_18, ota_check_now, NULL);
+    icon_refresh(parent, 686, 369, 22, 22, CARPLAY_STYLE_GRAPHIC);
+#else
+    ota_install_button = panel(parent, 403, 351, 250, 59, 14, CARPLAY_STYLE_ACCENT_CARD);
+    lv_obj_add_flag(ota_install_button, LV_OBJ_FLAG_HIDDEN);
+    ota_check_button = button_text(parent, "Check for updates", 667, 351, 258, 59, 14,
+                                   CARPLAY_STYLE_ACCENT_CARD, CARPLAY_STYLE_ACCENT_TEXT,
+                                   &carplay_ui_18, NULL, NULL);
+#endif
+    lv_obj_add_state(ota_check_button, LV_STATE_DISABLED);
+
+    panel(parent, 64, 457, 896, 88, 17, CARPLAY_STYLE_CARD_ALT);
+    panel(parent, 90, 480, 22, 22, LV_RADIUS_CIRCLE, CARPLAY_STYLE_OUTLINE_FAINT);
+    stroke(parent, 98, 486, 5, 5, LV_RADIUS_CIRCLE, CARPLAY_STYLE_DOT_OFF);
+    stroke(parent, 98, 494, 5, 9, 2, CARPLAY_STYLE_DOT_OFF);
+    text(parent, "Use the existing firmware updater", 134, 479, 700, &carplay_ui_17,
+         CARPLAY_STYLE_TEXT);
+    ota_backend = text(parent, "Update backend available", 134, 511, 700, &carplay_ui_14,
+                       CARPLAY_STYLE_MUTED);
+}
+
+/* ---------------- modals ---------------- */
+
+static void answer_bluetooth(lv_event_t *event);
+
+static void build_modals(lv_obj_t *screen)
+{
+    modal_scrim = lv_obj_create(screen);
+    lv_obj_set_size(modal_scrim, lv_display_get_horizontal_resolution(NULL),
+                    lv_display_get_vertical_resolution(NULL));
+    lv_obj_set_style_bg_color(modal_scrim, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(modal_scrim, LV_OPA_60, 0);
+    lv_obj_set_style_border_width(modal_scrim, 0, 0);
+    lv_obj_set_style_pad_all(modal_scrim, 0, 0);
+    lv_obj_add_flag(modal_scrim, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(modal_scrim, LV_OBJ_FLAG_SCROLLABLE);
+
+#if defined(RTCARPLAY_OTA)
+    ota_confirm_panel = panel(screen, 80, 120, 864, 360, 24, CARPLAY_STYLE_CARD);
+    text(ota_confirm_panel, "Install this update and restart?", 24, 26, 800,
+         &carplay_ui_21, CARPLAY_STYLE_TEXT);
+    ota_confirm_text = text(ota_confirm_panel, "", 24, 76, 800, &carplay_ui_17,
+                            CARPLAY_STYLE_MUTED);
+    lv_obj_set_style_text_line_space(ota_confirm_text, 8, 0);
+    lv_obj_set_height(ota_confirm_text, 180);
+    lv_label_set_long_mode(ota_confirm_text, LV_LABEL_LONG_WRAP);
+    button_text(ota_confirm_panel, "Cancel", 24, 276, 220, 56, 14, CARPLAY_STYLE_CARD_ALT,
+                CARPLAY_STYLE_TEXT, &carplay_ui_18, ota_confirm_cancel, NULL);
+    button_text(ota_confirm_panel, "Install and restart", 264, 276, 320, 56, 14,
+                CARPLAY_STYLE_ACCENT_CARD, CARPLAY_STYLE_ACCENT_TEXT, &carplay_ui_18,
+                ota_confirm_install, NULL);
+    lv_obj_add_flag(ota_confirm_panel, LV_OBJ_FLAG_HIDDEN);
+#endif
+
+    bt_panel = panel(screen, 80, 120, 864, 360, 24, CARPLAY_STYLE_CARD);
+    bt_text = text(bt_panel, "", 24, 32, 800, &carplay_ui_21, CARPLAY_STYLE_TEXT);
+    lv_obj_set_style_text_line_space(bt_text, 10, 0);
+    lv_obj_set_height(bt_text, 200);
+    lv_label_set_long_mode(bt_text, LV_LABEL_LONG_WRAP);
+    bt_accept = button_text(bt_panel, "Numbers match / Allow", 24, 276, 360, 56, 14,
+                            CARPLAY_STYLE_ACCENT_CARD, CARPLAY_STYLE_ACCENT_TEXT,
+                            &carplay_ui_18, answer_bluetooth, NULL);
+    button_text(bt_panel, "Cancel pairing", 404, 276, 260, 56, 14, CARPLAY_STYLE_CARD_ALT,
+                CARPLAY_STYLE_TEXT, &carplay_ui_18, answer_bluetooth, NULL);
+    lv_obj_add_flag(bt_panel, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void answer_bluetooth(lv_event_t *event)
+{
+    carplay_connection_pairing_reply(visible_pairing_request,
+                                     lv_event_get_target(event) == bt_accept);
+    lv_obj_add_flag(bt_panel, LV_OBJ_FLAG_HIDDEN);
+    update_scrim();
+}
+
+/* ---------------- live controls ---------------- */
+
+static void runtime_controls(void)
+{
+    static bool backlight_restored;
+    static bool volume_attempted;
+    static unsigned last_volume = UINT32_MAX;
+    static unsigned last_brightness = UINT32_MAX;
+
+    unsigned stored_brightness = carplay_preferences_get(CARPLAY_PREF_BRIGHTNESS, 72U);
+    if (!backlight_restored)
+    {
+        backlight_restored = true;
+        carplay_backlight_restore(stored_brightness);
+    }
+
+    if (!volume_attempted && carplay_volume_available())
+    {
+        /* Persisted media volume is re-applied once to the real codec; the
+         * readback below then labels the control with the actual value. */
+        volume_attempted = true;
+        (void)carplay_volume_set(carplay_preferences_get(CARPLAY_PREF_VOLUME, 60U));
+    }
+    if (volume_slider && !volume_dragging)
+    {
+        unsigned actual = 0;
+        if (carplay_volume_available() && carplay_volume_get(&actual))
+        {
+            if (actual != last_volume || lv_obj_has_state(volume_slider, LV_STATE_DISABLED))
+            {
+                lv_slider_set_value(volume_slider, (int32_t)actual, LV_ANIM_OFF);
+                last_volume = actual;
+                lv_obj_remove_state(volume_slider, LV_STATE_DISABLED);
+                char buffer[48];
+                snprintf(buffer, sizeof(buffer), TR("Volume %u%%"), actual);
+                lv_label_set_text(volume_value, buffer);
+            }
+        }
+        else if (!lv_obj_has_state(volume_slider, LV_STATE_DISABLED))
+        {
+            lv_obj_add_state(volume_slider, LV_STATE_DISABLED);
+            lv_label_set_text(volume_value, "Not supported on this device");
+        }
+    }
+    if (brightness_slider && !brightness_dragging)
+    {
+        unsigned actual = 0;
+        if (carplay_backlight_available() && carplay_backlight_get(&actual))
+        {
+            if (actual != last_brightness || lv_obj_has_state(brightness_slider, LV_STATE_DISABLED))
+            {
+                lv_slider_set_value(brightness_slider, (int32_t)actual, LV_ANIM_OFF);
+                last_brightness = actual;
+                lv_obj_remove_state(brightness_slider, LV_STATE_DISABLED);
+                char buffer[48];
+                snprintf(buffer, sizeof(buffer), TR("Brightness %u%%"), actual);
+                lv_label_set_text(brightness_value, buffer);
+            }
+        }
+        else if (!lv_obj_has_state(brightness_slider, LV_STATE_DISABLED))
+        {
+            lv_obj_add_state(brightness_slider, LV_STATE_DISABLED);
+            lv_label_set_text(brightness_value, "Not supported on this device");
+        }
+    }
+}
+
+/* ---------------- periodic update ---------------- */
+
+static void update_dashboard(const demo_status_t *status, bool have_status)
+{
+    uint16_t speed = 0;
+    uint8_t soc = 0;
+    bool valid = false, simulated = false;
+    dashboard_sample(&speed, &soc, &valid, &simulated);
+
+    static bool shown_valid, valid_known;
+    static uint16_t shown_speed;
+    static uint8_t shown_soc;
+    if (!valid && (!valid_known || shown_valid))
+    {
+        lv_label_set_text(dash_speed, "--");
+        lv_label_set_text(dash_soc, "--");
+        lv_bar_set_value(dash_bar, 0, LV_ANIM_OFF);
+        shown_valid = false;
+        valid_known = true;
+    }
+    else if (valid && (!valid_known || !shown_valid || speed != shown_speed || soc != shown_soc))
+    {
+        char buffer[16];
+        snprintf(buffer, sizeof(buffer), "%u", speed);
+        set_text_if_changed(dash_speed, buffer);
+        snprintf(buffer, sizeof(buffer), "%u", soc);
+        set_text_if_changed(dash_soc, buffer);
+        lv_bar_set_value(dash_bar, soc, LV_ANIM_OFF);
+        shown_speed = speed;
+        shown_soc = soc;
+        shown_valid = true;
+        valid_known = true;
+    }
+
+    static bool simulated_shown = true, simulated_known;
+    if (!simulated_known || simulated != simulated_shown)
+    {
+        if (simulated)
+            lv_obj_remove_flag(dash_note, LV_OBJ_FLAG_HIDDEN);
+        else
+            lv_obj_add_flag(dash_note, LV_OBJ_FLAG_HIDDEN);
+        simulated_shown = simulated;
+        simulated_known = true;
+    }
+
+    bool connected = have_status && status->stage == DEMO_LIVE;
+    static bool shown_connected, connected_known;
+    if (!connected_known || connected != shown_connected)
+    {
+        carplay_ui_style(dash_dot, connected ? CARPLAY_STYLE_DOT_ON : CARPLAY_STYLE_DOT_OFF);
+        lv_label_set_text(dash_status, connected ? "Connected" : "Not connected");
+        shown_connected = connected;
+        connected_known = true;
+    }
+
+    char clock[16];
+    clock_text(clock, sizeof(clock));
+    set_text_if_changed(dash_clock, clock);
+}
+
+static void update_connectivity(const demo_status_t *status, bool have_status)
+{
+    bool connected = have_status && status->stage == DEMO_LIVE;
+    bool busy = have_status && (status->stage == DEMO_PAIR || status->stage == DEMO_NETWORK ||
+                                status->stage == DEMO_CONNECT);
+    static bool shown_connected, connected_known;
+    if (!connected_known || connected != shown_connected)
+    {
+        carplay_ui_style(conn_dot, connected ? CARPLAY_STYLE_DOT_ON : CARPLAY_STYLE_DOT_OFF);
+        lv_label_set_text(conn_state, connected ? "Connected"
+                                      : have_status && status->stage == DEMO_PAIR
+                                          ? "Connecting"
+                                          : "Waiting for phone");
+        shown_connected = connected;
+        connected_known = true;
+    }
+    bool disabled = lv_obj_has_state(conn_action, LV_STATE_DISABLED);
+    if (busy != disabled)
+    {
+        if (busy)
+            lv_obj_add_state(conn_action, LV_STATE_DISABLED);
+        else
+            lv_obj_remove_state(conn_action, LV_STATE_DISABLED);
+    }
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    bool resume = have_status && connected && !status->display_reconfiguring &&
+                  !carplay_launcher_video_is_active();
+    static bool shown_resume, resume_known;
+    if (!resume_known || resume != shown_resume)
+    {
+        set_text_if_changed(lv_obj_get_child(conn_action, 0),
+                            resume ? "Disconnect" : "Connect phone");
+        shown_resume = resume;
+        resume_known = true;
+    }
+#endif
+}
+
+static void update_settings_state(void)
+{
+    static unsigned last_theme = UINT32_MAX, last_language = UINT32_MAX;
+    static unsigned last_display = UINT32_MAX;
+    demo_status_t status = { 0 };
+    bool have = carplay_connection_status(&status);
+
+    (void)have;
+    if (last_theme != theme_choice)
+    {
+        apply_segments(theme_buttons, 3, theme_choice);
+        last_theme = theme_choice;
+    }
+    unsigned language = carplay_ui_is_chinese() ? 0U : 1U;
+    if (last_language != language)
+    {
+        apply_segments(language_buttons, 2, language);
+        last_language = language;
+    }
+    unsigned display = display_choice;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    if (have)
+        display = status.display_requested == CARPLAY_FULLSCREEN ? 0U : 1U;
+#endif
+    if (last_display != display)
+    {
+        apply_segments(display_buttons, 2, display);
+        last_display = display;
+    }
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    if (have && status.display_reconfiguring)
+        set_text_if_changed(display_note, "Reconnect required to apply the new layout");
+#endif
 }
 
 static void update_page(lv_timer_t *timer)
 {
     (void)timer;
-    for (unsigned i = 0; i < 2; ++i)
-        if (language_buttons[i])
-            lv_obj_set_style_bg_color(language_buttons[i], lv_color_hex(i == (unsigned)carplay_ui_is_chinese() ? 0x236859 : 0x20344B), 0);
-    /* Same GUI startup owner retries a failed worker allocation/schedule.
-     * Successful manager startup is idempotent and creates no second worker. */
+    /* Same GUI startup owner retries a failed worker allocation/schedule. */
     static bool attempted;
     static uint32_t last_attempt;
     uint32_t now = rt_tick_get_millisecond();
@@ -636,33 +1265,26 @@ static void update_page(lv_timer_t *timer)
         last_attempt = now;
         (void)carplay_connection_manager_start();
     }
-    demo_status_t s = { 0 };
-    bool have_status = carplay_connection_status(&s);
-    /* Connection success is an edge, not a permanent page lock: a later
-     * deliberate visit to the launcher can still edit settings. */
+
+    demo_status_t status = { 0 };
+    bool have_status = carplay_connection_status(&status);
     static bool was_live;
-    bool live = have_status && s.stage == DEMO_LIVE;
+    bool live = have_status && status.stage == DEMO_LIVE;
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
-    live = live && !s.display_reconfiguring;
+    live = live && !status.display_reconfiguring;
 #else
     live = live && carplay_launcher_video_is_active();
 #endif
     if (live && !was_live)
     {
-        lv_obj_t *pages[] = {
-            settings_panel,
-            diagnostics_panel,
-            network_panel,
-            bt_panel,
-#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
-            display_panel,
-#endif
+        lv_obj_t *modals[] = { bt_panel,
 #if defined(RTCARPLAY_OTA)
-            ota_confirm_panel,
+                               ota_confirm_panel,
 #endif
-        };
-        for (unsigned i = 0; i < sizeof(pages) / sizeof(pages[0]); ++i)
-            lv_obj_add_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
+                               NULL };
+        for (unsigned i = 0; i < sizeof(modals) / sizeof(modals[0]); ++i)
+            if (modals[i])
+                lv_obj_add_flag(modals[i], LV_OBJ_FLAG_HIDDEN);
         update_scrim();
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
         carplay_fusion_ui_resume();
@@ -670,34 +1292,41 @@ static void update_page(lv_timer_t *timer)
     }
     if (have_status)
         was_live = live;
+
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
     dispatch_fusion_touch(carplay_fusion_cancel_touch());
-    if (carplay_fusion_ui_update(&s))
+    if (carplay_fusion_ui_update(&status))
         return;
 #endif
-    if (!have_status)
-        return;
+    /* No invalidation while the phone owns the whole panel. */
     if (live && carplay_launcher_video_is_active())
-        return; /* No further invalidation/animation on the hidden launcher. */
-    network_update();
-    update_files();
-#if defined(RTCARPLAY_OTA)
+        return;
+
+    carplay_internet_status_t network;
+    carplay_internet_status(&network);
+    network_ready = network.available && network.route_ready;
+
+    runtime_controls();
+    update_dashboard(&status, have_status);
+    update_connectivity(&status, have_status);
+    update_settings_state();
     ota_update();
-#endif
-#if defined(RTCARPLAY_AUDIO)
-    audio_update();
-#endif
-    if (s.wireless && s.pairing.kind && s.stage != DEMO_CLOSING && s.stage != DEMO_FAILED)
+
+    if (have_status && status.wireless && status.pairing.kind &&
+        status.stage != DEMO_CLOSING && status.stage != DEMO_FAILED)
     {
-        if (visible_pairing_request != s.pairing.request)
+        if (visible_pairing_request != status.pairing.request)
         {
-            visible_pairing_request = s.pairing.request;
-            if (s.pairing.kind == RTCP_BT_PAIR_CONSENT)
+            visible_pairing_request = status.pairing.request;
+            if (status.pairing.kind == RTCP_BT_PAIR_CONSENT)
                 lv_label_set_text(bt_text, "Allow Bluetooth pairing?");
             else
                 lv_label_set_text_fmt(bt_text,
-                                      s.pairing.kind == RTCP_BT_PAIR_COMPARE ? "%06u\n\nConfirm this number on your iPhone." : "%06u\n\nEnter on your iPhone.", s.pairing.passkey);
-            if (s.pairing.kind == RTCP_BT_PAIR_DISPLAY)
+                                      status.pairing.kind == RTCP_BT_PAIR_COMPARE
+                                          ? "Confirm this number on your iPhone.\n\n%06u"
+                                          : "Enter this number on your iPhone.\n\n%06u",
+                                      status.pairing.passkey);
+            if (status.pairing.kind == RTCP_BT_PAIR_DISPLAY)
                 lv_obj_add_state(bt_accept, LV_STATE_DISABLED);
             else
                 lv_obj_remove_state(bt_accept, LV_STATE_DISABLED);
@@ -707,147 +1336,23 @@ static void update_page(lv_timer_t *timer)
     else
     {
         visible_pairing_request = 0;
-        lv_obj_add_flag(bt_panel, LV_OBJ_FLAG_HIDDEN);
-    }
-    unsigned seconds = rt_tick_get_millisecond() / 1000U;
-    lv_label_set_text_fmt(uptime_label, "UPTIME  %02u:%02u:%02u",
-                          seconds / 3600U, seconds / 60U % 60U, seconds % 60U);
-    const char *usb = !s.usb_ready ? "Starting USB service" : s.usb ? (s.wireless ? "Phone detected / queued" : "Phone detected")
-                                                                    : "Ready for a cable";
-    const char *wireless = !s.wireless_enabled ? "Paused in Settings" : !s.wireless  ? "Standby after USB session"
-                                                                    : s.bt_connected ? "Phone connected"
-                                                                    : s.bt_ready     ? "Discoverable as rt-carplay"
-                                                                                     : "Starting Bluetooth / Wi-Fi";
-    lv_label_set_text_fmt(path_labels[0], "WIRED USB\n%s", TR(usb));
-    lv_label_set_text_fmt(path_labels[1], "WIRELESS\n%s", TR(wireless));
-    lv_label_set_text_fmt(session_note, "%s\n%s",
-                          TR(s.stage == DEMO_LIVE ? "Session connected" : "One phone at a time"),
-                          TR(s.retry_seconds ? "Waiting before automatic retry" : "Automatic discovery is on"));
-    lv_label_set_text(lv_obj_get_child(wireless_setting, 0),
-                      s.wireless_enabled ? "Wireless discovery: ON" : "Wireless discovery: OFF");
-#if defined(RTCARPLAY_MICROPHONE)
-    lv_label_set_text(lv_obj_get_child(microphone_setting, 0),
-                      carplay_audio_input_is_muted() ? "Microphone: MUTED" : "Microphone: ENABLED");
-#endif
-    bool idle = s.stage == DEMO_WAIT || s.stage == DEMO_FAILED;
-    lv_obj_t *idle_buttons[] = {
-        manage_button,
-        retry_button,
-        wireless_setting,
-#if !defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
-        settings_button,
-#endif
-    };
-    for (unsigned i = 0; i < sizeof(idle_buttons) / sizeof(idle_buttons[0]); ++i)
-    {
-        if (idle)
-            lv_obj_remove_state(idle_buttons[i], LV_STATE_DISABLED);
-        else
-            lv_obj_add_state(idle_buttons[i], LV_STATE_DISABLED);
-    }
-#if defined(RTCARPLAY_AUDIO)
-    if (idle)
-        lv_obj_remove_state(audio_button, LV_STATE_DISABLED);
-    else
-        lv_obj_add_state(audio_button, LV_STATE_DISABLED);
-#endif
-    const char *title, *detail, *tag;
-    switch (s.stage)
-    {
-    case DEMO_WAIT:
-        title = "Ready when you are.";
-        detail = s.wireless_enabled ? "Connect USB or pair Bluetooth." : "Connect your iPhone with USB.";
-        tag = "AUTO CONNECT";
-        break;
-    case DEMO_PAIR:
-        title = s.wireless ? "Pair your iPhone." : "Trust this display.";
-        detail = s.wireless ? "Confirm pairing on your iPhone." : "Unlock iPhone and tap Trust.";
-        tag = "VERIFYING";
-        break;
-    case DEMO_NETWORK:
-        title = "Making the connection.";
-        detail = s.wireless ? "Joining Wi-Fi..." : "Preparing USB...";
-        tag = "CONNECTING";
-        break;
-    case DEMO_CONNECT:
-        title = "Opening CarPlay.";
-        detail = "Waiting for video...";
-        tag = "ALMOST READY";
-        break;
-    case DEMO_LIVE:
-        title = "Check display handoff.";
-        detail = "See Diagnostics.";
-        tag = "DISPLAY CHECK";
-        break;
-    case DEMO_CLOSING:
-        title = "Getting ready again.";
-        detail = "Closing session...";
-        tag = "RETURNING";
-        break;
-    case DEMO_FAILED:
-        title = "Let's reconnect.";
-        detail = s.storage_error ? "Pairing storage error." : "Retrying automatically...";
-        tag = "RECONNECTING";
-        break;
-    default:
-        title = "Your drive, connected.";
-        detail = "Starting...";
-        tag = "LAUNCHER 02";
-        break;
-    }
-    lv_label_set_text(heading, title);
-    lv_label_set_text(description, detail);
-    lv_label_set_text(badge, tag);
-    lv_label_set_text_fmt(pin_label, "Bluetooth: rt-carplay  |  CarPlay PIN: %s\nWi-Fi: %s",
-                          s.pin[0] ? s.pin : TR("preparing"), s.ssid[0] ? s.ssid : TR(s.wireless_enabled ? "preparing" : "paused"));
-    for (unsigned i = 0; i < 3; ++i)
-    {
-        bool active = (int)s.stage >= DEMO_PAIR + (int)i && s.stage <= DEMO_LIVE;
-        lv_obj_set_style_bg_color(steps[i], lv_color_hex(active ? 0x58E0BF : 0x26384B), 0);
-    }
-    if (!lv_obj_has_flag(diagnostics_panel, LV_OBJ_FLAG_HIDDEN))
-    {
-        lv_label_set_text_fmt(debug_label,
-                              "Connection: %s / %s     Error: %d (last %d)\n"
-                              "USB service: %s    Attached: %s    USB error: %d\n"
-                              "Wireless: %s    Bluetooth: %s    MFi: %s    Radio error: %d\n"
-                              "Network: %s    Wi-Fi: %s\n"
-                              "Transport: %u   Authenticated: %u   Session: %u\n"
-                              "Video endpoint: %u   Audio endpoint: %u   Input: %u\n"
-                              "Decoded frames: %u   Drops: %u   Decode errors: %u\n"
-                              "Display handoff: %s    Screen RX: %u    HID sent/failed: %u/%u\n"
-                              "Trust cache: %d    Pairing write: %d    Bonds: %u/%u\n"
-                              "BT HCI/security: %02x/%u    Invite/ACK/retry: %u/%u/%u\n"
-                              "Recovery cycles: %u    Current retry wait: %u s",
-                              TR(s.wireless ? "WIRELESS" : "USB"), stage_name(s.stage), s.error, s.last_error,
-                              s.usb_ready ? "ready" : "starting", s.usb ? "yes" : "no", s.usb_error,
-                              s.wireless_enabled ? "enabled" : "paused", s.bt_connected ? "connected" : s.bt_ready ? "ready"
-                                                                                                                   : "inactive",
-                              s.bt_authenticated ? "authenticated" : "waiting", s.wireless_error,
-                              s.ipv6[0] ? s.ipv6 : "waiting", s.ssid[0] ? s.ssid : "inactive",
-                              s.receiver.transport_connected, s.receiver.authenticated, s.receiver.session_established,
-                              s.receiver.video_ready, s.receiver.audio_ready, s.receiver.input_ready,
-                              s.frames, s.drops, s.errors, carplay_launcher_video_is_active() ? "active" : "launcher visible",
-                              s.received, s.hid_sent, s.hid_failed, s.trust, s.storage_error,
-                              s.pairing.bond_count, s.pairing.bond_capacity, s.pairing.hci_error, s.pairing.security_error,
-                              s.invites, s.invite_acks, s.reinvites, s.reconnects, s.retry_seconds);
+        if (!lv_obj_has_flag(bt_panel, LV_OBJ_FLAG_HIDDEN))
+        {
+            lv_obj_add_flag(bt_panel, LV_OBJ_FLAG_HIDDEN);
+            update_scrim();
+        }
     }
     update_scrim();
 }
 
-static lv_obj_t *panel(lv_obj_t *parent, int x, int y, int width, int height)
+/* ---------------- init ---------------- */
+
+void carplay_launcher_open_display_settings(void)
 {
-    lv_obj_t *obj = lv_obj_create(parent);
-    lv_obj_set_pos(obj, x, y);
-    lv_obj_set_size(obj, width, height);
-    lv_obj_set_style_bg_color(obj, lv_color_hex(0x121E2C), 0);
-    lv_obj_set_style_border_color(obj, lv_color_hex(0x26384B), 0);
-    lv_obj_set_style_border_width(obj, 1, 0);
-    lv_obj_set_style_radius(obj, 24, 0);
-    lv_obj_set_style_pad_all(obj, 24, 0);
-    lv_obj_set_style_shadow_width(obj, 0, 0);
-    lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
-    return obj;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    carplay_fusion_ui_show_launcher();
+#endif
+    show_page(PAGE_SETTINGS);
 }
 
 /* SDK calls this from lv_user_gui_init(), after display registration. */
@@ -865,233 +1370,41 @@ void carplay_demo_launcher_init(void)
     if (carplay_video_sink_set_display_observer(carplay_launcher_video_event,
                                                 NULL) != RTCP_OK)
         rt_kprintf("[carplay-demo] video observer registration failed\n");
-    lv_obj_t *screen = lv_screen_active();
-    lv_obj_set_style_bg_color(screen, lv_color_hex(0x090F19), 0);
-    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
-    lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
-#if LV_FONT_MONTSERRAT_16
-    lv_obj_set_style_text_font(screen, &lv_font_montserrat_16, 0);
+
+    carplay_ui_set_dark(carplay_preferences_get(CARPLAY_PREF_THEME, 1) != 0);
+    carplay_ui_set_chinese(carplay_preferences_get(CARPLAY_PREF_LANGUAGE, 0) != 0);
+    theme_choice = carplay_ui_dark() ? 1U : 0U;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    display_choice = carplay_preferences_get(CARPLAY_PREF_DISPLAY, CARPLAY_FUSION) ==
+                             CARPLAY_FULLSCREEN
+                         ? 0U
+                         : 1U;
+#else
+    display_choice = 1U;
 #endif
+
+    lv_obj_t *screen = lv_screen_active();
+    carplay_ui_style(screen, CARPLAY_STYLE_SCREEN);
+    lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_text_font(screen, &carplay_ui_17, 0);
     int width = lv_display_get_horizontal_resolution(NULL);
     int height = lv_display_get_vertical_resolution(NULL);
-    label(screen, "CARPLAY", 36, 30, 300, 0xEDF5FF, true);
-    label(screen, "", 36, 65, 420, 0x8FA5BF, false);
-    uptime_label = label(screen, "UPTIME  00:00:00", 410, 40, 230, 0x8FA5BF, false);
-    lv_obj_t *card = panel(screen, 36, 110, width - 422, height - 282);
-    badge = label(card, "LAUNCHER 02", 0, 0, 480, 0x58E0BF, false);
-    heading = label(card, "Your drive, connected.", 0, 44, width - 474, 0xF2F7FF, true);
-#if LV_FONT_MONTSERRAT_32
-    lv_obj_set_style_text_font(heading, &lv_font_montserrat_32, 0);
-#endif
-    description = label(card, "Starting USB and wireless discovery.", 0, 102,
-                        width - 474, 0xC1CFDF, false);
-    lv_obj_set_style_text_line_space(description, 8, 0);
-    pin_label = label(card, "", 0, 206, width - 474, 0x8FA5BF, false);
-    lv_obj_set_style_text_line_space(pin_label, 6, 0);
-    lv_obj_t *paths = panel(screen, width - 366, 110, 330, height - 282);
-    label(paths, "CONNECTIONS", 0, 0, 280, 0x58E0BF, false);
-    path_labels[0] = label(paths, "WIRED USB\nStarting USB service", 0, 42, 280, 0xE0EAF6, false);
-    path_labels[1] = label(paths, "WIRELESS\nStarting Bluetooth / Wi-Fi", 0, 112, 280, 0xE0EAF6, false);
-    session_note = label(paths, "One phone at a time\nAutomatic discovery is on", 0, 206, 280, 0x8FA5BF, false);
-    for (unsigned i = 0; i < 3; ++i)
+
+    for (unsigned i = 0; i < PAGE_COUNT; ++i)
     {
-        int x = 36 + (int)i * ((width - 72 + 16) / 3);
-        steps[i] = lv_obj_create(screen);
-        lv_obj_set_size(steps[i], (width - 104) / 3, 4);
-        lv_obj_set_pos(steps[i], x, height - 154);
-        lv_obj_set_style_border_width(steps[i], 0, 0);
-        lv_obj_set_style_bg_color(steps[i], lv_color_hex(0x26384B), 0);
-        step_labels[i] = label(screen, i == 0 ? "01  Discover your phone" : i == 1 ? "02  Verify and connect"
-                                                                                   : "03  Open CarPlay",
-                               x, height - 141, (width - 104) / 3, 0x8FA5BF, false);
+        pages[i] = lv_obj_create(screen);
+        lv_obj_remove_style_all(pages[i]);
+        lv_obj_set_pos(pages[i], 0, 0);
+        lv_obj_set_size(pages[i], width, height);
+        lv_obj_remove_flag(pages[i], LV_OBJ_FLAG_SCROLLABLE);
     }
-    int nav_width = (width - 124) / 5;
-    manage_button = button(screen, "Devices", 36, height - 83, nav_width, files_open);
-    retry_button = button(screen, "Retry", 36 + 4 * (nav_width + 13), height - 83, nav_width, retry_connection);
-    settings_button = button(screen, "Settings", 36 + 2 * (nav_width + 13), height - 83, nav_width, NULL);
-    lv_obj_t *diagnostics_button = button(screen, "Diagnostics", 36 + 3 * (nav_width + 13), height - 83, nav_width, NULL);
-#if defined(RTCARPLAY_AUDIO)
-    audio_button = button(screen, "Audio", 36 + nav_width + 13, height - 83, nav_width, audio_open_page);
-    lv_obj_add_state(audio_button, LV_STATE_DISABLED);
-#else
-    lv_obj_t *unavailable = button(screen, "Audio unavailable", 36 + nav_width + 13, height - 83, nav_width, NULL);
-    lv_obj_add_state(unavailable, LV_STATE_DISABLED);
-#endif
-    network_button = button(screen, "Ethernet: starting...", width - 366, 36, 330, NULL);
-    network_summary = lv_obj_get_child(network_button, 0);
-    modal_scrim = lv_obj_create(screen);
-    lv_obj_remove_style_all(modal_scrim);
-    lv_obj_set_size(modal_scrim, width, height);
-    lv_obj_set_style_bg_color(modal_scrim, lv_color_hex(0x000000), 0);
-    lv_obj_set_style_bg_opa(modal_scrim, LV_OPA_60, 0);
-    lv_obj_add_flag(modal_scrim, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
-    lv_obj_remove_flag(modal_scrim, LV_OBJ_FLAG_SCROLLABLE);
-    settings_panel = panel(screen, 30, 25, width - 60, height - 50);
-    label(settings_panel, "SETTINGS", 10, 0, 320, 0xF2F7FF, true);
-    language_buttons[0] = button(settings_panel, "English", width - 460, 0, 150, NULL);
-    language_buttons[1] = button(settings_panel, "中文", width - 296, 0, 150, NULL);
-    lv_obj_add_event_cb(language_buttons[0], select_language, LV_EVENT_CLICKED, (void *)0);
-    lv_obj_add_event_cb(language_buttons[1], select_language, LV_EVENT_CLICKED, (void *)1);
-    lv_obj_set_style_bg_color(language_buttons[0], lv_color_hex(0x236859), 0);
-    settings_note = label(settings_panel,
-                          "",
-                          10, 52, width - 140, 0x8FA5BF, false);
-    wireless_setting = button(settings_panel, "Wireless discovery: ON", 10, 178, 330, toggle_wireless);
-    microphone_setting = button(settings_panel, "Microphone not enabled", 360, 178, 330, toggle_microphone);
-#if !defined(RTCARPLAY_MICROPHONE)
-    lv_obj_add_state(microphone_setting, LV_STATE_DISABLED);
-#endif
-#if defined(RTCARPLAY_OTA)
-    label(settings_panel, "FIRMWARE & UPDATES", 10, 264, 500, 0x58E0BF, false);
-    ota_version_label = label(settings_panel, "Installed firmware", 10, 296, width - 140, 0xC1CFDF, false);
-    ota_state_label = label(settings_panel,
-                            "Not checked yet. Connect Ethernet, then check for updates.",
-                            10, 324, width - 140, 0x8FA5BF, false);
-    ota_check_button = button(settings_panel, "Check for updates", 10, 388, 230, ota_check_now);
-    ota_install_button = button(settings_panel, "Install update", 255, 388, 230, ota_install_now);
-    lv_obj_add_state(ota_check_button, LV_STATE_DISABLED);
-    lv_obj_add_state(ota_install_button, LV_STATE_DISABLED);
-#else
-    label(settings_panel, "SYSTEM", 10, 280, 500, 0x58E0BF, false);
-    lv_obj_t *system = label(settings_panel, "", 10, 316, width - 140, 0xC1CFDF, false);
-    lv_label_set_text_fmt(system, "Launcher V2  |  ArtInChip D213  |  LVGL 9\nDisplay: %d x %d  |  One active CarPlay session", width, height);
-#endif
-#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
-    button(settings_panel, "Display mode", 10, 100, 330, open_display);
-    display_panel = panel(screen, 30, 25, width - 60, height - 50);
-    label(display_panel, "CARPLAY DISPLAY", 10, 0, width - 140, 0xF2F7FF, true);
-    label(display_panel, "USB and wireless",
-          10, 52, width - 140, 0xC1CFDF, false);
-    const char *mode_names[] = { "Full screen", "Fusion", "Local instruments" };
-    const char *mode_sizes[] = { "1024 x 600", "768 x 600 + meters", "Instruments only" };
-    for (unsigned i = 0; i < 3; ++i)
-    {
-        int x = 10 + (int)i * 300;
-        display_modes[i] = button(display_panel, mode_names[i], x, 125, 280, NULL);
-        lv_obj_set_height(display_modes[i], 100);
-        lv_obj_add_event_cb(display_modes[i], select_display, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
-        label(display_panel, mode_sizes[i], x, 246, 280, 0x8FA5BF, false);
-    }
-    display_note = label(display_panel, "Resolution changes reconnect CarPlay.", 10, 330, width - 140, 0x8FA5BF, false);
-    button(display_panel, "Cancel", 10, 440, 180, resume_display);
-    button(display_panel, "Apply", 700, 440, 190, apply_display);
-    lv_obj_add_flag(display_panel, LV_OBJ_FLAG_HIDDEN);
-#endif
-    lv_obj_t *legal = label(settings_panel,
-                            "Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI)",
-                            10, height - 104, width - 140, 0x8FA5BF, false);
-#if LV_FONT_MONTSERRAT_14
-    lv_obj_set_style_text_font(legal, &lv_font_montserrat_14, 0);
-#else
-    (void)legal;
-#endif
-    lv_obj_t *back = button(settings_panel, "Back",
-                            width - 268, 388, 160, NULL);
-#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
-    lv_obj_add_event_cb(back, resume_display, LV_EVENT_CLICKED, NULL);
-#else
-    lv_obj_add_event_cb(back, close_panel, LV_EVENT_CLICKED, settings_panel);
-#endif
-    lv_obj_add_flag(settings_panel, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_event_cb(settings_button, open_panel, LV_EVENT_CLICKED, settings_panel);
-#if defined(RTCARPLAY_OTA)
-    ota_confirm_panel = panel(screen, 80, 120, width - 160, height - 240);
-    ota_confirm_text = label(ota_confirm_panel, "", 20, 20, width - 240, 0xFFFFFF, false);
-    lv_obj_set_style_text_line_space(ota_confirm_text, 6, 0);
-    button(ota_confirm_panel, "Cancel", 20, height - 340, 200, ota_confirm_cancel);
-    button(ota_confirm_panel, "Install and reboot", 240, height - 340, 260,
-           ota_confirm_install);
-    lv_obj_add_flag(ota_confirm_panel, LV_OBJ_FLAG_HIDDEN);
-#endif
-    diagnostics_panel = panel(screen, 30, 25, width - 60, height - 50);
-    label(diagnostics_panel, "CONNECTION DIAGNOSTICS", 10, 0, width - 140, 0xF2F7FF, true);
-    debug_label = label(diagnostics_panel, "Waiting for a status snapshot...", 10, 55, width - 140, 0xC1CFDF, false);
-#if LV_FONT_MONTSERRAT_14
-    lv_obj_set_style_text_font(debug_label, &lv_font_montserrat_14, 0);
-#endif
-    lv_obj_set_style_text_line_space(debug_label, 8, 0);
-    back = button(diagnostics_panel, "Back", 10, height - 165, 160, NULL);
-    lv_obj_add_event_cb(back, close_panel, LV_EVENT_CLICKED, diagnostics_panel);
-    lv_obj_add_event_cb(diagnostics_button, open_panel, LV_EVENT_CLICKED, diagnostics_panel);
-    lv_obj_add_flag(diagnostics_panel, LV_OBJ_FLAG_HIDDEN);
-    network_panel = panel(screen, 30, 25, width - 60, height - 50);
-    label(network_panel, "VEHICLE NETWORK", 10, 0, 700, 0xF2F7FF, true);
-    network_detail = label(network_panel, "Waiting for Ethernet status...", 10, 55, width - 140, 0xC1CFDF, false);
-    lv_obj_set_style_text_line_space(network_detail, 4, 0);
-    network_note = label(network_panel, "",
-                         10, 350, width - 140, 0x8FA5BF, false);
-    network_check = button(network_panel, "Check now", 10, height - 165, 200, network_check_now);
-    back = button(network_panel, "Back", 230, height - 165, 160, NULL);
-    lv_obj_add_event_cb(back, close_panel, LV_EVENT_CLICKED, network_panel);
-    lv_obj_add_event_cb(network_button, open_panel, LV_EVENT_CLICKED, network_panel);
-    lv_obj_add_flag(network_panel, LV_OBJ_FLAG_HIDDEN);
-#if defined(RTCARPLAY_AUDIO)
-    audio_panel = panel(screen, 30, 25, width - 60, height - 50);
-    label(audio_panel, "SPEAKER & MICROPHONE TEST", 10, 0, width - 130, 0xFFFFFF, true);
-    const char *test_modes[] = { "PCM tone", "PCM silence", "AAC tone", "Mic meter", "Mic loopback" };
-    for (unsigned i = 0; i < 5; ++i) audio_mode_buttons[i] = audio_control(audio_panel, test_modes[i], 10 + i * 176, 55, 164, i);
-#if !defined(LPKG_RT_CARPLAY_AUDIO_CODECS) && !defined(RTCP_AUDIO_CODECS)
-    lv_obj_add_state(audio_mode_buttons[2], LV_STATE_DISABLED);
-#endif
-#if !defined(RTCARPLAY_MICROPHONE)
-    lv_obj_add_state(audio_mode_buttons[3], LV_STATE_DISABLED);
-    lv_obj_add_state(audio_mode_buttons[4], LV_STATE_DISABLED);
-#endif
-    audio_control(audio_panel, "44.1 kHz", 10, 115, 140, 10);
-    audio_control(audio_panel, "48 kHz", 165, 115, 140, 11);
-    audio_control(audio_panel, "Both", 335, 115, 130, 20);
-    audio_control(audio_panel, "Left", 480, 115, 130, 21);
-    audio_control(audio_panel, "Right", 625, 115, 130, 22);
-    audio_control(audio_panel, "Volume -", 10, 175, 150, 30);
-    audio_control(audio_panel, "Volume +", 175, 175, 150, 31);
-    audio_control(audio_panel, "Mute / unmute", 340, 175, 180, 32);
-    audio_settings = label(audio_panel, "", 10, 235, width - 130, 0x58E0BF, false);
-    audio_note = label(audio_panel, "Preparing audio tests...", 10, 275, width - 130, 0xC1CFDF, false);
-    label(audio_panel, "Input L", 10, 370, 80, 0x8FA5BF, false);
-    label(audio_panel, "Input R", 450, 370, 80, 0x8FA5BF, false);
-    for (unsigned i = 0; i < 2; ++i)
-    {
-        audio_meters[i] = lv_bar_create(audio_panel);
-        lv_obj_set_pos(audio_meters[i], 95 + (int)i * 440, 372);
-        lv_obj_set_size(audio_meters[i], 305, 16);
-        lv_bar_set_range(audio_meters[i], 0, 32768);
-    }
-    audio_play = audio_control(audio_panel, "Start / restart", 10, height - 170, 185, 40);
-    audio_control(audio_panel, "Stop", 215, height - 170, 150, 41);
-    audio_control(audio_panel, "Back", 385, height - 170, 150, 42);
-    lv_obj_add_flag(audio_panel, LV_OBJ_FLAG_HIDDEN);
-#endif
-    file_panel = panel(screen, 30, 25, width - 60, height - 50);
-    label(file_panel, "SAVED DEVICES", 10, 0, 600, 0xFFFFFF, true);
-    file_note = label(file_panel, "", 10, 40, width - 110, 0xC1CFDF, false);
-    file_list = lv_obj_create(file_panel);
-    lv_obj_set_pos(file_list, 10, 100);
-    lv_obj_set_size(file_list, width - 120, height - 260);
-    lv_obj_set_style_pad_all(file_list, 8, 0);
-    lv_obj_set_style_bg_color(file_list, lv_color_hex(0x0E1825), 0);
-    lv_obj_set_style_border_color(file_list, lv_color_hex(0x26384B), 0);
-    lv_obj_set_style_radius(file_list, 16, 0);
-    button(file_panel, "Refresh", 10, height - 145, 150, files_refresh);
-    button(file_panel, "Back", 180, height - 145, 150, files_back);
-#if DEMO_HAS_WIRELESS
-    button(file_panel, "Forget Bluetooth phones", 350, height - 145, 250, select_bluetooth_bonds);
-#else
-    (void)&select_bluetooth_bonds;
-#endif
-    confirm_panel = lv_obj_create(file_panel);
-    lv_obj_set_pos(confirm_panel, 40, 50);
-    lv_obj_set_size(confirm_panel, width - 180, height - 180);
-    lv_obj_remove_flag(confirm_panel, LV_OBJ_FLAG_SCROLLABLE);
-    confirm_text = label(confirm_panel, "", 10, 10, width - 240, 0xFFFFFF, false);
-    button(confirm_panel, "Cancel", 10, height - 285, 160, cancel_forget);
-    button(confirm_panel, "Forget record", 200, height - 285, 180, confirm_forget);
-    lv_obj_add_flag(confirm_panel, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(file_panel, LV_OBJ_FLAG_HIDDEN);
-    bt_panel = panel(screen, 80, 120, width - 160, height - 240);
-    bt_text = label(bt_panel, "", 20, 20, width - 240, 0xFFFFFF, true);
-    bt_accept = button(bt_panel, "Numbers match / Allow", 20, height - 340, 260, answer_bluetooth);
-    button(bt_panel, "Cancel pairing", 300, height - 340, 200, answer_bluetooth);
-    lv_obj_add_flag(bt_panel, LV_OBJ_FLAG_HIDDEN);
+    build_dashboard(pages[PAGE_DASHBOARD]);
+    build_connectivity(pages[PAGE_CONNECTIVITY]);
+    build_settings(pages[PAGE_SETTINGS]);
+    build_ota(pages[PAGE_OTA]);
+    build_modals(screen);
+    show_page(PAGE_DASHBOARD);
+
     lv_indev_t *pointer = lv_indev_create();
     if (pointer)
     {
@@ -1099,10 +1412,8 @@ void carplay_demo_launcher_init(void)
         lv_indev_set_read_cb(pointer, pointer_read);
     }
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
-    lv_obj_add_flag(uptime_label, LV_OBJ_FLAG_HIDDEN);
     carplay_fusion_ui_init(screen, (uint16_t)width, (uint16_t)height);
 #endif
-    carplay_ui_set_chinese(carplay_preferences_get(CARPLAY_PREF_LANGUAGE, 0) != 0);
     lv_timer_create(update_page, 250, NULL);
     int touch = carplay_touch_panel_start((uint16_t)width, (uint16_t)height,
                                           launcher_panel_touch, NULL);

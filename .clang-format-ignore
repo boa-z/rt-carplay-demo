@@ -1,4 +1,3 @@
 # Generated assets and generated/adapted upstream source are not hand-formatted.
 ui/fonts/**
 generated/**
-platform/audio_test_fixture.h

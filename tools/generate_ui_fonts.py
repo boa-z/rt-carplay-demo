@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Generate the launcher's OFL font subset (fontTools + lv_font_conv 1.5.3)."""
+"""Generate the launcher's OFL font subsets (fontTools + lv_font_conv 1.5.3).
+
+Every size is generated from the same symbol set: the label table in
+ui/ui_language.c plus any non-ASCII literal in ui/*.c. ui_language.c switches a
+label to the CJK face sized for it, so a size that lacked glyphs would render
+boxes only at that size."""
 import argparse
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
 from fontTools.ttLib import TTFont
 from fontTools.varLib.instancer import instantiateVariableFont
+
+SIZES = (16, 18, 24, 30)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("font", type=Path, help="NotoSansSC[wght].ttf, SIL OFL 1.1")
@@ -15,7 +23,13 @@ parser.add_argument("converter", type=Path, help="lv_font_conv.js 1.5.3")
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[1]
 source = (root / "ui/ui_language.c").read_text(encoding="utf-8")
-symbols = "".join(sorted({c for c in source if ord(c) > 127}))
+symbols = {c for c in source if ord(c) > 127}
+for extra in (root / "ui").glob("*.c"):
+    if extra == root / "ui/ui_language.c":
+        continue
+    for literal in re.findall(r'"([^"\n]*)"', extra.read_text(encoding="utf-8")):
+        symbols.update(c for c in literal if ord(c) > 127)
+symbols = "".join(sorted(symbols))
 destination = root / "ui/fonts"
 destination.mkdir(exist_ok=True)
 with tempfile.TemporaryDirectory() as temp:
@@ -23,7 +37,7 @@ with tempfile.TemporaryDirectory() as temp:
     regular = instantiateVariableFont(font, {"wght": 400}, inplace=True)
     path = Path(temp) / "CarPlayUI-Regular.ttf"
     regular.save(path)
-    for size in (16, 24):
+    for size in SIZES:
         name = "carplay_cjk_{}".format(size)
         output = destination / (name + ".c")
         subprocess.run([

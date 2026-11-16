@@ -4,21 +4,30 @@
 
 typedef enum
 {
-    CARPLAY_PREF_LANGUAGE,
-    CARPLAY_PREF_WIRELESS,
-    CARPLAY_PREF_MIC_MUTED,
-    CARPLAY_PREF_DISPLAY,
+    CARPLAY_PREF_LANGUAGE,   /* 0 english, 1 simplified chinese */
+    CARPLAY_PREF_THEME,      /* 0 light, 1 dark */
+    CARPLAY_PREF_DISPLAY,    /* carplay_display_mode_t */
+    CARPLAY_PREF_WIRELESS,   /* 0 disabled, 1 enabled */
+    CARPLAY_PREF_MIC_MUTED,  /* 0 enabled, 1 muted */
+    CARPLAY_PREF_VOLUME,     /* 0..100 percent of the local mixer */
+    CARPLAY_PREF_BRIGHTNESS, /* 5..100 percent of the panel PWM */
     CARPLAY_PREF_COUNT
 } carplay_preference_t;
 
-#if defined(RT_USING_DFS)
+/* Per-key accepted maximum; values outside the range are never stored. */
+#define CARPLAY_PREF_VOLUME_MAX     100U
+#define CARPLAY_PREF_BRIGHTNESS_MAX 100U
+#define CARPLAY_PREF_BRIGHTNESS_MIN 5U
+
+#if defined(RT_USING_DFS) || defined(CARPLAY_PREFERENCES_EXTERNAL_PROVIDER)
 /* Initialize on the application startup owner before worker/UI requests. */
 int carplay_preferences_init(void);
 unsigned carplay_preferences_get(carplay_preference_t key, unsigned fallback);
+/* Returns -EINVAL for an out-of-range value, -EIO when the record could not be
+ * written. A successful call is the only confirmation that the choice persists. */
 int carplay_preferences_set(carplay_preference_t key, unsigned value);
 int carplay_preferences_error(void);
 #else
-/* Non-filesystem hosts retain volatile settings and the existing defaults. */
 static inline int carplay_preferences_init(void)
 {
     return 0;
