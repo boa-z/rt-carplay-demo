@@ -4,6 +4,8 @@
 
 注意：用户随后报告 e17d8fa2 蓝牙反复重启，该版本撤回，不应继续刷写。源码确认融合连接管理器把 `status.wireless` 传给表示“有线”的参数，导致连接模式反向；现改为 `!status.wireless`。原有管理器测试的模拟接口也重复了同一个错误，现同步纠正，不新增测试。此前绿色 Host/CI 未检出此缺陷。没有读取实机日志，因此完整运行因果及修复效果仍待用户手动验证；e17d8fa2 本次运行回归记为 FAIL，替换镜像手机验收为 NOT_RUN。下列散列和构建记录用于追溯问题版本，不是下载推荐。
 
+修正版已提交并推送为 `ba46280ba73700d2514433db0d7bfc9b1cc13ba6`，SDK 版本不变。原有连接检查及完整应用 Host 检查通过，没有新增测试。Windows GUI 编译成功，替换镜像为 `C:/Project/Carplay/rt-carplay-artifacts/ultra-research/native-ba46280b/gui/d213-carplay-ultra-gui.img`，SHA256 为 `1a584f917ad53761efc3d9e4b9424741cdf7ea415dea644d0996ba15c984e770`。源码版本、干净工作区、全部六项散列、九个组件边界/CRC 和配置/ELF 检查通过。配置保留 Wi-Fi、蓝牙和有线支持；融合/全屏几何与有线/无线传输独立，两种连接均支持。修正版实机验收仍为 NOT_RUN。[修正 CI](https://github.com/boa-z/luban-lite-carplay/actions/runs/43793819201) 的 Host 已通过，记录时 GUI/Headless 尚在构建。
+
 本次响应真正的 1024x600 手机全屏、启动台显示设置及融合画面压缩感的问题。集成版本为 `e17d8fa2d6ba00d130643f9d80c8e7988e06f6f6`，SDK 为 `06f90ad4846865746e297bf8178c71301f8c5c4d`。原生 Windows GUI 镜像 SHA256 为 `4a7add9e171cd51779fdae82b1290599802394502af0335558127367bf427ce2`，位于 `C:/Project/Carplay/rt-carplay-artifacts/ultra-research/native-e17d8fa2/gui/d213-carplay-ultra-gui.img`。源码版本、干净工作区、六项散列、九个镜像组件和配置/ELF 检查通过。集成 CI 的 Host、GUI、Headless 及 SDK CI 均通过，具体链接和日志身份见英文页。
 
 Connections > Settings > Display mode 提供 Full screen 1024 x 600、Video + meters 768 x 600 和 Local instruments。仪表栏全屏按钮也进入相同路径。尺寸变化由连接管理器异步关闭 USB/iAP2 借用者和旧 Receiver，再以新尺寸重建 Receiver、HID、视频接收器和 `/info`，退出期间显示本地仪表。同尺寸请求不触发几何重建，待处理请求合并，LOCAL 保留手机几何；设备/音频工具可拒绝切换。设置重启恢复默认。旧合成诊断命令语义保留，原生尺寸切换使用 `carplay_connection display fullscreen|fusion|local`。

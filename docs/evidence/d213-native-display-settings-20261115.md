@@ -10,6 +10,14 @@ The user subsequently reported repeated Bluetooth restarts with the e17d8fa2 ima
 
 ## Affected artifacts
 
+### Corrected replacement
+
+The correction is committed and pushed as `ba46280ba73700d2514433db0d7bfc9b1cc13ba6`, retaining SDK `06f90ad4846865746e297bf8178c71301f8c5c4d`. The existing targeted connection checks and full integration `make -j8 check` passed; logs are `native-display-owner-polarity-host.log` and `native-display-polarity-integration-host.log`. No additional tests were written. Fusion/full-screen geometry is independent of wired/wireless transport; both connection paths remain enabled.
+
+The replacement Windows GUI build exited 0. Its image is `C:/Project/Carplay/rt-carplay-artifacts/ultra-research/native-ba46280b/gui/d213-carplay-ultra-gui.img`, SHA256 `1a584f917ad53761efc3d9e4b9424741cdf7ea415dea644d0996ba15c984e770`. Exact integration/SDK pins, clean source inventories, all six SHA256 entries, nine component bounds/CRC32 checks and the config/ELF profile checks passed. The configuration enables Wi-Fi and Bluetooth, native wired NCM and fusion, with a default phone viewport of 768x600 and a physical panel of 1024x600. The build log is `native-ba46280b-gui.log`. Replacement phone/board acceptance remains NOT_RUN. [Correction CI](https://github.com/boa-z/luban-lite-carplay/actions/runs/43793819201) passed Host checks; GUI/Headless jobs were still running when this record was written.
+
+### Withdrawn e17d8fa2 build
+
 | Item | Evidence |
 | --- | --- |
 | Integration image revision | `e17d8fa2d6ba00d130643f9d80c8e7988e06f6f6` |
