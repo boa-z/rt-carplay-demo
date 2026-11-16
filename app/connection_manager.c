@@ -91,60 +91,6 @@ static bool automatic_select(bool wireless)
     (void)rt_mutex_release(status_lock);
     return allowed;
 }
-#if defined(RTCARPLAY_AUDIO)
-static void close_session(void);
-static int start_receiver(void);
-static void publish(demo_stage_t, int);
-static bool audio_open, audio_ready, audio_exit;
-static unsigned audio_action; /* 1 play, 2 stop; consumed by demo worker */
-static int audio_result;
-static audio_test_config_t audio_config = { AUDIO_TEST_TONE, 48000, 0 };
-static unsigned audio_volume = 20;
-static bool audio_muted;
-/* The session owner alone closes/restarts CarPlay and starts/stops tests. */
-static bool audio_service(void)
-{
-    (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
-    bool open = audio_open, exit = audio_exit, ready = audio_ready;
-    unsigned action = audio_action;
-    audio_action = 0;
-    audio_test_config_t config = audio_config;
-    unsigned volume = audio_volume;
-    bool muted = audio_muted;
-    (void)rt_mutex_release(status_lock);
-    if (!open)
-        return false;
-    if (!ready)
-    {
-        close_session();
-        (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
-        audio_ready = true;
-        (void)rt_mutex_release(status_lock);
-    }
-    carplay_audio_test_gain(volume, muted);
-    int result = RTCP_OK;
-    if (action || exit)
-        result = carplay_audio_test_stop();
-    if (result == RTCP_OK && action == 1 && !exit)
-        result = carplay_audio_test_start(&config);
-    (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
-    if (action || exit)
-        audio_result = result;
-    if (exit && result == RTCP_OK)
-    {
-        audio_open = audio_ready = audio_exit = false;
-        manager_open = false;
-    }
-    (void)rt_mutex_release(status_lock);
-    if (exit && result == RTCP_OK && !status.wireless)
-    {
-        int start = start_receiver();
-        publish(start == RTCP_OK ? DEMO_WAIT : DEMO_FAILED, start);
-    }
-    return true;
-}
-#endif
-
 #if defined(RT_USING_FINSH)
 #include <finsh.h>
 static int connection_command(int argc, char **argv)
@@ -361,15 +307,6 @@ static void close_session(void)
  * reader remains usable even if receiver startup/storage loading failed. */
 static bool idle_actions(void)
 {
-#if defined(RTCARPLAY_AUDIO)
-    if (audio_service())
-    {
-        (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
-        bool closed = !audio_open;
-        (void)rt_mutex_release(status_lock);
-        return closed;
-    }
-#endif
     char name[CARPLAY_PAIR_FILENAME_MAX];
     (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
     file_action_t action = file_action;
@@ -868,9 +805,6 @@ bool carplay_connection_set_display_mode(carplay_display_mode_t mode)
         return false;
     (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
     bool allowed = !manager_open && file_action == FILE_NONE;
-#if defined(RTCARPLAY_AUDIO)
-    allowed &= !audio_open;
-#endif
     if (allowed)
     {
         requested_display = mode;
@@ -1014,80 +948,3 @@ bool carplay_connection_files_snapshot(unsigned *revision,
     (void)rt_mutex_release(status_lock);
     return changed;
 }
-
-#if defined(RTCARPLAY_AUDIO)
-bool carplay_connection_audio_open(void)
-{
-    if (status_lock == NULL)
-        return false;
-    (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
-    bool idle = (status.stage == DEMO_WAIT || status.stage == DEMO_FAILED) &&
-                !manager_open && file_action == FILE_NONE;
-    if (idle)
-    {
-        manager_open = audio_open = true;
-        audio_ready = audio_exit = false;
-        audio_action = 0;
-        audio_result = 0;
-    }
-    (void)rt_mutex_release(status_lock);
-    return idle;
-}
-
-void carplay_connection_audio_select(unsigned id)
-{
-    if (status_lock == NULL)
-        return;
-    (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
-    if (!audio_open)
-    {
-        (void)rt_mutex_release(status_lock);
-        return;
-    }
-    if (id < 5)
-        audio_config.mode = (audio_test_mode_t)id;
-    else if (id == 10)
-        audio_config.rate = 44100;
-    else if (id == 11)
-        audio_config.rate = 48000;
-    else if (id >= 20 && id <= 22)
-        audio_config.channel = id - 20;
-    else if (id == 30)
-        audio_volume = audio_volume < 10 ? 0 : audio_volume - 10;
-    else if (id == 31)
-        audio_volume = audio_volume > 90 ? 100 : audio_volume + 10;
-    else if (id == 32)
-        audio_muted = !audio_muted;
-    else if (id == 40 && audio_ready && !audio_exit)
-        audio_action = 1;
-    else if (id == 41)
-        audio_action = 2;
-    else if (id == 42)
-    {
-        audio_exit = true;
-        audio_action = 2;
-    }
-    (void)rt_mutex_release(status_lock);
-}
-
-void carplay_connection_audio_snapshot(bool *open, bool *ready, bool *exiting,
-                                       audio_test_config_t *config, int *result, audio_test_status_t *test)
-{
-    if (!open || !ready || !exiting || !config || !result || !test)
-        return;
-    *open = *ready = *exiting = false;
-    *config = (audio_test_config_t){ AUDIO_TEST_TONE, 48000, 0 };
-    *result = RTCP_ESTATE;
-    memset(test, 0, sizeof(*test));
-    if (status_lock == NULL)
-        return;
-    (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
-    *open = audio_open;
-    *ready = audio_ready;
-    *exiting = audio_exit;
-    *config = audio_config;
-    *result = audio_result;
-    (void)rt_mutex_release(status_lock);
-    carplay_audio_test_status(test);
-}
-#endif

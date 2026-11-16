@@ -9,9 +9,6 @@
 #include "fusion_display.h"
 #endif
 #include "rtcp/events.h"
-#if defined(RTCARPLAY_AUDIO)
-#include "audio_test_lubanlite.h"
-#endif
 
 #if defined(RTCARPLAY_IAP2) && defined(LPKG_RT_CARPLAY_LUBANLITE_WIFI)
 #define DEMO_HAS_WIRELESS 1
@@ -82,10 +79,4 @@ bool carplay_connection_files_snapshot(unsigned *revision,
                                        carplay_pair_file_t files[CARPLAY_PAIR_FILES_MAX], unsigned *count,
                                        bool *more, int *result);
 int carplay_connection_touch(uint8_t phase, uint16_t id, uint16_t x, uint16_t y);
-#if defined(RTCARPLAY_AUDIO)
-bool carplay_connection_audio_open(void);
-void carplay_connection_audio_select(unsigned action);
-void carplay_connection_audio_snapshot(bool *open, bool *ready, bool *exiting,
-                                       audio_test_config_t *config, int *result, audio_test_status_t *status);
-#endif
 #endif

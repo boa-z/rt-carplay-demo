@@ -26,7 +26,7 @@ AUDIO_LIBS := $(RTCP_BUILD)/audio-deps/librtcp_faad.a $(RTCP_BUILD)/audio-deps/l
 LDLIBS := $(AUDIO_LIBS) -lm
 CPPFLAGS += $(addprefix -I$(RTCP_ROOT)/,include core core/mfi core/iap2/include core/airplay/include core/crypto/include core/media/include core/input/include core/discovery/include core/usb/include core/audio/include port/rtthread/include third_party/ed25519 port/linux/include third_party/mbedtls/include config) -Iapp -Iplatform
 CPPFLAGS += -DRTCP_AUDIO_CODECS -DMBEDTLS_CONFIG_FILE='"mbedtls_rtcp_host.h"'
-BOARD_BINS := $(addprefix $(BUILD)/,test_audio_diagnostics test_audio_capture test_audio_input test_audio_input_aec test_audio_sink test_pairing_files test_rtthread_app)
+BOARD_BINS := $(addprefix $(BUILD)/,test_audio_capture test_audio_input test_audio_input_aec test_audio_sink test_pairing_files test_rtthread_app)
 export RTCP_ROOT
 $(BUILD):
 	@mkdir -p $@
@@ -224,10 +224,6 @@ check-iap2-endpoints:
 .PHONY: check-wired-trace
 check-wired-trace:
 	python3 tests/run_wired_trace.py
-
-# Offline speaker/microphone test worker against virtual devices.
-$(BUILD)/test_audio_diagnostics: tests/unit/test_audio_diagnostics.c platform/audio_test_lubanlite.c platform/audio_test_fixture.h $(LIB) $(MBEDTLS_LIB)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -DRTCARPLAY_MICROPHONE -Itests/support/lubanlite_audio -Iplatform -o $@ $< $(LIB) $(MBEDTLS_LIB) $(LDLIBS) -lpthread
 
 # Actual board sink with a pthread-backed RT-Thread/device seam.
 $(BUILD)/test_audio_capture: tests/unit/test_audio_capture.c platform/rtcp_audio_capture_lubanlite.c | $(BUILD)
