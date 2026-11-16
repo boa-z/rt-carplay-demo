@@ -6,12 +6,14 @@
 #include <stdint.h>
 
 /* USB CDC-NCM framing, distinct from Apple's vendor Ethernet RX format. */
-struct carplay_ncm_function {
+struct carplay_ncm_function
+{
     uint8_t control, data, alternate, mac_string, capabilities;
     uint8_t in, out, notification;
     uint16_t in_mps, out_mps, segment;
 };
-struct carplay_ncm_limits {
+struct carplay_ncm_limits
+{
     uint32_t input, output;
     uint16_t divisor, remainder, alignment;
 };
@@ -24,7 +26,8 @@ typedef int (*carplay_ncm_frame_fn)(void *, const uint8_t *, size_t);
 int carplay_ncm_decode(const uint8_t *, size_t, carplay_ncm_frame_fn, void *);
 
 /* Header metadata only: never retain TCP/UDP/media payloads. */
-struct carplay_ncm_packet {
+struct carplay_ncm_packet
+{
     uint8_t source_mac[6], destination_mac[6];
     uint8_t source[16], destination[16], target[16];
     uint16_t ether_type, source_port, destination_port;

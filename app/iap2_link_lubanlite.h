@@ -41,7 +41,8 @@ bool carplay_iap2_is_running(void);
 bool carplay_iap2_identification_accepted(void);
 bool carplay_iap2_authenticated(void);
 
-typedef struct {
+typedef struct
+{
     bool running, listening, connected, identified, authenticated;
     unsigned wifi_configs, availability, invites, reinvites, invite_acks;
     bool mfi_completed; /* retained through normal RFCOMM Wi-Fi handover */

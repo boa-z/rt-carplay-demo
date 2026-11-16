@@ -33,9 +33,12 @@
 static struct netif *wired_netif(void)
 {
     const char *name = RTCARPLAY_WIRED_NETIF;
-    if (strlen(name) != 2U) return NULL;
-    for (struct netif *n = netif_list; n != NULL; n = n->next) {
-        if (n->name[0] == name[0] && n->name[1] == name[1]) return n;
+    if (strlen(name) != 2U)
+        return NULL;
+    for (struct netif *n = netif_list; n != NULL; n = n->next)
+    {
+        if (n->name[0] == name[0] && n->name[1] == name[1])
+            return n;
     }
     return NULL;
 }
@@ -47,16 +50,19 @@ static bool wired_netif_is_up(struct netif *netif)
 
 bool rtcp_lubanlite_wired_mac(uint8_t mac[6])
 {
-    if (mac == NULL) return false;
+    if (mac == NULL)
+        return false;
     memset(mac, 0, 6);
     bool found = false;
     LOCK_TCPIP_CORE();
     struct netif *netif = wired_netif();
     if (wired_netif_is_up(netif) && netif->hwaddr_len == 6U &&
-        (netif->hwaddr[0] & 1U) == 0U) {
+        (netif->hwaddr[0] & 1U) == 0U)
+    {
         uint8_t nonzero = 0;
         for (unsigned i = 0; i < 6U; ++i) nonzero |= netif->hwaddr[i];
-        if (nonzero != 0U) {
+        if (nonzero != 0U)
+        {
             memcpy(mac, netif->hwaddr, 6);
             found = true;
         }
@@ -78,21 +84,28 @@ bool rtcp_lubanlite_wired_ipv6(char *address, size_t capacity, bool *valid)
 {
     bool found = false;
 
-    if (valid != NULL) *valid = false;
-    if (address == NULL || capacity < 2U) return false;
+    if (valid != NULL)
+        *valid = false;
+    if (address == NULL || capacity < 2U)
+        return false;
     address[0] = '\0';
 
     LOCK_TCPIP_CORE();
     struct netif *netif = wired_netif();
-    if (wired_netif_is_up(netif)) {
-        for (u8_t i = 0U; i < LWIP_IPV6_NUM_ADDRESSES; ++i) {
+    if (wired_netif_is_up(netif))
+    {
+        for (u8_t i = 0U; i < LWIP_IPV6_NUM_ADDRESSES; ++i)
+        {
             const ip6_addr_t *entry = netif_ip6_addr(netif, i);
-            if (!ip6_addr_islinklocal(entry)) continue;
+            if (!ip6_addr_islinklocal(entry))
+                continue;
             const char *text = ip6addr_ntoa(entry);
             size_t len = strlen(text);
-            if (len + 1U > capacity) break;
+            if (len + 1U > capacity)
+                break;
             memcpy(address, text, len + 1U);
-            if (valid != NULL) {
+            if (valid != NULL)
+            {
                 *valid = ip6_addr_isvalid(netif_ip6_addr_state(netif, i)) != 0;
             }
             found = true;
@@ -107,7 +120,8 @@ bool rtcp_lubanlite_wired_ipv6(char *address, size_t capacity, bool *valid)
 
 bool rtcp_lubanlite_wired_mac(uint8_t mac[6])
 {
-    if (mac != NULL) memset(mac, 0, 6);
+    if (mac != NULL)
+        memset(mac, 0, 6);
     return false;
 }
 
@@ -118,8 +132,10 @@ bool rtcp_lubanlite_wired_net_up(void)
 
 bool rtcp_lubanlite_wired_ipv6(char *address, size_t capacity, bool *valid)
 {
-    if (valid != NULL) *valid = false;
-    if (address != NULL && capacity != 0U) address[0] = '\0';
+    if (valid != NULL)
+        *valid = false;
+    if (address != NULL && capacity != 0U)
+        address[0] = '\0';
     return false;
 }
 

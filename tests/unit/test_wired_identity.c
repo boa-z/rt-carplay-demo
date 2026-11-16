@@ -1,11 +1,22 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include <assert.h>
 #include <string.h>
-#define RT_USING_LWIP 1
+#define RT_USING_LWIP         1
 #define RTCARPLAY_WIRED_NETIF "n0"
 static unsigned lock_depth, lock_calls;
-#define LOCK_TCPIP_CORE() do { assert(!lock_depth); ++lock_depth; ++lock_calls; } while (0)
-#define UNLOCK_TCPIP_CORE() do { assert(lock_depth == 1); --lock_depth; } while (0)
+#define LOCK_TCPIP_CORE()    \
+    do                       \
+    {                        \
+        assert(!lock_depth); \
+        ++lock_depth;        \
+        ++lock_calls;        \
+    } while (0)
+#define UNLOCK_TCPIP_CORE()      \
+    do                           \
+    {                            \
+        assert(lock_depth == 1); \
+        --lock_depth;            \
+    } while (0)
 /* Use the actual seam and lwIP netif layout. Unused IPv6 text conversion is
  * discarded at link time; these checks exercise MAC selection/validation. */
 #include "../../platform/rtcp_net_lubanlite.c"
@@ -16,7 +27,7 @@ static void rejected(void)
     uint8_t mac[6];
     memset(mac, 0xa5, sizeof(mac));
     assert(!rtcp_lubanlite_wired_mac(mac));
-    const uint8_t zero[6] = {0};
+    const uint8_t zero[6] = { 0 };
     assert(!memcmp(mac, zero, 6) && !lock_depth);
 }
 
@@ -24,8 +35,7 @@ int main(void)
 {
     assert(!rtcp_lubanlite_wired_mac(NULL) && !lock_calls);
     rejected();
-    struct netif wan = {.name = {'e', '0'}, .hwaddr_len = 6,
-        .hwaddr = {2, 1, 2, 3, 4, 5}, .flags = NETIF_FLAG_UP | NETIF_FLAG_LINK_UP};
+    struct netif wan = { .name = { 'e', '0' }, .hwaddr_len = 6, .hwaddr = { 2, 1, 2, 3, 4, 5 }, .flags = NETIF_FLAG_UP | NETIF_FLAG_LINK_UP };
     struct netif ipheth = wan;
     ipheth.name[0] = 'i';
     ipheth.next = &wan;

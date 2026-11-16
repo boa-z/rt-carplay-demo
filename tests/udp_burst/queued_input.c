@@ -9,13 +9,23 @@ static bool in_rx, reject_packet;
 static unsigned calls, live_pbufs;
 err_t sys_mbox_trypost(sys_mbox_t *m, void *p)
 {
-    if (m->count == m->capacity) return ERR_MEM;
+    if (m->count == m->capacity)
+        return ERR_MEM;
     m->items[m->count++] = p;
     return ERR_OK;
 }
-void sys_mutex_lock(sys_mutex_t *m) { (void)m; }
-void sys_mutex_unlock(sys_mutex_t *m) { (void)m; }
-u32_t sys_now(void) { return 0; }
+void sys_mutex_lock(sys_mutex_t *m)
+{
+    (void)m;
+}
+void sys_mutex_unlock(sys_mutex_t *m)
+{
+    (void)m;
+}
+u32_t sys_now(void)
+{
+    return 0;
+}
 
 static err_t input(struct pbuf *p, struct netif *netif)
 {
@@ -24,7 +34,8 @@ static err_t input(struct pbuf *p, struct netif *netif)
      * the TCP/IP consumer, never inline in the producer's RX call. */
     assert(!in_rx);
     ++calls;
-    if (reject_packet) return ERR_VAL;
+    if (reject_packet)
+        return ERR_VAL;
     assert(pbuf_free(p) == 1);
     --live_pbufs;
     return ERR_OK;
@@ -46,8 +57,9 @@ static void drain(void)
 #endif
 int main(void)
 {
-    struct netif netif = {0};
-    mem_init(); memp_init();
+    struct netif netif = { 0 };
+    mem_init();
+    memp_init();
     tcpip_mbox.capacity = 2;
     in_rx = true;
     assert(tcpip_inpkt(packet(), &netif, input) == ERR_OK);
@@ -56,7 +68,8 @@ int main(void)
     struct pbuf *rejected = packet();
     assert(tcpip_inpkt(rejected, &netif, input) == ERR_MEM);
     /* A failed enqueue leaves ownership with the adapter. */
-    assert(pbuf_free(rejected) == 1); --live_pbufs;
+    assert(pbuf_free(rejected) == 1);
+    --live_pbufs;
     assert(!calls && live_pbufs == 2);
     in_rx = false;
 #if !LWIP_TCPIP_CORE_LOCKING_INPUT
@@ -65,7 +78,8 @@ int main(void)
     /* A protocol input error is freed by the real tcpip dispatcher. */
     reject_packet = true;
     assert(tcpip_inpkt(packet(), &netif, input) == ERR_OK);
-    drain(); --live_pbufs;
+    drain();
+    --live_pbufs;
     assert(calls == 3 && !live_pbufs);
     reject_packet = false;
     assert(tcpip_inpkt(packet(), &netif, input) == ERR_OK);

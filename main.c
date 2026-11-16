@@ -25,7 +25,8 @@ static void rtcarplay_autostart(void)
     config.rotation_degrees = RTCARPLAY_ROTATION;
 
     int result = carplay_app_start(&config);
-    if (result != RTCP_OK) {
+    if (result != RTCP_OK)
+    {
         rt_kprintf("rt-carplay autostart failed: %d\n", result);
     }
 }
@@ -41,9 +42,11 @@ int main(void)
     rt_kprintf("rt-carplay: Launcher V2; automatic USB and wireless discovery\n");
 #elif defined(RTCARPLAY_AUTO_CONNECT)
     int result;
-    do {
+    do
+    {
         result = carplay_connection_manager_start();
-        if (result != RTCP_OK) {
+        if (result != RTCP_OK)
+        {
             rt_kprintf("rt-carplay: connection owner startup failed=%d; retrying\n", result);
             rt_thread_mdelay(1000);
         }

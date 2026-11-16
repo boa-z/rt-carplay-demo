@@ -16,25 +16,33 @@ static int suffix(char out[PATH_BYTES], const char *path, const char *ending)
 }
 int carplay_file_load(const char *path, uint8_t *data, size_t capacity, size_t *length)
 {
-    if (!path || !data || !length) return RTCP_EINVAL;
+    if (!path || !data || !length)
+        return RTCP_EINVAL;
     *length = 0;
     FILE *f = fopen(path, "rb");
-    if (!f && carplay_file_errno_is(errno, ENOENT)) {
+    if (!f && carplay_file_errno_is(errno, ENOENT))
+    {
         char backup[PATH_BYTES];
-        if (suffix(backup, path, ".bak") != RTCP_OK) return RTCP_EINVAL;
+        if (suffix(backup, path, ".bak") != RTCP_OK)
+            return RTCP_EINVAL;
         f = fopen(backup, "rb");
     }
-    if (!f) {
+    if (!f)
+    {
         int error = errno;
-        if (carplay_file_errno_is(error, ENOENT)) return RTCP_OK;
+        if (carplay_file_errno_is(error, ENOENT))
+            return RTCP_OK;
         RTCP_LOGE("pairing_file", "load open failed path=%s errno=%d", path, error);
         return RTCP_EIO;
     }
     size_t got = fread(data, 1, capacity, f);
     bool ok = !ferror(f) && fgetc(f) == EOF;
-    if (ferror(f)) ok = false;
-    if (fclose(f) != 0) ok = false;
-    if (!ok) {
+    if (ferror(f))
+        ok = false;
+    if (fclose(f) != 0)
+        ok = false;
+    if (!ok)
+    {
         RTCP_LOGE("pairing_file", "load read/size/close failed path=%s bytes=%u capacity=%u errno=%d",
                   path, (unsigned)got, (unsigned)capacity, errno);
         return RTCP_EIO;
@@ -46,22 +54,33 @@ int carplay_file_save(const char *path, const uint8_t *data, size_t length)
 {
     char temporary[PATH_BYTES], backup[PATH_BYTES];
     if (!path || !data || suffix(temporary, path, ".tmp") != RTCP_OK ||
-        suffix(backup, path, ".bak") != RTCP_OK) return RTCP_EINVAL;
+        suffix(backup, path, ".bak") != RTCP_OK)
+        return RTCP_EINVAL;
     FILE *f = fopen(temporary, "wb");
-    if (!f) goto fail;
+    if (!f)
+        goto fail;
     bool ok = fwrite(data, 1, length, f) == length;
-    if (fclose(f) != 0) ok = false;
-    if (!ok) goto fail;
+    if (fclose(f) != 0)
+        ok = false;
+    if (!ok)
+        goto fail;
     f = fopen(path, "rb");
     bool had_primary = f != NULL;
-    if (f) fclose(f);
-    else if (!carplay_file_errno_is(errno, ENOENT)) goto fail;
-    if (had_primary) {
-        if (remove(backup) != 0 && !carplay_file_errno_is(errno, ENOENT)) goto fail;
-        if (rename(path, backup) != 0) goto fail;
+    if (f)
+        fclose(f);
+    else if (!carplay_file_errno_is(errno, ENOENT))
+        goto fail;
+    if (had_primary)
+    {
+        if (remove(backup) != 0 && !carplay_file_errno_is(errno, ENOENT))
+            goto fail;
+        if (rename(path, backup) != 0)
+            goto fail;
     }
-    if (rename(temporary, path) == 0) return RTCP_OK;
-    if (had_primary) (void)rename(backup, path);
+    if (rename(temporary, path) == 0)
+        return RTCP_OK;
+    if (had_primary)
+        (void)rename(backup, path);
 fail:
     RTCP_LOGE("pairing_file", "save failed path=%s errno=%d", path, errno);
     (void)remove(temporary);

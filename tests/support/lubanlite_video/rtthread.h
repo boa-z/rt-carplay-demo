@@ -8,9 +8,9 @@ void rt_hw_interrupt_enable(rt_base_t);
 typedef void *rt_mutex_t;
 typedef void *rt_sem_t;
 typedef void *rt_thread_t;
-#define RT_EOK 0
+#define RT_EOK             0
 #define RT_WAITING_FOREVER (-1)
-#define RT_IPC_FLAG_FIFO 0
+#define RT_IPC_FLAG_FIFO   0
 uint32_t rt_tick_get_millisecond(void);
 int rt_kprintf(const char *, ...);
 int rt_mutex_take(rt_mutex_t, int);
@@ -28,4 +28,4 @@ int rt_thread_delete(rt_thread_t);
 rt_thread_t rt_thread_self(void);
 /* Retain shell entry for warning-clean compilation. */
 #define MSH_CMD_EXPORT_ALIAS(fn, alias, desc) \
-    static int (*const test_shell_##alias)(int, char **) __attribute__((used)) = fn
+    static int (* const test_shell_##alias)(int, char **) __attribute__((used)) = fn

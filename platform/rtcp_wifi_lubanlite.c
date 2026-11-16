@@ -51,7 +51,8 @@ static const char *s_ifname = "wlan0";
  */
 static int wifi_ap_start(const char *ssid, const char *pass, uint8_t channel)
 {
-    if (ssid == NULL || ssid[0] == '\0') return RTCP_EINVAL;
+    if (ssid == NULL || ssid[0] == '\0')
+        return RTCP_EINVAL;
 
     struct rt_wlan_info info;
     memset(&info, 0, sizeof(info));
@@ -61,7 +62,8 @@ static int wifi_ap_start(const char *ssid, const char *pass, uint8_t channel)
                                 : RT_802_11_BAND_2_4GHZ;
     info.channel = (rt_int16_t)channel;
     info.ssid.len = (rt_uint8_t)strlen(ssid);
-    if (info.ssid.len > RT_WLAN_SSID_MAX_LENGTH) {
+    if (info.ssid.len > RT_WLAN_SSID_MAX_LENGTH)
+    {
         info.ssid.len = RT_WLAN_SSID_MAX_LENGTH;
     }
     memcpy(info.ssid.val, ssid, info.ssid.len);
@@ -70,20 +72,25 @@ static int wifi_ap_start(const char *ssid, const char *pass, uint8_t channel)
      * kernel Timer object list and must not run in AP-only mode. */
     rt_wlan_config_autoreconnect(RT_FALSE);
 
-    if (rt_wlan_ap_is_active()) {
+    if (rt_wlan_ap_is_active())
+    {
         rt_wlan_ap_stop();
         rt_thread_mdelay(200);
     }
 
-    if (rt_wlan_set_mode(RT_WLAN_DEVICE_AP_NAME, RT_WLAN_AP) != RT_EOK) {
+    if (rt_wlan_set_mode(RT_WLAN_DEVICE_AP_NAME, RT_WLAN_AP) != RT_EOK)
+    {
         return RTCP_EIO;
     }
-    if (rt_wlan_start_ap_adv(&info, is_open ? RT_NULL : pass) != RT_EOK) {
+    if (rt_wlan_start_ap_adv(&info, is_open ? RT_NULL : pass) != RT_EOK)
+    {
         return RTCP_EIO;
     }
 
-    for (unsigned waited = 0U; waited < AP_START_WAIT_MS; waited += 100U) {
-        if (rt_wlan_ap_is_active()) return RTCP_OK;
+    for (unsigned waited = 0U; waited < AP_START_WAIT_MS; waited += 100U)
+    {
+        if (rt_wlan_ap_is_active())
+            return RTCP_OK;
         rt_thread_mdelay(100);
     }
     return RTCP_ETIMEDOUT;
@@ -98,7 +105,8 @@ static int wifi_ap_stop(void)
 
 static int wifi_set_vendor_ie(const uint8_t *ie, size_t len)
 {
-    if (ie == NULL || len == 0U || len > 255U) return RTCP_EINVAL;
+    if (ie == NULL || len == 0U || len > 255U)
+        return RTCP_EINVAL;
 
     /* Replacing the list is not supported by the driver: clear it first. */
     (void)wext_del_custom_ie(s_ifname);
@@ -106,7 +114,8 @@ static int wifi_set_vendor_ie(const uint8_t *ie, size_t len)
         .ie = (uint8_t *)ie,
         .type = (uint8_t)(PROBE_RSP | BEACON),
     };
-    if (wext_add_custom_ie(s_ifname, &custom, 1) != 0) return RTCP_EIO;
+    if (wext_add_custom_ie(s_ifname, &custom, 1) != 0)
+        return RTCP_EIO;
     return RTCP_OK;
 }
 
@@ -120,7 +129,8 @@ static int wifi_sta_info(struct rtcp_sta_info *out)
 
 void rtcp_wifi_lubanlite_set_interface(const char *name)
 {
-    if (name != NULL && name[0] != '\0') s_ifname = name;
+    if (name != NULL && name[0] != '\0')
+        s_ifname = name;
 }
 
 static int parse_mac(const char *text, uint8_t mac[6])
@@ -128,13 +138,17 @@ static int parse_mac(const char *text, uint8_t mac[6])
     unsigned values[6];
     int fields = sscanf(text, "%x:%x:%x:%x:%x:%x", &values[0], &values[1],
                         &values[2], &values[3], &values[4], &values[5]);
-    if (fields != 6) {
+    if (fields != 6)
+    {
         fields = sscanf(text, "%2x%2x%2x%2x%2x%2x", &values[0], &values[1],
                         &values[2], &values[3], &values[4], &values[5]);
     }
-    if (fields != 6) return RTCP_EINVAL;
-    for (size_t i = 0U; i < 6U; ++i) {
-        if (values[i] > 0xffU) return RTCP_EINVAL;
+    if (fields != 6)
+        return RTCP_EINVAL;
+    for (size_t i = 0U; i < 6U; ++i)
+    {
+        if (values[i] > 0xffU)
+            return RTCP_EINVAL;
         mac[i] = (uint8_t)values[i];
     }
     return RTCP_OK;
@@ -142,9 +156,11 @@ static int parse_mac(const char *text, uint8_t mac[6])
 
 int rtcp_wifi_lubanlite_get_mac(uint8_t mac[6])
 {
-    if (mac == NULL) return RTCP_EINVAL;
-    char text[32] = {0};
-    if (wifi_get_mac_address(text) != RTW_SUCCESS) return RTCP_EIO;
+    if (mac == NULL)
+        return RTCP_EINVAL;
+    char text[32] = { 0 };
+    if (wifi_get_mac_address(text) != RTW_SUCCESS)
+        return RTCP_EIO;
     return parse_mac(text, mac);
 }
 
@@ -152,12 +168,14 @@ int rtcp_wifi_lubanlite_get_mac(uint8_t mac[6])
 static struct netif *find_ap_netif(void)
 {
     rt_device_t ap = rt_device_find(RT_WLAN_DEVICE_AP_NAME);
-    for (struct netif *entry = netif_list; entry != NULL; entry = entry->next) {
+    for (struct netif *entry = netif_list; entry != NULL; entry = entry->next)
+    {
         /* WLAN's lwIP adapter stores the owning rt_wlan_device here.
          * Do not choose a stale STA interface or require a nonzero address
          * before DHCP has had a chance to assign the AP address. */
         struct eth_device *eth = entry->state;
-        if (entry->name[0] == 'w' && ap && eth && eth->parent.user_data == ap) {
+        if (entry->name[0] == 'w' && ap && eth && eth->parent.user_data == ap)
+        {
             return entry;
         }
     }
@@ -167,10 +185,12 @@ static struct netif *find_ap_netif(void)
 
 int rtcp_wifi_lubanlite_get_ipv4(uint8_t address[4])
 {
-    if (address == NULL) return RTCP_EINVAL;
+    if (address == NULL)
+        return RTCP_EINVAL;
 #if defined(RT_USING_LWIP)
     struct netif *netif = find_ap_netif();
-    if (netif == NULL || netif_ip4_addr(netif)->addr == 0) return RTCP_ESTATE;
+    if (netif == NULL || netif_ip4_addr(netif)->addr == 0)
+        return RTCP_ESTATE;
     memcpy(address, &netif_ip4_addr(netif)->addr, 4U);
     return RTCP_OK;
 #else
@@ -182,9 +202,10 @@ int rtcp_wifi_lubanlite_start_dhcpd(void)
 {
 #if defined(RT_USING_LWIP) && defined(LWIP_USING_DHCPD)
     struct netif *netif = find_ap_netif();
-    if (netif == NULL) return RTCP_ESTATE;
+    if (netif == NULL)
+        return RTCP_ESTATE;
     /* lwIP takes a two-character interface name. */
-    char name[3] = {(char)netif->name[0], (char)netif->name[1], '\0'};
+    char name[3] = { (char)netif->name[0], (char)netif->name[1], '\0' };
     dhcpd_start(name);
     return RTCP_OK;
 #else

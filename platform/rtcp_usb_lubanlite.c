@@ -55,27 +55,29 @@
 #define APPLE_USB_VENDOR_ID 0x05acU
 /* Apple's "publish CarPlay USB configurations" request (LIVI iap2-usbmux). */
 #define APPLE_REQUEST_CARPLAY_CONFIGS 0x52U
-#define APPLE_CARPLAY_CONFIGS_WINDEX 0x0004U
+#define APPLE_CARPLAY_CONFIGS_WINDEX  0x0004U
 
-#define CARPLAY_CONFIG_SCAN_MAX 8U
+#define CARPLAY_CONFIG_SCAN_MAX            8U
 #define CARPLAY_CONFIG_ACTIVATE_TIMEOUT_MS 5000U
-#define CARPLAY_CONFIG_ACTIVATE_POLL_MS 100U
-#define CARPLAY_CONFIG_DESC_MAX 1024U
-#define CARPLAY_READ_FAILURE_LIMIT 3U
+#define CARPLAY_CONFIG_ACTIVATE_POLL_MS    100U
+#define CARPLAY_CONFIG_DESC_MAX            1024U
+#define CARPLAY_READ_FAILURE_LIMIT         3U
 
-#define MUX_CLASS RTCP_USB_CLASS_VENDOR
+#define MUX_CLASS    RTCP_USB_CLASS_VENDOR
 #define MUX_SUBCLASS RTCP_USB_APPLE_SUBCLASS_USBMUX
 
 /* CherryUSB carries the next DATA PID in urb.data_toggle, not in the
  * endpoint descriptor. This state outlives each owned DMA transaction. */
-struct usb_bulk_state {
+struct usb_bulk_state
+{
     uint8_t data_toggle;
     uint32_t generation;
     /* Persistent across attachment generations; never shares the EP0 lock. */
     usb_osal_mutex_t mutex;
 };
 
-typedef struct {
+typedef struct
+{
     atomic_bool enabled;
     volatile bool present;
     /* Seqlock: odd while the hub thread updates the snapshot. */
@@ -140,14 +142,17 @@ static void snapshot_write_end(void)
 
 static bool snapshot_read(rtcp_usb_device_t *device)
 {
-    for (unsigned attempt = 0U; attempt < 8U; ++attempt) {
+    for (unsigned attempt = 0U; attempt < 8U; ++attempt)
+    {
         uint32_t sequence = s_usb.sequence;
-        if ((sequence & 1U) != 0U) {
+        if ((sequence & 1U) != 0U)
+        {
             continue;
         }
         memcpy(device, &s_usb.device, sizeof(*device));
         __sync_synchronize();
-        if (s_usb.sequence == sequence) {
+        if (s_usb.sequence == sequence)
+        {
             device->present = s_usb.present;
             return device->present;
         }
@@ -194,24 +199,26 @@ bool rtcp_usb_lubanlite_host_ready(uint32_t generation, bool ready)
 
 static uint8_t map_speed(uint8_t cherryusb_speed)
 {
-    switch (cherryusb_speed) {
-        case USB_SPEED_LOW:
-            return RTCP_USB_SPEED_LOW;
-        case USB_SPEED_FULL:
-            return RTCP_USB_SPEED_FULL;
-        case USB_SPEED_HIGH:
-            return RTCP_USB_SPEED_HIGH;
-        case USB_SPEED_SUPER:
-            return RTCP_USB_SPEED_SUPER;
-        default:
-            return RTCP_USB_SPEED_UNKNOWN;
+    switch (cherryusb_speed)
+    {
+    case USB_SPEED_LOW:
+        return RTCP_USB_SPEED_LOW;
+    case USB_SPEED_FULL:
+        return RTCP_USB_SPEED_FULL;
+    case USB_SPEED_HIGH:
+        return RTCP_USB_SPEED_HIGH;
+    case USB_SPEED_SUPER:
+        return RTCP_USB_SPEED_SUPER;
+    default:
+        return RTCP_USB_SPEED_UNKNOWN;
     }
 }
 
 /* Application callers can supply stack or unaligned buffers. Only this owned,
  * cache-line-padded allocation is exposed to DMA, including the Setup stage.
  * Each transfer owns its semaphore/URB so a failed cancel can retain them. */
-struct usb_dma_transfer {
+struct usb_dma_transfer
+{
     struct usbh_urb urb;
     struct usb_endpoint_descriptor endpoint;
     usb_osal_sem_t done;
@@ -238,9 +245,11 @@ extern void usbh_ehci_transfer_snapshot(struct usbh_urb *, int)
 
 static int map_urb_error(int error)
 {
-    if (error == -USB_ERR_TIMEOUT) return RTCP_ETIMEDOUT;
+    if (error == -USB_ERR_TIMEOUT)
+        return RTCP_ETIMEDOUT;
     if (error == -USB_ERR_NOTCONN || error == -USB_ERR_SHUTDOWN ||
-        error == -USB_ERR_NODEV) return RTCP_ESTATE;
+        error == -USB_ERR_NODEV)
+        return RTCP_ESTATE;
     return RTCP_EIO;
 }
 
@@ -248,16 +257,22 @@ static int map_urb_error(int error)
  * function runs; no HCD ever retains a caller's data or stack Setup packet. */
 /* One five-second window, copied/reset with interrupts masked. No UART or
  * allocation while measuring; the demo's low-priority reporter drains it. */
-struct usb_probe_metric { uint32_t n, total, max, over100; };
-static struct {
+struct usb_probe_metric
+{
+    uint32_t n, total, max, over100;
+};
+static struct
+{
     struct usb_probe_metric in_wait, in_hold, out_wait, out_hold, ep0_wait, ep0_hold;
     uint32_t errors, shorts, last_ep, last_actual, last_length, last_pid;
     int last_rc;
 } s_usb_probe;
 static void usb_probe_add(struct usb_probe_metric *m, uint32_t elapsed)
 {
-    ++m->n; m->total += elapsed;
-    if (elapsed > m->max) m->max = elapsed;
+    ++m->n;
+    m->total += elapsed;
+    if (elapsed > m->max)
+        m->max = elapsed;
     m->over100 += elapsed >= 100;
 }
 uint32_t usbh_control_probe_now_ms(void)
@@ -265,10 +280,11 @@ uint32_t usbh_control_probe_now_ms(void)
     return (uint32_t)rt_tick_get_millisecond();
 }
 void usbh_control_probe_record(struct usbh_hubport *hport, uint8_t request,
-                                uint32_t wait_ms, uint32_t hold_ms)
+                               uint32_t wait_ms, uint32_t hold_ms)
 {
     /* Carrier only: MAC/setup/enumeration are a different workload. */
-    if (hport->device_desc.idVendor != APPLE_USB_VENDOR_ID || request != 0x45) return;
+    if (hport->device_desc.idVendor != APPLE_USB_VENDOR_ID || request != 0x45)
+        return;
     size_t flags = usb_osal_enter_critical_section();
     usb_probe_add(&s_usb_probe.ep0_wait, wait_ms);
     usb_probe_add(&s_usb_probe.ep0_hold, hold_ms);
@@ -277,25 +293,32 @@ void usbh_control_probe_record(struct usbh_hubport *hport, uint8_t request,
 static void usb_probe_print(const char *name, const struct usb_probe_metric *m)
 {
     rt_kprintf("[usb-lock] %s n=%u avg=%u max=%u ge100=%u ms\n", name, m->n,
-        m->n ? m->total / m->n : 0, m->max, m->over100);
+               m->n ? m->total / m->n : 0, m->max, m->over100);
 }
 void rtcp_lubanlite_usb_probe_report(void)
 {
     static uint32_t previous;
     uint32_t now = usbh_control_probe_now_ms();
-    if ((uint32_t)(now - previous) < 5000) return;
-    uint32_t dt = now - previous; previous = now;
+    if ((uint32_t)(now - previous) < 5000)
+        return;
+    uint32_t dt = now - previous;
+    previous = now;
     size_t flags = usb_osal_enter_critical_section();
     __typeof__(s_usb_probe) p = s_usb_probe;
     memset(&s_usb_probe, 0, sizeof(s_usb_probe));
     usb_osal_leave_critical_section(flags);
-    if (!p.in_hold.n && !p.out_hold.n && !p.ep0_hold.n && !p.errors) return;
+    if (!p.in_hold.n && !p.out_hold.n && !p.ep0_hold.n && !p.errors)
+        return;
     rt_kprintf("[usb-lock] dt=%ums errors=%u shorts=%u\n", dt, p.errors, p.shorts);
-    usb_probe_print("in_wait", &p.in_wait); usb_probe_print("in_hold", &p.in_hold);
-    usb_probe_print("out_wait", &p.out_wait); usb_probe_print("out_hold", &p.out_hold);
-    usb_probe_print("ep0_wait", &p.ep0_wait); usb_probe_print("ep0_hold", &p.ep0_hold);
-    if (p.errors || p.shorts) rt_kprintf("[usb-lock] last_ep=%02x rc=%d actual/length=%u/%u pid=%u\n",
-        p.last_ep, p.last_rc, p.last_actual, p.last_length, p.last_pid);
+    usb_probe_print("in_wait", &p.in_wait);
+    usb_probe_print("in_hold", &p.in_hold);
+    usb_probe_print("out_wait", &p.out_wait);
+    usb_probe_print("out_hold", &p.out_hold);
+    usb_probe_print("ep0_wait", &p.ep0_wait);
+    usb_probe_print("ep0_hold", &p.ep0_hold);
+    if (p.errors || p.shorts)
+        rt_kprintf("[usb-lock] last_ep=%02x rc=%d actual/length=%u/%u pid=%u\n",
+                   p.last_ep, p.last_rc, p.last_actual, p.last_length, p.last_pid);
 }
 
 static int dma_transfer(struct usbh_hubport *hport,
@@ -308,9 +331,11 @@ static int dma_transfer(struct usbh_hubport *hport,
         return RTCP_EINVAL;
     if (length > INT32_MAX ||
         length > SIZE_MAX - sizeof(struct usb_dma_transfer) -
-                     (CONFIG_USB_ALIGN_SIZE - 1U)) return RTCP_EINVAL;
+                     (CONFIG_USB_ALIGN_SIZE - 1U))
+        return RTCP_EINVAL;
     usb_osal_mutex_t mutex = pipe ? pipe->mutex : hport->mutex;
-    if (!mutex) return RTCP_ESTATE;
+    if (!mutex)
+        return RTCP_ESTATE;
     uint32_t probe_start = usbh_control_probe_now_ms();
     usb_osal_mutex_take(mutex);
     uint32_t probe_locked = usbh_control_probe_now_ms();
@@ -318,26 +343,41 @@ static int dma_transfer(struct usbh_hubport *hport,
      * before CherryUSB may destroy the port. A queued old caller must not
      * dereference a released port after acquiring its persistent pipe lock. */
     if ((pipe == &s_usb.mux_in_state || pipe == &s_usb.mux_out_state) &&
-        (!s_usb.present || s_usb.hport != hport || pipe->generation != generation)) {
-        usb_osal_mutex_give(mutex); return RTCP_ESTATE;
+        (!s_usb.present || s_usb.hport != hport || pipe->generation != generation))
+    {
+        usb_osal_mutex_give(mutex);
+        return RTCP_ESTATE;
     }
     size_t padded = (length + CONFIG_USB_ALIGN_SIZE - 1U) &
                     ~(size_t)(CONFIG_USB_ALIGN_SIZE - 1U);
     struct usb_dma_transfer *t = rt_malloc_align(sizeof(*t) + padded,
-                                                CONFIG_USB_ALIGN_SIZE);
-    if (!t) { usb_osal_mutex_give(mutex); return RTCP_ENOMEM; }
+                                                 CONFIG_USB_ALIGN_SIZE);
+    if (!t)
+    {
+        usb_osal_mutex_give(mutex);
+        return RTCP_ENOMEM;
+    }
     memset(t, 0, sizeof(*t) + padded);
     t->done = usb_osal_sem_create(0U);
-    if (!t->done) { rt_free_align(t); usb_osal_mutex_give(mutex); return RTCP_ENOMEM; }
+    if (!t->done)
+    {
+        rt_free_align(t);
+        usb_osal_mutex_give(mutex);
+        return RTCP_ENOMEM;
+    }
     bool input = endpoint ? (endpoint->bEndpointAddress & USB_REQUEST_DIR_IN) != 0U
                           : (setup->bmRequestType & USB_REQUEST_DIR_IN) != 0U;
-    if (length && !input) memcpy(t->data, data, length);
-    if (endpoint) {
+    if (length && !input)
+        memcpy(t->data, data, length);
+    if (endpoint)
+    {
         t->endpoint = *endpoint;
         usbh_bulk_urb_fill(&t->urb, hport, &t->endpoint,
                            length ? t->data : NULL, (uint32_t)length, 0U,
                            transfer_complete, t->done);
-    } else {
+    }
+    else
+    {
         t->setup = *setup;
         usbh_control_urb_fill(&t->urb, hport, &t->setup,
                               length ? t->data : NULL, (uint32_t)length, 0U,
@@ -349,22 +389,28 @@ static int dma_transfer(struct usbh_hubport *hport,
      * generation changes and suppress stale toggle updates after reconnect. */
     size_t flags = usb_osal_enter_critical_section();
     bool current = !pipe || pipe->generation == generation;
-    if (pipe) t->urb.data_toggle = pipe->data_toggle;
+    if (pipe)
+        t->urb.data_toggle = pipe->data_toggle;
     usb_osal_leave_critical_section(flags);
     int ret = current ? usbh_submit_urb(&t->urb) : -USB_ERR_NOTCONN;
     bool reclaim = true;
-    if (ret < 0) {
+    if (ret < 0)
+    {
         USB_LOG_WRN("USB submit error ep=%02x raw=%d length=%u\r\n",
-                     t->urb.ep->bEndpointAddress, ret, (unsigned)length);
+                    t->urb.ep->bEndpointAddress, ret, (unsigned)length);
         ret = map_urb_error(ret);
-    } else {
+    }
+    else
+    {
         bool completed = usb_osal_sem_take(t->done, timeout_ms) == 0;
-        if (!completed) {
-            if (!endpoint || !input || RTCP_USB_TRACE_IN_TIMEOUTS) {
+        if (!completed)
+        {
+            if (!endpoint || !input || RTCP_USB_TRACE_IN_TIMEOUTS)
+            {
                 USB_LOG_WRN("USB wait timeout ep=%02x length=%u actual=%u pid=%u urb=%d\r\n",
-                             t->urb.ep->bEndpointAddress, (unsigned)length,
-                             (unsigned)t->urb.actual_length, t->urb.data_toggle,
-                             t->urb.errorcode);
+                            t->urb.ep->bEndpointAddress, (unsigned)length,
+                            (unsigned)t->urb.actual_length, t->urb.data_toggle,
+                            t->urb.errorcode);
                 if (usbh_ehci_transfer_snapshot)
                     usbh_ehci_transfer_snapshot(&t->urb, -USB_ERR_TIMEOUT);
             }
@@ -373,46 +419,59 @@ static int dma_transfer(struct usbh_hubport *hport,
              * valid bytes and the next DATA PID: deliver it normally. Losing
              * either corrupts the shared mux/TLS stream on the next read. */
             completed = usb_osal_sem_take(t->done, 1U) == 0;
-            if (!completed) {
+            if (!completed)
+            {
                 /* On cancellation failure retain URB, callback argument and
                  * DMA storage for a possible late HCD access. */
                 reclaim = usbh_kill_urb(&t->urb) == 0;
                 /* EHCI can complete and release hcpriv just before kill's
                  * critical section. A failed kill then means "already done"
                  * only when the callback semaphore confirms completion. */
-                if (!reclaim && usb_osal_sem_take(t->done, 1U) == 0) {
+                if (!reclaim && usb_osal_sem_take(t->done, 1U) == 0)
+                {
                     completed = true;
                     reclaim = true;
                 }
-                if (!completed) ret = RTCP_ETIMEDOUT;
+                if (!completed)
+                    ret = RTCP_ETIMEDOUT;
             }
         }
-        if (completed) {
-            if (t->urb.errorcode < 0) {
+        if (completed)
+        {
+            if (t->urb.errorcode < 0)
+            {
                 USB_LOG_WRN("USB completion error ep=%02x urb=%d actual=%u pid=%u\r\n",
-                             t->urb.ep->bEndpointAddress, t->urb.errorcode,
-                             (unsigned)t->urb.actual_length, t->urb.data_toggle);
+                            t->urb.ep->bEndpointAddress, t->urb.errorcode,
+                            (unsigned)t->urb.actual_length, t->urb.data_toggle);
                 ret = map_urb_error(t->urb.errorcode);
-            } else {
+            }
+            else
+            {
                 flags = usb_osal_enter_critical_section();
                 if (pipe && pipe->generation == generation)
                     pipe->data_toggle = t->urb.data_toggle;
                 usb_osal_leave_critical_section(flags);
                 size_t actual = t->urb.actual_length;
                 size_t prefix = endpoint ? 0U : sizeof(t->setup);
-                if (actual < prefix || actual - prefix > length) {
+                if (actual < prefix || actual - prefix > length)
+                {
                     ret = RTCP_EIO;
-                } else {
+                }
+                else
+                {
                     ret = (int)(actual - prefix);
-                    if (input && ret > 0) memcpy(data, t->data, (size_t)ret);
+                    if (input && ret > 0)
+                        memcpy(data, t->data, (size_t)ret);
                 }
             }
         }
     }
-    if (pipe && pipe->generation != generation) ret = RTCP_ESTATE;
+    if (pipe && pipe->generation != generation)
+        ret = RTCP_ESTATE;
     uint32_t probe_end = usbh_control_probe_now_ms();
     usb_osal_mutex_give(mutex);
-    if (endpoint) {
+    if (endpoint)
+    {
         flags = usb_osal_enter_critical_section();
         usb_probe_add(input ? &s_usb_probe.in_wait : &s_usb_probe.out_wait,
                       probe_locked - probe_start);
@@ -420,10 +479,13 @@ static int dma_transfer(struct usbh_hubport *hport,
                       probe_end - probe_locked);
         bool short_out = !input && ret >= 0 && (size_t)ret != length;
         s_usb_probe.shorts += short_out;
-        if (ret < 0 || short_out) {
+        if (ret < 0 || short_out)
+        {
             /* IN idle timeouts are normal, not a missing OUT packet. */
-            if (!input || ret != RTCP_ETIMEDOUT) ++s_usb_probe.errors;
-            if (!input || ret != RTCP_ETIMEDOUT) {
+            if (!input || ret != RTCP_ETIMEDOUT)
+                ++s_usb_probe.errors;
+            if (!input || ret != RTCP_ETIMEDOUT)
+            {
                 s_usb_probe.last_ep = endpoint->bEndpointAddress;
                 s_usb_probe.last_actual = t->urb.actual_length;
                 s_usb_probe.last_length = (uint32_t)length;
@@ -433,10 +495,13 @@ static int dma_transfer(struct usbh_hubport *hport,
         }
         usb_osal_leave_critical_section(flags);
     }
-    if (reclaim) {
+    if (reclaim)
+    {
         usb_osal_sem_delete(t->done);
         rt_free_align(t);
-    } else {
+    }
+    else
+    {
         USB_LOG_ERR("USB transfer cancel failed; DMA storage quarantined\r\n");
     }
     return ret;
@@ -448,12 +513,14 @@ static int control_transfer_timeout(struct usbh_hubport *hport,
                                     uint16_t length, uint32_t timeout_ms)
 {
     struct usb_setup_packet setup = {
-        .bmRequestType = request_type, .bRequest = request,
-        .wValue = value, .wIndex = index, .wLength = length,
+        .bmRequestType = request_type,
+        .bRequest = request,
+        .wValue = value,
+        .wIndex = index,
+        .wLength = length,
     };
     return dma_transfer(hport, NULL, &setup, data, length,
-                         timeout_ms ? timeout_ms :
-                         CONFIG_USBHOST_CONTROL_TRANSFER_TIMEOUT, NULL, 0U);
+                        timeout_ms ? timeout_ms : CONFIG_USBHOST_CONTROL_TRANSFER_TIMEOUT, NULL, 0U);
 }
 
 static bool read_config_descriptor(struct usbh_hubport *hport, uint8_t index,
@@ -467,15 +534,18 @@ static bool read_config_descriptor(struct usbh_hubport *hport, uint8_t index,
         USB_REQUEST_GET_DESCRIPTOR,
         (uint16_t)((USB_DESCRIPTOR_TYPE_CONFIGURATION << 8) | index), 0U,
         buffer, 9U, CONFIG_USBHOST_CONTROL_TRANSFER_TIMEOUT);
-    if (ret < 9) {
+    if (ret < 9)
+    {
         return false;
     }
-    if (buffer[0] < 9U || buffer[1] != USB_DESCRIPTOR_TYPE_CONFIGURATION) {
+    if (buffer[0] < 9U || buffer[1] != USB_DESCRIPTOR_TYPE_CONFIGURATION)
+    {
         return false;
     }
     uint16_t total = (uint16_t)((uint16_t)buffer[2] |
                                 ((uint16_t)buffer[3] << 8U));
-    if (total < 9U || total > capacity) {
+    if (total < 9U || total > capacity)
+    {
         rt_kprintf("[usb-desc] config %u: wTotalLength=%u exceeds the "
                    "%u-byte diagnostic buffer\n",
                    index, total, (unsigned)capacity);
@@ -488,7 +558,8 @@ static bool read_config_descriptor(struct usbh_hubport *hport, uint8_t index,
         USB_REQUEST_GET_DESCRIPTOR,
         (uint16_t)((USB_DESCRIPTOR_TYPE_CONFIGURATION << 8) | index), 0U,
         buffer, total, CONFIG_USBHOST_CONTROL_TRANSFER_TIMEOUT);
-    if (ret < (int)total) {
+    if (ret < (int)total)
+    {
         return false;
     }
     *total_length = total;
@@ -510,7 +581,8 @@ static bool find_carplay_configuration(struct usbh_hubport *hport,
                                        bool dump)
 {
     uint8_t bus = hport->bus->busid;
-    if (bus >= CONFIG_USBHOST_MAX_BUS) {
+    if (bus >= CONFIG_USBHOST_MAX_BUS)
+    {
         return false;
     }
     uint8_t *buffer = s_config_desc[bus];
@@ -521,11 +593,14 @@ static bool find_carplay_configuration(struct usbh_hubport *hport,
 
     for (uint8_t index = 0U;
          index < configuration_count && index < CARPLAY_CONFIG_SCAN_MAX;
-         ++index) {
+         ++index)
+    {
         uint16_t total = 0U;
         if (!read_config_descriptor(hport, index, buffer, CARPLAY_CONFIG_DESC_MAX,
-                                    &total)) {
-            if (dump) {
+                                    &total))
+        {
+            if (dump)
+            {
                 rt_kprintf("[usb-desc] config %u: read failed\n", index);
             }
             continue;
@@ -533,14 +608,17 @@ static bool find_carplay_configuration(struct usbh_hubport *hport,
         rtcp_usb_device_t probe;
         memset(&probe, 0, sizeof(probe));
         int parsed = rtcp_usb_parse_configuration(&probe, buffer, total);
-        if (parsed != RTCP_OK) {
-            if (dump) {
+        if (parsed != RTCP_OK)
+        {
+            if (dump)
+            {
                 rt_kprintf("[usb-desc] config %u: parse failed (%d)\n", index,
                            parsed);
             }
             continue;
         }
-        if (dump) {
+        if (dump)
+        {
             rtcp_usb_describe_configuration(&probe, buffer, total, index,
                                             descriptor_emit, NULL);
         }
@@ -551,18 +629,21 @@ static bool find_carplay_configuration(struct usbh_hubport *hport,
 #if defined(RTCARPLAY_NATIVE_NCM)
         /* Native NCM owns the data path. Apple Ethernet descriptors do not
          * make its unbuilt driver a usable fallback. */
-        if (kind != RTCP_USB_CONFIG_NCM) continue;
+        if (kind != RTCP_USB_CONFIG_NCM)
+            continue;
 #elif !defined(LPKG_CHERRYUSB_HOST_NCM)
         /* Descriptors alone do not install a CDC-NCM driver. The retained
          * target uses its independent Apple Ethernet class and i0 adapter. */
-        if (!functions.apple_ethernet) continue;
+        if (!functions.apple_ethernet)
+            continue;
 #endif
         /* Community implementations distinguish a full NCM + Apple Ethernet
          * personality from a usable tethering interface. Keep the SDK's
          * generic classification separate from this application policy. */
         bool mode = kind == RTCP_USB_CONFIG_NCM && functions.apple_ethernet;
         unsigned rank = (mode ? 4U : 0U) + (unsigned)kind;
-        if (kind != RTCP_USB_CONFIG_OTHER && rank > best_rank) {
+        if (kind != RTCP_USB_CONFIG_OTHER && rank > best_rank)
+        {
             best_kind = kind;
             best_index = index;
             best_rank = rank;
@@ -570,9 +651,11 @@ static bool find_carplay_configuration(struct usbh_hubport *hport,
         }
     }
 
-    if (best_kind != RTCP_USB_CONFIG_OTHER) {
+    if (best_kind != RTCP_USB_CONFIG_OTHER)
+    {
         *selected_index = best_index;
-        if (mode_present) *mode_present = best_mode;
+        if (mode_present)
+            *mode_present = best_mode;
         return true;
     }
     return false;
@@ -590,7 +673,8 @@ static uint8_t read_configuration_count(struct usbh_hubport *hport)
         sizeof(descriptor), CONFIG_USBHOST_CONTROL_TRANSFER_TIMEOUT);
     if (ret < (int)sizeof(descriptor) ||
         descriptor[0] != USB_SIZEOF_DEVICE_DESC ||
-        descriptor[1] != USB_DESCRIPTOR_TYPE_DEVICE) {
+        descriptor[1] != USB_DESCRIPTOR_TYPE_DEVICE)
+    {
         return 0U;
     }
     return descriptor[17];
@@ -604,7 +688,8 @@ static int request_carplay_configurations(struct usbh_hubport *hport)
         USB_REQUEST_DIR_IN | USB_REQUEST_VENDOR | USB_REQUEST_RECIPIENT_DEVICE,
         APPLE_REQUEST_CARPLAY_CONFIGS, 0U, APPLE_CARPLAY_CONFIGS_WINDEX,
         &response, 1U, 1000U);
-    if (ret < 0) {
+    if (ret < 0)
+    {
         USB_LOG_WRN("CarPlay config request failed:%d\r\n", ret);
     }
     USB_LOG_INFO("CarPlay mode request 0x52: data_bytes=%d response=%02x\r\n",
@@ -620,7 +705,8 @@ static int request_carplay_configurations(struct usbh_hubport *hport)
 uint8_t usbh_get_hport_active_config_index(struct usbh_hubport *hport)
 {
     if (!s_usb.enabled || hport == NULL ||
-        hport->device_desc.idVendor != APPLE_USB_VENDOR_ID) {
+        hport->device_desc.idVendor != APPLE_USB_VENDOR_ID)
+    {
         return 0U;
     }
 
@@ -630,8 +716,9 @@ uint8_t usbh_get_hport_active_config_index(struct usbh_hubport *hport)
     /* Enumeration still reads all candidates; full descriptor rendering is
      * available through 'carplay_usb desc' instead of every reconnect. */
     bool fallback = find_carplay_configuration(hport, count, &selected,
-                                                &mode_present, false);
-    if (fallback && mode_present) {
+                                               &mode_present, false);
+    if (fallback && mode_present)
+    {
         USB_LOG_INFO("CarPlay composite mode already present: index %u\r\n",
                      selected);
         s_usb.last_configuration_index = selected;
@@ -639,12 +726,15 @@ uint8_t usbh_get_hport_active_config_index(struct usbh_hubport *hport)
     }
 
     USB_LOG_INFO("Apple device reports %u configurations; wired_fallback=%u, "
-                 "requesting CarPlay mode before class bind\r\n", count, fallback);
+                 "requesting CarPlay mode before class bind\r\n",
+                 count, fallback);
     int activation = request_carplay_configurations(hport);
-    if (activation != 1) {
+    if (activation != 1)
+    {
         /* Old/locked phones can reject the community mode request. Retain
          * a usable descriptor-backed path; no guessed configuration number. */
-        if (fallback && hport->connected) {
+        if (fallback && hport->connected)
+        {
             s_usb.last_configuration_index = selected;
             USB_LOG_WRN("CarPlay mode request not accepted; trying wired fallback index %u\r\n",
                         selected);
@@ -657,11 +747,14 @@ uint8_t usbh_get_hport_active_config_index(struct usbh_hubport *hport)
     unsigned failures = 0U;
     for (uint32_t elapsed = 0U;
          elapsed < CARPLAY_CONFIG_ACTIVATE_TIMEOUT_MS;
-         elapsed += CARPLAY_CONFIG_ACTIVATE_POLL_MS) {
+         elapsed += CARPLAY_CONFIG_ACTIVATE_POLL_MS)
+    {
         usb_osal_msleep(CARPLAY_CONFIG_ACTIVATE_POLL_MS);
         uint8_t refreshed = read_configuration_count(hport);
-        if (refreshed == 0U) {
-            if (++failures >= CARPLAY_READ_FAILURE_LIMIT) {
+        if (refreshed == 0U)
+        {
+            if (++failures >= CARPLAY_READ_FAILURE_LIMIT)
+            {
                 USB_LOG_WRN("Device stopped answering while waiting for "
                             "CarPlay configurations\r\n");
                 fallback = false;
@@ -673,8 +766,9 @@ uint8_t usbh_get_hport_active_config_index(struct usbh_hubport *hport)
         count = refreshed;
         hport->device_desc.bNumConfigurations = count;
         fallback = find_carplay_configuration(hport, count, &selected,
-                                               &mode_present, false);
-        if (fallback && mode_present) {
+                                              &mode_present, false);
+        if (fallback && mode_present)
+        {
             /* Keep the enumeration record consistent with what the phone now
              * reports; the log and later users see the updated count. */
             hport->device_desc.bNumConfigurations = count;
@@ -685,7 +779,8 @@ uint8_t usbh_get_hport_active_config_index(struct usbh_hubport *hport)
         }
     }
 
-    if (fallback && hport->connected) {
+    if (fallback && hport->connected)
+    {
         s_usb.last_configuration_index = selected;
         USB_LOG_WRN("CarPlay composite mode not observed; trying refreshed wired fallback index %u\r\n",
                     selected);
@@ -704,25 +799,29 @@ uint8_t usbh_get_hport_active_config_index(struct usbh_hubport *hport)
 void rtcp_usb_lubanlite_dump_configurations(bool request_carplay)
 {
     struct usbh_hubport *hport = s_usb.hport;
-    if (!s_usb.present || hport == NULL) {
+    if (!s_usb.present || hport == NULL)
+    {
         rt_kprintf("[carplay_usb] desc: no iPhone attached; run "
                    "'carplay_usb start' and plug it in\n");
         return;
     }
 
     uint8_t count = read_configuration_count(hport);
-    if (count == 0U) {
+    if (count == 0U)
+    {
         rt_kprintf("[carplay_usb] desc: cannot read the device descriptor\n");
         return;
     }
     rt_kprintf("[carplay_usb] desc: %u configuration(s), selected index %u\n",
                count, s_usb.last_configuration_index);
-    if (request_carplay) {
+    if (request_carplay)
+    {
         rt_kprintf("[carplay_usb] desc: sending Apple request 0x52\n");
         request_carplay_configurations(hport);
         usb_osal_msleep(300);
         uint8_t refreshed = read_configuration_count(hport);
-        if (refreshed != 0U && refreshed != count) {
+        if (refreshed != 0U && refreshed != count)
+        {
             count = refreshed;
             rt_kprintf("[carplay_usb] desc: the device now reports %u "
                        "configuration(s)\n",
@@ -731,22 +830,26 @@ void rtcp_usb_lubanlite_dump_configurations(bool request_carplay)
     }
 
     uint8_t bus = hport->bus->busid;
-    if (bus >= CONFIG_USBHOST_MAX_BUS) {
+    if (bus >= CONFIG_USBHOST_MAX_BUS)
+    {
         return;
     }
     uint8_t *buffer = s_config_desc[bus];
     for (uint8_t index = 0U;
-         index < count && index < CARPLAY_CONFIG_SCAN_MAX; ++index) {
+         index < count && index < CARPLAY_CONFIG_SCAN_MAX; ++index)
+    {
         uint16_t total = 0U;
         if (!read_config_descriptor(hport, index, buffer, CARPLAY_CONFIG_DESC_MAX,
-                                    &total)) {
+                                    &total))
+        {
             rt_kprintf("[usb-desc] config %u: read failed\n", index);
             continue;
         }
         rtcp_usb_device_t probe;
         memset(&probe, 0, sizeof(probe));
         int parsed = rtcp_usb_parse_configuration(&probe, buffer, total);
-        if (parsed != RTCP_OK) {
+        if (parsed != RTCP_OK)
+        {
             rt_kprintf("[usb-desc] config %u: parse failed (%d)\n", index,
                        parsed);
             continue;
@@ -762,7 +865,8 @@ void rtcp_usb_lubanlite_dump_configurations(bool request_carplay)
 static bool endpoint_descriptor_from_info(const rtcp_usb_endpoint_t *info,
                                           struct usb_endpoint_descriptor *desc)
 {
-    if (info->address == 0U) {
+    if (info->address == 0U)
+    {
         return false;
     }
     memset(desc, 0, sizeof(*desc));
@@ -781,11 +885,13 @@ static int carplay_usbmux_connect(struct usbh_hubport *hport, uint8_t intf)
         s_usb.mux_in_state.mutex = usb_osal_mutex_create();
     if (!s_usb.mux_out_state.mutex)
         s_usb.mux_out_state.mutex = usb_osal_mutex_create();
-    if (!s_usb.mux_in_state.mutex || !s_usb.mux_out_state.mutex) return -1;
+    if (!s_usb.mux_in_state.mutex || !s_usb.mux_out_state.mutex)
+        return -1;
     (void)intf;
     if (!s_usb.enabled || hport == NULL ||
         hport->device_desc.idVendor != APPLE_USB_VENDOR_ID ||
-        hport->raw_config_desc == NULL || hport->config.config_desc.wTotalLength == 0U) {
+        hport->raw_config_desc == NULL || hport->config.config_desc.wTotalLength == 0U)
+    {
         return -1;
     }
 
@@ -803,20 +909,23 @@ static int carplay_usbmux_connect(struct usbh_hubport *hport, uint8_t intf)
     device.address = hport->dev_addr;
     device.configuration_index = s_usb.last_configuration_index;
     if (rtcp_usb_parse_configuration(&device, hport->raw_config_desc,
-                                     hport->config.config_desc.wTotalLength) != RTCP_OK) {
+                                     hport->config.config_desc.wTotalLength) != RTCP_OK)
+    {
         USB_LOG_ERR("CarPlay: cannot parse the selected configuration\r\n");
         return -1;
     }
 
     int mux = rtcp_usb_find_interface(&device, MUX_CLASS, MUX_SUBCLASS,
                                       RTCP_USB_APPLE_PROTOCOL_USBMUX);
-    if (mux < 0) {
+    if (mux < 0)
+    {
         return -1;
     }
     uint8_t out = 0U;
     uint8_t in = 0U;
     if (!rtcp_usb_interface_bulk_endpoints(&device.interfaces[mux], &out, &in) ||
-        out == 0U || in == 0U) {
+        out == 0U || in == 0U)
+    {
         USB_LOG_ERR("CarPlay: USBMUX interface has no bulk pair\r\n");
         return -1;
     }
@@ -824,27 +933,32 @@ static int carplay_usbmux_connect(struct usbh_hubport *hport, uint8_t intf)
     uint16_t out_packet = 0U;
     uint16_t in_packet = 0U;
     const rtcp_usb_interface_t *interface = &device.interfaces[mux];
-    for (uint8_t alt = 0U; alt < interface->altsetting_count; ++alt) {
-        for (uint8_t e = 0U; e < interface->altsettings[alt].endpoint_count; ++e) {
+    for (uint8_t alt = 0U; alt < interface->altsetting_count; ++alt)
+    {
+        for (uint8_t e = 0U; e < interface->altsettings[alt].endpoint_count; ++e)
+        {
             const rtcp_usb_endpoint_t *endpoint =
                 &interface->altsettings[alt].endpoints[e];
-            if (endpoint->address == out) out_packet = endpoint->max_packet_size;
-            if (endpoint->address == in) in_packet = endpoint->max_packet_size;
+            if (endpoint->address == out)
+                out_packet = endpoint->max_packet_size;
+            if (endpoint->address == in)
+                in_packet = endpoint->max_packet_size;
         }
     }
 
     struct usb_endpoint_descriptor out_desc;
     struct usb_endpoint_descriptor in_desc;
     if (!endpoint_descriptor_from_info(
-            &(rtcp_usb_endpoint_t){.address = out,
-                                   .transfer_type = RTCP_USB_TRANSFER_BULK,
-                                   .max_packet_size = out_packet},
+            &(rtcp_usb_endpoint_t){ .address = out,
+                                    .transfer_type = RTCP_USB_TRANSFER_BULK,
+                                    .max_packet_size = out_packet },
             &out_desc) ||
         !endpoint_descriptor_from_info(
-            &(rtcp_usb_endpoint_t){.address = in,
-                                   .transfer_type = RTCP_USB_TRANSFER_BULK,
-                                   .max_packet_size = in_packet},
-            &in_desc)) {
+            &(rtcp_usb_endpoint_t){ .address = in,
+                                    .transfer_type = RTCP_USB_TRANSFER_BULK,
+                                    .max_packet_size = in_packet },
+            &in_desc))
+    {
         return -1;
     }
 
@@ -867,9 +981,10 @@ static int carplay_usbmux_connect(struct usbh_hubport *hport, uint8_t intf)
                  device.configuration_value, out, in);
 
     rtcp_usb_event_cb_t callback = s_usb.callback;
-    if (callback != NULL) {
+    if (callback != NULL)
+    {
         callback((rtcp_usb_t *)&rtcp_usb_lubanlite, RTCP_USB_EVENT_ATTACHED,
-                             s_usb.user);
+                 s_usb.user);
     }
     return 0;
 }
@@ -877,7 +992,8 @@ static int carplay_usbmux_connect(struct usbh_hubport *hport, uint8_t intf)
 static int carplay_usbmux_disconnect(struct usbh_hubport *hport, uint8_t intf)
 {
     (void)intf;
-    if (s_usb.hport != hport) {
+    if (s_usb.hport != hport)
+    {
         return 0;
     }
 
@@ -894,20 +1010,23 @@ static int carplay_usbmux_disconnect(struct usbh_hubport *hport, uint8_t intf)
 
     ++s_usb.detach_count;
     /* The persistent locks drain DMA owners before core releases hport. */
-    if (s_usb.mux_in_state.mutex) {
+    if (s_usb.mux_in_state.mutex)
+    {
         usb_osal_mutex_take(s_usb.mux_in_state.mutex);
         usb_osal_mutex_give(s_usb.mux_in_state.mutex);
     }
-    if (s_usb.mux_out_state.mutex) {
+    if (s_usb.mux_out_state.mutex)
+    {
         usb_osal_mutex_take(s_usb.mux_out_state.mutex);
         usb_osal_mutex_give(s_usb.mux_out_state.mutex);
     }
     USB_LOG_INFO("CarPlay USB detached\r\n");
 
     rtcp_usb_event_cb_t callback = s_usb.callback;
-    if (callback != NULL) {
+    if (callback != NULL)
+    {
         callback((rtcp_usb_t *)&rtcp_usb_lubanlite, RTCP_USB_EVENT_DETACHED,
-                             s_usb.user);
+                 s_usb.user);
     }
     return 0;
 }
@@ -954,7 +1073,8 @@ static void lubanlite_close(void *context)
 static int lubanlite_get_device(void *context, rtcp_usb_device_t *device)
 {
     (void)context;
-    if (device == NULL) {
+    if (device == NULL)
+    {
         return RTCP_EINVAL;
     }
     return snapshot_read(device) ? RTCP_OK : RTCP_ESTATE;
@@ -966,7 +1086,8 @@ static int lubanlite_control_transfer(void *context, uint8_t request_type,
                                       uint16_t length, uint32_t timeout_ms)
 {
     (void)context;
-    if (!s_usb.present || s_usb.hport == NULL) {
+    if (!s_usb.present || s_usb.hport == NULL)
+    {
         return RTCP_ESTATE;
     }
     return control_transfer_timeout(s_usb.hport, request_type, request, value,
@@ -977,14 +1098,19 @@ static int lubanlite_bulk_transfer(void *context, uint8_t endpoint, void *data,
                                    size_t length, uint32_t timeout_ms)
 {
     (void)context;
-    if (!data) return RTCP_ESTATE;
+    if (!data)
+        return RTCP_ESTATE;
     size_t flags = usb_osal_enter_critical_section();
-    if (!s_usb.present || !s_usb.hport) {
-        usb_osal_leave_critical_section(flags); return RTCP_ESTATE;
+    if (!s_usb.present || !s_usb.hport)
+    {
+        usb_osal_leave_critical_section(flags);
+        return RTCP_ESTATE;
     }
     bool input = endpoint == s_usb.mux_in;
-    if (!input && endpoint != s_usb.mux_out) {
-        usb_osal_leave_critical_section(flags); return RTCP_ENOTSUP;
+    if (!input && endpoint != s_usb.mux_out)
+    {
+        usb_osal_leave_critical_section(flags);
+        return RTCP_ENOTSUP;
     }
     struct usbh_hubport *hport = s_usb.hport;
     struct usb_bulk_state *pipe = input ? &s_usb.mux_in_state : &s_usb.mux_out_state;
@@ -994,14 +1120,18 @@ static int lubanlite_bulk_transfer(void *context, uint8_t endpoint, void *data,
     usb_osal_leave_critical_section(flags);
     /* Capture identity and descriptor together before waiting for ownership.
      * A reused hport address is not proof of the same attachment generation. */
-    if (input && length > 16384U) length = 16384U;
-    int ret = dma_transfer(hport,&descriptor,NULL,data,length,
-                           timeout_ms ? timeout_ms : 1000U,pipe,generation);
-    if (ret < 0 || input) return ret;
-    if (length && packet_size && length % packet_size == 0) {
-        int zlp = dma_transfer(hport,&descriptor,NULL,NULL,0,
-                               timeout_ms ? timeout_ms : 1000U,pipe,generation);
-        if (zlp < 0) return zlp;
+    if (input && length > 16384U)
+        length = 16384U;
+    int ret = dma_transfer(hport, &descriptor, NULL, data, length,
+                           timeout_ms ? timeout_ms : 1000U, pipe, generation);
+    if (ret < 0 || input)
+        return ret;
+    if (length && packet_size && length % packet_size == 0)
+    {
+        int zlp = dma_transfer(hport, &descriptor, NULL, NULL, 0,
+                               timeout_ms ? timeout_ms : 1000U, pipe, generation);
+        if (zlp < 0)
+            return zlp;
     }
     return ret;
 }

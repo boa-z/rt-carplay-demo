@@ -2,13 +2,21 @@
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
-typedef enum { AUDIO_TEST_TONE, AUDIO_TEST_SILENCE, AUDIO_TEST_AAC,
-               AUDIO_TEST_MIC_LEVEL, AUDIO_TEST_MIC_LOOP } audio_test_mode_t;
-typedef struct {
+typedef enum
+{
+    AUDIO_TEST_TONE,
+    AUDIO_TEST_SILENCE,
+    AUDIO_TEST_AAC,
+    AUDIO_TEST_MIC_LEVEL,
+    AUDIO_TEST_MIC_LOOP
+} audio_test_mode_t;
+typedef struct
+{
     audio_test_mode_t mode;
     unsigned rate, channel; /* stereo output: 0 both, 1 left, 2 right */
 } audio_test_config_t;
-typedef struct {
+typedef struct
+{
     bool running, muted;
     unsigned volume, frames, bytes, peak_left, peak_right, writes;
     int error;

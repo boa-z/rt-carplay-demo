@@ -35,17 +35,19 @@
 #include <aic_log.h>
 #include <hal_ce.h>
 
-#define TRNG_UNIT ALG_HASH_ACCELERATOR
+#define TRNG_UNIT        ALG_HASH_ACCELERATOR
 #define TRNG_CHUNK_BYTES 32U
-#define TRNG_TIMEOUT_US 300000U
+#define TRNG_TIMEOUT_US  300000U
 
 bool rtcp_lubanlite_random(uint8_t *output, size_t len)
 {
-    if (output == NULL || len == 0U) return false;
-    uint8_t *const baseline = output;
+    if (output == NULL || len == 0U)
+        return false;
+    uint8_t * const baseline = output;
     const size_t total = len;
 
-    if (hal_crypto_init() != 0) {
+    if (hal_crypto_init() != 0)
+    {
         pr_err("rtcp: failed to enable the CE clock\n");
         memset(baseline, 0, total);
         return false;
@@ -54,7 +56,8 @@ bool rtcp_lubanlite_random(uint8_t *output, size_t len)
     /* The CE writes through the cache, so the output buffer is cache-line
      * sized and aligned; only the requested prefix is copied out. */
     uint8_t block[CACHE_LINE_SIZE] __attribute__((aligned(CACHE_LINE_SIZE)));
-    while (len != 0U) {
+    while (len != 0U)
+    {
         size_t chunk = len < TRNG_CHUNK_BYTES ? len : TRNG_CHUNK_BYTES;
         struct crypto_task task __attribute__((aligned(CACHE_LINE_SIZE)));
         memset(&task, 0, sizeof(task));
@@ -66,14 +69,16 @@ bool rtcp_lubanlite_random(uint8_t *output, size_t len)
         aicos_dcache_clean_range((void *)&task, sizeof(task));
         aicos_dcache_invalid_range(block, sizeof(block));
         hal_crypto_start_hash(&task);
-        if (hal_crypto_poll_finish(TRNG_UNIT, TRNG_TIMEOUT_US) != 0) {
+        if (hal_crypto_poll_finish(TRNG_UNIT, TRNG_TIMEOUT_US) != 0)
+        {
             pr_err("rtcp: CE TRNG timed out\n");
             memset(block, 0, sizeof(block));
             memset(baseline, 0, total);
             return false;
         }
         hal_crypto_pending_clear(TRNG_UNIT);
-        if (hal_crypto_get_err(TRNG_UNIT) != 0U) {
+        if (hal_crypto_get_err(TRNG_UNIT) != 0U)
+        {
             pr_err("rtcp: CE TRNG reported an error\n");
             hal_crypto_err_clear(TRNG_UNIT);
             memset(block, 0, sizeof(block));
@@ -93,7 +98,8 @@ bool rtcp_lubanlite_random(uint8_t *output, size_t len)
 
 bool rtcp_lubanlite_random(uint8_t *output, size_t len)
 {
-    if (output != NULL) memset(output, 0, len);
+    if (output != NULL)
+        memset(output, 0, len);
     return false;
 }
 

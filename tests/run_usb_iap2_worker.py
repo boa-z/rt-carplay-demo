@@ -3,6 +3,7 @@
 """Run the actual USB iAP2 worker with real SDK sessions and delayed scheduling."""
 from pathlib import Path
 import os
+import re
 import subprocess
 import tempfile
 
@@ -40,7 +41,7 @@ source = r'''
 #define IAP2_USB_TICK 20
 #define IAP2_USB_RX_TIMEOUT_MS 100
 '''
-a = text.index("typedef struct {\n    iap2_session_t *session;")
+a = re.search(r"typedef\s+struct\s*\{\s*iap2_session_t\s*\*session;", text).start()
 b = text.index("} iap2_usb_link_t;", a) + len("} iap2_usb_link_t;")
 source += text[a:b]
 source += r'''

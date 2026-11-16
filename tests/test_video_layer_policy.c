@@ -27,15 +27,18 @@ int rt_device_control(rt_device_t device, int command, void *argument)
     assert(device != NULL);
     struct aicfb_alpha_config *alpha = argument;
     assert(alpha->layer_id == AICFB_LAYER_TYPE_UI);
-    if ((unsigned)command == 0x4626U) {
+    if ((unsigned)command == 0x4626U)
+    {
         ++reads;
-        if (fail_read) return -1;
+        if (fail_read)
+            return -1;
         *alpha = current;
         return 0;
     }
     assert((unsigned)command == 0x4627U);
     ++writes;
-    if (fail_write) return -1;
+    if (fail_write)
+        return -1;
     current = *alpha;
     return 0;
 }
@@ -56,7 +59,8 @@ int main(void)
     missing = true;
     carplay_launcher_video_event(true, NULL);
     assert(reads == 0 && writes == 0);
-    missing = false; fail_read = true;
+    missing = false;
+    fail_read = true;
     carplay_launcher_video_event(true, NULL);
     assert(reads == 1 && writes == 0 && !carplay_launcher_video_is_active());
     fail_read = false;
@@ -72,7 +76,8 @@ int main(void)
     assert(writes == 2);
 
     /* Reconnect recaptures current host policy; a failed hide is restorable. */
-    current.value = 219; original = current;
+    current.value = 219;
+    original = current;
     fail_write = true;
     carplay_launcher_video_event(true, NULL);
     assert(current.value == 219 && !carplay_launcher_video_is_active());

@@ -8,7 +8,8 @@
 /* Copied observations only; callers never access lwIP objects or wait for I/O.
  * Reachability means the configured WAN-bound HTTP 204 check passed, not a
  * guarantee that every Internet destination or an attached iPhone works. */
-typedef struct {
+typedef struct
+{
     bool available, device, link, addressed, route_ready, checking, checked, reachable, sharing;
     uint32_t age_ms;
     char address[16], mask[16], gateway[16], dns[16];
@@ -19,7 +20,12 @@ void carplay_internet_status(carplay_internet_status_t *out);
 bool carplay_internet_check(void);
 #else
 static inline void carplay_internet_status(carplay_internet_status_t *out)
-{ memset(out, 0, sizeof(*out)); }
-static inline bool carplay_internet_check(void) { return false; }
+{
+    memset(out, 0, sizeof(*out));
+}
+static inline bool carplay_internet_check(void)
+{
+    return false;
+}
 #endif
 #endif

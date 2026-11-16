@@ -53,14 +53,14 @@
  * (0x0100/0x1200/0x1000) and dropped the link with reason 0x13. */
 #define IAP2_LINK_UUID "00000000-deca-fade-deca-deafdecacaff"
 
-#define IAP2_LINK_RX_MS 100
+#define IAP2_LINK_RX_MS    100
 #define IAP2_LINK_RX_BYTES 1024U
 
 /* The iAP2 callbacks build up to ~1.6 KB bodies on the stack; leave room for
  * the transport and logging paths. */
 #define IAP2_LINK_STACK_BYTES (12U * 1024U)
-#define IAP2_LINK_PRIORITY 20U
-#define IAP2_LINK_TICK 20U
+#define IAP2_LINK_PRIORITY    20U
+#define IAP2_LINK_TICK        20U
 
 /* IdentificationInformation strings.  modelIdentifier is the accessory model;
  * the firmware/hardware versions are informational.  Override per product. */
@@ -74,9 +74,10 @@
 #define RTCARPLAY_IAP2_HARDWARE_VERSION "ArtInChip demo128"
 #endif
 #define IAP2_LINK_MANUFACTURER "ArtInChip"
-#define IAP2_LINK_LANGUAGE "en"
+#define IAP2_LINK_LANGUAGE     "en"
 
-typedef struct {
+typedef struct
+{
     iap2_session_t *session;
     int fd;
     char ip_address[16];
@@ -135,10 +136,13 @@ static void link_reset_service(iap2_link_t *link)
 static bool link_tx(const uint8_t *bytes, size_t len, void *context)
 {
     iap2_link_t *link = context;
-    if (link == &s_tunnel) return carplay_app_send_iap(bytes, len);
-    if (link->fd < 1) return false;
+    if (link == &s_tunnel)
+        return carplay_app_send_iap(bytes, len);
+    if (link->fd < 1)
+        return false;
     int sent = rtcp_bt_lubanlite_send(link->fd, bytes, len);
-    if (sent != (int)len) {
+    if (sent != (int)len)
+    {
         IAP2_LOG("tx failed (%d of %u bytes)", sent, (unsigned)len);
         return false;
     }
@@ -150,7 +154,8 @@ static bool link_get_wifi(iap2_session_wifi_t *out, void *context)
 {
     iap2_link_t *link = context;
     carplay_app_iap2_info_t snapshot;
-    if (carplay_app_iap2_info(&snapshot) != RTCP_OK) return false;
+    if (carplay_app_iap2_info(&snapshot) != RTCP_OK)
+        return false;
     link->endpoint = snapshot;
     const carplay_app_iap2_info_t *info = &link->endpoint;
 
@@ -159,7 +164,8 @@ static bool link_get_wifi(iap2_session_wifi_t *out, void *context)
     out->passphrase = info->passphrase;
     out->channel = info->channel;
     out->security_type = info->security_type;
-    if (info->bssid_valid) memcpy(out->bssid, info->bssid, sizeof(out->bssid));
+    if (info->bssid_valid)
+        memcpy(out->bssid, info->bssid, sizeof(out->bssid));
     return true;
 }
 
@@ -167,14 +173,16 @@ static bool link_get_airplay(iap2_session_airplay_t *out, void *context)
 {
     iap2_link_t *link = context;
     carplay_app_iap2_info_t snapshot;
-    if (carplay_app_iap2_info(&snapshot) != RTCP_OK) return false;
+    if (carplay_app_iap2_info(&snapshot) != RTCP_OK)
+        return false;
     link->endpoint = snapshot;
     const carplay_app_iap2_info_t *info = &link->endpoint;
 
     int written = rt_snprintf(link->ip_address, sizeof(link->ip_address),
                               "%u.%u.%u.%u", info->ipv4[0], info->ipv4[1],
                               info->ipv4[2], info->ipv4[3]);
-    if (written <= 0 || (size_t)written >= sizeof(link->ip_address)) return false;
+    if (written <= 0 || (size_t)written >= sizeof(link->ip_address))
+        return false;
 
     memset(out, 0, sizeof(*out));
     out->airplay_port = info->airplay_port;
@@ -192,7 +200,8 @@ static void link_event(iap2_session_event_t event, void *context)
     iap2_link_t *link = context;
     ++link->events;
 
-    switch (event) {
+    switch (event)
+    {
     case IAP2_SESSION_EVENT_IDENTIFICATION_ACCEPTED:
         link->identification_accepted = true;
         IAP2_LOG("identification accepted");
@@ -261,7 +270,8 @@ static void link_event(iap2_session_event_t event, void *context)
         IAP2_LOG("iAP2 link ready");
         break;
     case IAP2_SESSION_EVENT_LINK_DEAD:
-        if (link == &s_tunnel) link->error = RTCP_EIO;
+        if (link == &s_tunnel)
+            link->error = RTCP_EIO;
         IAP2_LOG("iAP2 link failed (protocol)");
         break;
     default:
@@ -286,17 +296,22 @@ static const struct rtcp_mfi *link_mfi(void)
      * with the Bluetooth controller untouched).  If both fail the session
      * still gets a lazy handle: the first certificate request re-probes,
      * by which time the phone has connected and the part has recovered. */
-    for (int attempt = 0; attempt < 2; attempt++) {
+    for (int attempt = 0; attempt < 2; attempt++)
+    {
         result = rtcp_mfi_lubanlite_start(RTCARPLAY_MFI_I2C_BUS,
                                           RTCARPLAY_MFI_I2C_ADDR);
-        if (result == RTCP_OK) return rtcp_mfi_lubanlite();
-        if (attempt == 0) rt_thread_mdelay(100);
+        if (result == RTCP_OK)
+            return rtcp_mfi_lubanlite();
+        if (attempt == 0)
+            rt_thread_mdelay(100);
     }
     IAP2_LOG("MFi coprocessor not ready at start rc=%d; retrying when the "
-             "phone requests the certificate", result);
+             "phone requests the certificate",
+             result);
     const struct rtcp_mfi *lazy = rtcp_mfi_lubanlite_lazy(
         RTCARPLAY_MFI_I2C_BUS, RTCARPLAY_MFI_I2C_ADDR);
-    if (lazy != NULL) return lazy;
+    if (lazy != NULL)
+        return lazy;
     IAP2_LOG("MFi lazy handle unavailable; the session will stop after "
              "identification");
 #else
@@ -310,13 +325,15 @@ static int link_session_create(iap2_link_t *link, const struct rtcp_mfi *mfi)
 {
     carplay_app_iap2_info_t snapshot;
     int result = carplay_app_iap2_info(&snapshot);
-    if (result != RTCP_OK) return result;
+    if (result != RTCP_OK)
+        return result;
     link->endpoint = snapshot;
     const carplay_app_iap2_info_t *info = &link->endpoint;
 
     uint8_t bdaddr[6];
     result = rtcp_bt_lubanlite_local_bdaddr(bdaddr);
-    if (result != RTCP_OK) {
+    if (result != RTCP_OK)
+    {
         IAP2_LOG("cannot read the local Bluetooth address rc=%d", result);
         return result;
     }
@@ -374,7 +391,8 @@ static void link_thread(void *parameter)
     bool provider_installed = false;
     bool transport_attempted = false;
     int result = RTCP_OK;
-    if (!s_serve) goto done;
+    if (!s_serve)
+        goto done;
 
     /* Probe the coprocessor before the Bluetooth controller is enabled so a
      * healthy part is ready by the time the phone connects.  Board logs show
@@ -382,41 +400,51 @@ static void link_thread(void *parameter)
      * (even with Bluetooth untouched), so link_mfi() keeps a lazy handle
      * that re-probes at certificate time. */
     mfi = link_mfi();
-    if (!s_serve) goto done;
-    if (mfi != NULL) {
+    if (!s_serve)
+        goto done;
+    if (mfi != NULL)
+    {
         provider_installed = carplay_mfi_provider_install(mfi) == RTCP_OK;
         if (!provider_installed)
             IAP2_LOG("AirPlay /auth-setup MFi provider unavailable");
     }
 
-    if (!s_serve) goto done;
+    if (!s_serve)
+        goto done;
     transport_attempted = true;
     result = rtcp_bt_lubanlite.enable("rt-carplay", NULL);
-    if (result != RTCP_OK) {
+    if (result != RTCP_OK)
+    {
         IAP2_LOG("Bluetooth enable failed rc=%d", result);
         goto done;
     }
-    if (!s_serve) goto done;
+    if (!s_serve)
+        goto done;
 
     result = link_session_create(link, mfi);
-    if (result != RTCP_OK) {
+    if (result != RTCP_OK)
+    {
         IAP2_LOG("iAP2 session create failed rc=%d", result);
         goto done;
     }
-    if (!s_serve) goto done;
+    if (!s_serve)
+        goto done;
 
     uint8_t channel = 0U;
     result = rtcp_bt_lubanlite_rfcomm_listen(0U, "rt-carplay", IAP2_LINK_UUID,
                                              &channel);
-    if (result != RTCP_OK) {
+    if (result != RTCP_OK)
+    {
         IAP2_LOG("iAP2 SDP/RFCOMM registration failed rc=%d", result);
         goto done;
     }
     IAP2_LOG("RFCOMM iAP2 service on channel %u", (unsigned)channel);
     link->listening = true;
 
-    while (s_serve) {
-        if (!carplay_app_is_running()) {
+    while (s_serve)
+    {
+        if (!carplay_app_is_running())
+        {
             IAP2_LOG("receiver stopped, ending the iAP2 service");
             result = RTCP_OK;
             break;
@@ -426,15 +454,20 @@ static void link_thread(void *parameter)
         bool reconnect = carplay_app_iap2_info(&idle_info) == RTCP_OK &&
                          !idle_info.airplay_connected && !s_tunnel.link_up;
         result = rtcp_bt_lubanlite_reconnect_tick(reconnect);
-        if (result != RTCP_OK) break;
+        if (result != RTCP_OK)
+            break;
         int fd = -1;
         result = rtcp_bt_lubanlite_rfcomm_accept_timeout(1, &fd, 500);
-        if (result == RTCP_ETIMEDOUT) continue;
-        if (result != RTCP_OK) {
-            if (s_serve) IAP2_LOG("accept stopped rc=%d", result);
+        if (result == RTCP_ETIMEDOUT)
+            continue;
+        if (result != RTCP_OK)
+        {
+            if (s_serve)
+                IAP2_LOG("accept stopped rc=%d", result);
             break;
         }
-        if (!s_serve) break;
+        if (!s_serve)
+            break;
         /* The accepted DLC now owns the ACL lifecycle. Drop only the
          * reconnect reference, keeping this connection for normal iAP2. */
         (void)rtcp_bt_lubanlite_reconnect_tick(false);
@@ -452,8 +485,10 @@ static void link_thread(void *parameter)
         iap2_session_link_up(link->session, rtcp_os_rtthread.now_ms());
         IAP2_LOG("link up (fd %d)", fd);
 
-        while (s_serve) {
-            if (!carplay_app_is_running()) break;
+        while (s_serve)
+        {
+            if (!carplay_app_is_running())
+                break;
 
             uint8_t buffer[IAP2_LINK_RX_BYTES];
             int received = rtcp_bt_lubanlite_recv_timeout(fd, buffer,
@@ -461,12 +496,17 @@ static void link_thread(void *parameter)
                                                           IAP2_LINK_RX_MS);
             uint64_t now = rtcp_os_rtthread.now_ms();
 
-            if (received > 0) {
+            if (received > 0)
+            {
                 link->rx_bytes += (unsigned)received;
                 iap2_session_feed(link->session, buffer, (size_t)received, now);
-            } else if (received == 0) {
+            }
+            else if (received == 0)
+            {
                 break;
-            } else if (received != RTCP_ETIMEDOUT) {
+            }
+            else if (received != RTCP_ETIMEDOUT)
+            {
                 IAP2_LOG("recv failed rc=%d", received);
                 rtcp_bt_lubanlite_drop_link(fd);
                 break;
@@ -475,7 +515,8 @@ static void link_thread(void *parameter)
             /* Notify only on transitions: the session restarts its invite
              * timer on every "disconnected" notification. */
             if (carplay_app_iap2_info(&info) == RTCP_OK &&
-                info.airplay_connected != link->airplay_connected) {
+                info.airplay_connected != link->airplay_connected)
+            {
                 link->airplay_connected = info.airplay_connected;
                 IAP2_LOG("AirPlay event channel %s",
                          info.airplay_connected ? "connected" : "closed");
@@ -486,7 +527,8 @@ static void link_thread(void *parameter)
             iap2_session_advance(link->session, now);
         }
 
-        if (link->session != NULL) iap2_session_link_down(link->session);
+        if (link->session != NULL)
+            iap2_session_link_down(link->session);
         link->fd = -1;
         link->link_up = false;
         link_reset_progress(link);
@@ -495,25 +537,30 @@ static void link_thread(void *parameter)
     }
 
 done:
-    if (s_serve && result != RTCP_OK) link->error = result;
+    if (s_serve && result != RTCP_OK)
+        link->error = result;
     link->listening = false;
-    if (link->session != NULL && link->link_up) {
+    if (link->session != NULL && link->link_up)
+    {
         iap2_session_link_down(link->session);
     }
     /* Also covers stop arriving during bt_enable()/SDP registration: do
      * not leave a freshly initialized controller discoverable after stop. */
-    if (transport_attempted) {
+    if (transport_attempted)
+    {
         rtcp_bt_lubanlite_disconnect();
         (void)rtcp_bt_lubanlite_reconnect_tick(false);
     }
     link->fd = -1;
     link->link_up = false;
     link_reset_progress(link);
-    if (link->session != NULL) {
+    if (link->session != NULL)
+    {
         iap2_session_destroy(link->session);
         link->session = NULL;
     }
-    if (provider_installed) carplay_mfi_provider_release(mfi);
+    if (provider_installed)
+        carplay_mfi_provider_release(mfi);
     s_serve = false;
     carplay_bt_release(CARPLAY_BT_OWNER_IAP2);
     IAP2_LOG("service stopped");
@@ -526,12 +573,15 @@ done:
 static int link_start_owned(void)
 {
     unsigned stop_generation = s_stop_generation;
-    if (s_link.running) return RTCP_ESTATE;
-    if (!carplay_app_is_running()) {
+    if (s_link.running)
+        return RTCP_ESTATE;
+    if (!carplay_app_is_running())
+    {
         IAP2_LOG("start the receiver (carplay_start) first");
         return RTCP_ESTATE;
     }
-    if (!carplay_bt_claim(CARPLAY_BT_OWNER_IAP2)) {
+    if (!carplay_bt_claim(CARPLAY_BT_OWNER_IAP2))
+    {
         IAP2_LOG("Bluetooth link is already owned by another service");
         return RTCP_ESTATE;
     }
@@ -540,19 +590,22 @@ static int link_start_owned(void)
     s_serve = true;
     /* A non-blocking stop may arrive during claim/reset, before this store.
      * Preserve that request instead of starting a late controller/session. */
-    if (s_stop_generation != stop_generation) s_serve = false;
+    if (s_stop_generation != stop_generation)
+        s_serve = false;
     s_link.running = true;
     s_link_thread = rt_thread_create("carplay-iap2", link_thread, &s_link,
-                                          IAP2_LINK_STACK_BYTES,
-                                          IAP2_LINK_PRIORITY, IAP2_LINK_TICK);
-    if (s_link_thread == NULL) {
+                                     IAP2_LINK_STACK_BYTES,
+                                     IAP2_LINK_PRIORITY, IAP2_LINK_TICK);
+    if (s_link_thread == NULL)
+    {
         s_serve = false;
         s_link.error = RTCP_ENOMEM;
         carplay_bt_release(CARPLAY_BT_OWNER_IAP2);
         s_link.running = false;
         return RTCP_ENOMEM;
     }
-    if (rt_thread_startup(s_link_thread) != RT_EOK) {
+    if (rt_thread_startup(s_link_thread) != RT_EOK)
+    {
         rt_thread_delete(s_link_thread);
         s_link_thread = NULL;
         s_serve = false;
@@ -586,13 +639,15 @@ int carplay_iap2_stop(void)
     if (atomic_flag_test_and_set_explicit(&s_link_call, memory_order_acquire))
         return RTCP_ESTATE;
     rt_thread_t thread = s_link_thread;
-    if (thread != NULL && rt_thread_self() == thread) {
+    if (thread != NULL && rt_thread_self() == thread)
+    {
         atomic_flag_clear_explicit(&s_link_call, memory_order_release);
         return RTCP_ESTATE;
     }
     carplay_iap2_request_stop();
     for (unsigned waited = 0U; s_link.running && waited < 3000U;
-         waited += 10U) {
+         waited += 10U)
+    {
         rt_thread_mdelay(10);
     }
     int result = s_link.running ? RTCP_ETIMEDOUT : RTCP_OK;
@@ -617,7 +672,8 @@ bool carplay_iap2_authenticated(void)
 
 void carplay_iap2_get_status(carplay_iap2_status_t *out)
 {
-    if (!out) return;
+    if (!out)
+        return;
     out->running = s_link.running;
     out->listening = s_link.listening;
     out->connected = s_link.link_up;
@@ -644,29 +700,38 @@ static int cmd_carplay_iap2(int argc, char **argv)
 {
     const char *sub = argc >= 2 ? argv[1] : "status";
 #if defined(RTCARPLAY_DEMO_LAUNCHER) || defined(RTCARPLAY_AUTO_CONNECT)
-    if (strcmp(sub, "status") != 0) {
+    if (strcmp(sub, "status") != 0)
+    {
         rt_kprintf("Automatic connection manager owns Bluetooth iAP2; use the connection selector\n");
         return 0;
     }
 #endif
 
-    if (strcmp(sub, "start") == 0) {
+    if (strcmp(sub, "start") == 0)
+    {
         int result = carplay_iap2_start();
-        if (result == RTCP_ESTATE) {
+        if (result == RTCP_ESTATE)
+        {
             rt_kprintf("carplay_iap2: start carplay_start first, and stop "
                        "carplay_bt if it is running\n");
-        } else if (result != RTCP_OK) {
+        }
+        else if (result != RTCP_OK)
+        {
             rt_kprintf("carplay_iap2 start failed: %d\n", result);
         }
         return 0;
     }
-    if (strcmp(sub, "stop") == 0) {
+    if (strcmp(sub, "stop") == 0)
+    {
         int result = carplay_iap2_stop();
-        if (result == RTCP_OK) rt_kprintf("carplay_iap2 stopped\n");
-        else rt_kprintf("carplay_iap2 stop failed: %d\n", result);
+        if (result == RTCP_OK)
+            rt_kprintf("carplay_iap2 stopped\n");
+        else
+            rt_kprintf("carplay_iap2 stop failed: %d\n", result);
         return 0;
     }
-    if (strcmp(sub, "status") == 0) {
+    if (strcmp(sub, "status") == 0)
+    {
         const char *coproc = "not built in";
 #if defined(RTCARPLAY_MFI)
         coproc = rtcp_mfi_lubanlite_ready() ? "ready" : "absent";
@@ -678,9 +743,9 @@ static int cmd_carplay_iap2(int argc, char **argv)
                    s_link.link_up ? "up" : "down",
                    (unsigned)rtcp_bt_lubanlite_channel(), coproc,
                    carplay_iap2_identification_accepted() ? "accepted"
-                                                         : "pending",
+                                                          : "pending",
                    carplay_iap2_authenticated() ? "authenticated"
-                       : (s_link.link_up ? "not authenticated" : "-"),
+                                                : (s_link.link_up ? "not authenticated" : "-"),
                    s_link.rx_bytes, s_link.tx_bytes, s_link.events);
         rt_kprintf("  listening=%u error=%d MFi_completed=%u wifi_configs=%u "
                    "availability=%u invites=%u reinvites=%u link_acks=%u\n",
@@ -699,7 +764,7 @@ static int cmd_carplay_iap2(int argc, char **argv)
 }
 
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_iap2, carplay_iap2,
-                     Wireless iAP2 over RFCOMM: start|stop|status);
+                     Wireless iAP2 over RFCOMM : start | stop | status);
 
 #if defined(RTCARPLAY_MFI)
 /*
@@ -717,10 +782,12 @@ static const struct rtcp_mfi *cmd_mfi_ready(void)
 {
     const struct rtcp_mfi *mfi = rtcp_mfi_lubanlite();
 
-    if (mfi != NULL) return mfi;
+    if (mfi != NULL)
+        return mfi;
     int result = rtcp_mfi_lubanlite_start(RTCARPLAY_MFI_I2C_BUS,
                                           RTCARPLAY_MFI_I2C_ADDR);
-    if (result != RTCP_OK) {
+    if (result != RTCP_OK)
+    {
         rt_kprintf("carplay_mfi: coprocessor not ready rc=%d\n", result);
         return NULL;
     }
@@ -730,12 +797,14 @@ static const struct rtcp_mfi *cmd_mfi_ready(void)
 static int cmd_carplay_mfi_cert(int argc, char **argv)
 {
     const struct rtcp_mfi *mfi = cmd_mfi_ready();
-    if (mfi == NULL) return 0;
+    if (mfi == NULL)
+        return 0;
 
     static uint8_t certificate[IAP2_LINK_CERT_CAPACITY];
     size_t len = sizeof(certificate);
     int result = mfi->read_cert(certificate, sizeof(certificate), &len);
-    if (result != RTCP_OK) {
+    if (result != RTCP_OK)
+    {
         rt_kprintf("carplay_mfi cert: read failed rc=%d\n", result);
         return 0;
     }
@@ -743,14 +812,17 @@ static int cmd_carplay_mfi_cert(int argc, char **argv)
     rt_kprintf("carplay_mfi cert: %u bytes\n", (unsigned)len);
     bool raw = argc >= 3 && strcmp(argv[2], "raw") == 0;
     size_t shown = raw ? len : (len < 16U ? len : 16U);
-    for (size_t offset = 0; offset < shown; offset += 16U) {
+    for (size_t offset = 0; offset < shown; offset += 16U)
+    {
         rt_kprintf("%04x:", (unsigned)offset);
-        for (size_t i = 0; i < 16U && offset + i < shown; ++i) {
+        for (size_t i = 0; i < 16U && offset + i < shown; ++i)
+        {
             rt_kprintf(" %02x", certificate[offset + i]);
         }
         rt_kprintf("\n");
     }
-    if (!raw && len > shown) {
+    if (!raw && len > shown)
+    {
         rt_kprintf("carplay_mfi cert raw  (print the full DER as hex)\n");
     }
     return 0;
@@ -773,29 +845,34 @@ static int cmd_carplay_mfi_cert(int argc, char **argv)
  * are sent unchanged; only the local self-test needs the X.509 leaf inside.
  * mbedtls 2.7 has no PKCS#7 parser, so walk the DER containers directly.
  */
-struct der_tlv {
+struct der_tlv
+{
     uint8_t tag;
-    const uint8_t *start;   /* tag byte */
-    const uint8_t *value;   /* first content byte */
-    size_t len;             /* content length */
-    const uint8_t *next;    /* first byte after this TLV */
+    const uint8_t *start; /* tag byte */
+    const uint8_t *value; /* first content byte */
+    size_t len;           /* content length */
+    const uint8_t *next;  /* first byte after this TLV */
 };
 
 static int der_next(const uint8_t *p, const uint8_t *end, struct der_tlv *t)
 {
     size_t len;
 
-    if (p == NULL || t == NULL || (size_t)(end - p) < 2U) return -1;
+    if (p == NULL || t == NULL || (size_t)(end - p) < 2U)
+        return -1;
     t->start = p;
     t->tag = *p++;
     len = *p++;
-    if ((len & 0x80U) != 0U) {
+    if ((len & 0x80U) != 0U)
+    {
         size_t n = len & 0x7FU;
-        if (n == 0U || n > 3U || (size_t)(end - p) < n) return -1;
+        if (n == 0U || n > 3U || (size_t)(end - p) < n)
+            return -1;
         len = 0U;
         while (n-- > 0U) len = (len << 8) | *p++;
     }
-    if ((size_t)(end - p) < len) return -1;
+    if ((size_t)(end - p) < len)
+        return -1;
     t->value = p;
     t->len = len;
     t->next = p + len;
@@ -866,23 +943,29 @@ static void cmd_mfi_check_signature(const uint8_t *certificate,
     mbedtls_x509_crt_init(&crt);
 
     if (pkcs7_first_certificate(certificate, certificate_len, &x509,
-                                &x509_len) == 0) {
+                                &x509_len) == 0)
+    {
         rt_kprintf("carplay_mfi sign: PKCS#7 SignedData, leaf certificate "
-                   "%u bytes of %u\n", (unsigned)x509_len,
+                   "%u bytes of %u\n",
+                   (unsigned)x509_len,
                    (unsigned)certificate_len);
-    } else {
+    }
+    else
+    {
         rt_kprintf("carplay_mfi sign: certificate is not PKCS#7 SignedData; "
                    "parsing as X.509\n");
     }
 
     int result = mbedtls_x509_crt_parse(&crt, x509, x509_len);
-    if (result != 0) {
+    if (result != 0)
+    {
         rt_kprintf("carplay_mfi sign: certificate parse failed -0x%04x\n",
                    -result);
         mbedtls_x509_crt_free(&crt);
         return;
     }
-    if (mbedtls_pk_get_type(&crt.pk) != MBEDTLS_PK_RSA) {
+    if (mbedtls_pk_get_type(&crt.pk) != MBEDTLS_PK_RSA)
+    {
         rt_kprintf("carplay_mfi sign: certificate key is not RSA (type %d)\n",
                    (int)mbedtls_pk_get_type(&crt.pk));
         mbedtls_x509_crt_free(&crt);
@@ -892,8 +975,10 @@ static void cmd_mfi_check_signature(const uint8_t *certificate,
     mbedtls_rsa_context *rsa = mbedtls_pk_rsa(crt.pk);
     size_t rsa_len = (size_t)mbedtls_rsa_get_len(rsa);
     rt_kprintf("carplay_mfi sign: certificate RSA %u bits, signature %u "
-               "bytes\n", (unsigned)(rsa_len * 8U), (unsigned)signature_len);
-    if (signature_len != rsa_len) {
+               "bytes\n",
+               (unsigned)(rsa_len * 8U), (unsigned)signature_len);
+    if (signature_len != rsa_len)
+    {
         rt_kprintf("carplay_mfi sign: signature length does not match the "
                    "certificate key\n");
         mbedtls_x509_crt_free(&crt);
@@ -914,12 +999,14 @@ static void cmd_mfi_check_signature(const uint8_t *certificate,
 static int cmd_carplay_mfi_sign(void)
 {
     const struct rtcp_mfi *mfi = cmd_mfi_ready();
-    if (mfi == NULL) return 0;
+    if (mfi == NULL)
+        return 0;
 
     static uint8_t certificate[IAP2_LINK_CERT_CAPACITY];
     static uint8_t signature[RTCP_MFI_SIG_MAX];
     uint8_t challenge[RTCP_MFI_CHALLENGE_LEN];
-    for (size_t i = 0; i < sizeof(challenge); ++i) {
+    for (size_t i = 0; i < sizeof(challenge); ++i)
+    {
         challenge[i] = (uint8_t)i;
     }
 
@@ -928,11 +1015,14 @@ static int cmd_carplay_mfi_sign(void)
                            sizeof(signature), &signature_len);
     rt_kprintf("carplay_mfi sign: rc=%d signature %u bytes\n", result,
                (unsigned)signature_len);
-    if (result != RTCP_OK) return 0;
+    if (result != RTCP_OK)
+        return 0;
 
-    for (size_t offset = 0; offset < signature_len; offset += 16U) {
+    for (size_t offset = 0; offset < signature_len; offset += 16U)
+    {
         rt_kprintf("%04x:", (unsigned)offset);
-        for (size_t i = 0; i < 16U && offset + i < signature_len; ++i) {
+        for (size_t i = 0; i < 16U && offset + i < signature_len; ++i)
+        {
             rt_kprintf(" %02x", signature[offset + i]);
         }
         rt_kprintf("\n");
@@ -940,10 +1030,13 @@ static int cmd_carplay_mfi_sign(void)
 
     size_t certificate_len = sizeof(certificate);
     if (mfi->read_cert(certificate, sizeof(certificate), &certificate_len) ==
-        RTCP_OK) {
+        RTCP_OK)
+    {
         cmd_mfi_check_signature(certificate, certificate_len, challenge,
                                 sizeof(challenge), signature, signature_len);
-    } else {
+    }
+    else
+    {
         rt_kprintf("carplay_mfi sign: certificate read failed; "
                    "signature not verified\n");
     }
@@ -952,13 +1045,16 @@ static int cmd_carplay_mfi_sign(void)
 
 static int cmd_carplay_mfi(int argc, char **argv)
 {
-    if (argc >= 2 && strcmp(argv[1], "cert") == 0) {
+    if (argc >= 2 && strcmp(argv[1], "cert") == 0)
+    {
         return cmd_carplay_mfi_cert(argc, argv);
     }
-    if (argc >= 2 && strcmp(argv[1], "sign") == 0) {
+    if (argc >= 2 && strcmp(argv[1], "sign") == 0)
+    {
         return cmd_carplay_mfi_sign();
     }
-    if (argc >= 2 && strcmp(argv[1], "dump") == 0) {
+    if (argc >= 2 && strcmp(argv[1], "dump") == 0)
+    {
         rtcp_mfi_lubanlite_dump(RTCARPLAY_MFI_I2C_BUS, RTCARPLAY_MFI_I2C_ADDR);
         return 0;
     }
@@ -966,19 +1062,29 @@ static int cmd_carplay_mfi(int argc, char **argv)
     const char *bus_name = argc >= 2 ? argv[1] : RTCARPLAY_MFI_I2C_BUS;
     unsigned addr = RTCARPLAY_MFI_I2C_ADDR;
 
-    if (argc >= 3) {
+    if (argc >= 3)
+    {
         const char *p = argv[2];
         unsigned v = 0;
 
-        if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) p += 2;
-        while (*p != '\0') {
+        if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X'))
+            p += 2;
+        while (*p != '\0')
+        {
             char c = *p++;
             unsigned d;
 
-            if (c >= '0' && c <= '9') d = (unsigned)(c - '0');
-            else if (c >= 'a' && c <= 'f') d = (unsigned)(c - 'a' + 10);
-            else if (c >= 'A' && c <= 'F') d = (unsigned)(c - 'A' + 10);
-            else { v = 0; break; }
+            if (c >= '0' && c <= '9')
+                d = (unsigned)(c - '0');
+            else if (c >= 'a' && c <= 'f')
+                d = (unsigned)(c - 'a' + 10);
+            else if (c >= 'A' && c <= 'F')
+                d = (unsigned)(c - 'A' + 10);
+            else
+            {
+                v = 0;
+                break;
+            }
             v = (v << 4) | d;
         }
         addr = v;
@@ -988,7 +1094,7 @@ static int cmd_carplay_mfi(int argc, char **argv)
     return 0;
 }
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_mfi, carplay_mfi,
-                     raw MFi 2.0C bus dump (bring-up diagnostic));
+                     raw MFi 2.0C bus dump(bring - up diagnostic));
 #endif
 
 /* The AirPlay owner is the sole writer of this state. Bluetooth retains its
@@ -996,31 +1102,40 @@ MSH_CMD_EXPORT_ALIAS(cmd_carplay_mfi, carplay_mfi,
 bool carplay_iap2_tunnel_bytes(const uint8_t *bytes, size_t len, void *context)
 {
     (void)context;
-    if (!s_tunnel.session) {
+    if (!s_tunnel.session)
+    {
         link_reset_service(&s_tunnel);
-        if (link_session_create(&s_tunnel, link_mfi()) != RTCP_OK) return false;
+        if (link_session_create(&s_tunnel, link_mfi()) != RTCP_OK)
+            return false;
         s_tunnel.link_up = true;
         IAP2_LOG("Wi-Fi tunnel iAP2 starting");
         iap2_session_link_up(s_tunnel.session, rtcp_os_rtthread.now_ms());
         iap2_session_notify_airplay_event(s_tunnel.session, true, rtcp_os_rtthread.now_ms());
     }
-    if (len) iap2_session_feed(s_tunnel.session, bytes, len, rtcp_os_rtthread.now_ms());
+    if (len)
+        iap2_session_feed(s_tunnel.session, bytes, len, rtcp_os_rtthread.now_ms());
     return s_tunnel.error == RTCP_OK;
 }
 bool carplay_iap2_tunnel_tick(void *context)
 {
     (void)context;
-    if (!s_tunnel.session) return true;
+    if (!s_tunnel.session)
+        return true;
     iap2_session_advance(s_tunnel.session, rtcp_os_rtthread.now_ms());
     if (!s_handoff_done && s_handoff_requested && s_tunnel.authenticated &&
-        s_tunnel.identification_accepted && s_tunnel.error == RTCP_OK) {
-        if (!s_handoff_at_ms) s_handoff_at_ms = rtcp_os_rtthread.now_ms();
+        s_tunnel.identification_accepted && s_tunnel.error == RTCP_OK)
+    {
+        if (!s_handoff_at_ms)
+            s_handoff_at_ms = rtcp_os_rtthread.now_ms();
         int result = rtcp_bt_lubanlite_handoff(s_handoff_generation);
-        if (result == RTCP_OK) {
+        if (result == RTCP_OK)
+        {
             s_handoff_done = true;
             IAP2_LOG("wireless handoff complete: tunnel authenticated/identified; Bluetooth released");
-        } else if (result != RTCP_ETIMEDOUT ||
-                   rtcp_os_rtthread.now_ms() - s_handoff_at_ms >= 3000U) {
+        }
+        else if (result != RTCP_ETIMEDOUT ||
+                 rtcp_os_rtthread.now_ms() - s_handoff_at_ms >= 3000U)
+        {
             /* No per-tick retries/log floods on HCI failure. */
             s_handoff_requested = false;
             IAP2_LOG("wireless handoff failed rc=%d", result);
@@ -1031,7 +1146,8 @@ bool carplay_iap2_tunnel_tick(void *context)
 void carplay_iap2_tunnel_stop(void *context)
 {
     (void)context;
-    if (s_tunnel.session) {
+    if (s_tunnel.session)
+    {
         iap2_session_link_down(s_tunnel.session);
         iap2_session_destroy(s_tunnel.session);
         IAP2_LOG("Wi-Fi tunnel iAP2 stopped");
@@ -1041,10 +1157,12 @@ void carplay_iap2_tunnel_stop(void *context)
 }
 bool carplay_iap2_request_handoff(const char *device, void *context)
 {
-    (void)device; (void)context;
+    (void)device;
+    (void)context;
     if (!s_handoff_requested && !s_handoff_done)
         IAP2_LOG("disableBluetooth accepted: waiting for authenticated iAP2 tunnel");
-    if (!s_handoff_requested && !s_handoff_done) {
+    if (!s_handoff_requested && !s_handoff_done)
+    {
         s_handoff_generation = rtcp_bt_lubanlite_bootstrap_generation();
         s_handoff_at_ms = 0;
     }

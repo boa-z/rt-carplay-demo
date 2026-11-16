@@ -19,12 +19,20 @@
 #define DEMO_HAS_WIRELESS 0
 #endif
 
-typedef enum {
-    DEMO_BOOT, DEMO_WAIT, DEMO_PAIR, DEMO_NETWORK, DEMO_CONNECT,
-    DEMO_LIVE, DEMO_CLOSING, DEMO_FAILED
+typedef enum
+{
+    DEMO_BOOT,
+    DEMO_WAIT,
+    DEMO_PAIR,
+    DEMO_NETWORK,
+    DEMO_CONNECT,
+    DEMO_LIVE,
+    DEMO_CLOSING,
+    DEMO_FAILED
 } demo_stage_t;
 
-typedef struct {
+typedef struct
+{
     demo_stage_t stage;
     int error;
     char pin[16];
@@ -49,7 +57,6 @@ typedef struct {
 #endif
 } demo_status_t;
 
-
 /* Application-owned connection worker. No LVGL dependency. Initialize from
  * the application owner before posting requests. Snapshots are caller-owned. */
 int carplay_connection_manager_start(void);
@@ -71,13 +78,13 @@ void carplay_connection_files_close(void);
 void carplay_connection_files_refresh(void);
 void carplay_connection_files_forget(const char *name);
 bool carplay_connection_files_snapshot(unsigned *revision,
-    carplay_pair_file_t files[CARPLAY_PAIR_FILES_MAX], unsigned *count,
-    bool *more, int *result);
+                                       carplay_pair_file_t files[CARPLAY_PAIR_FILES_MAX], unsigned *count,
+                                       bool *more, int *result);
 int carplay_connection_touch(uint8_t phase, uint16_t id, uint16_t x, uint16_t y);
 #if defined(RTCARPLAY_AUDIO)
 bool carplay_connection_audio_open(void);
 void carplay_connection_audio_select(unsigned action);
 void carplay_connection_audio_snapshot(bool *open, bool *ready, bool *exiting,
-    audio_test_config_t *config, int *result, audio_test_status_t *status);
+                                       audio_test_config_t *config, int *result, audio_test_status_t *status);
 #endif
 #endif

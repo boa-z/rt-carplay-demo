@@ -25,18 +25,19 @@ typedef void (*carplay_app_screen_cb_t)(bool configuration,
                                         uint64_t sender_time_ns,
                                         void *context);
 
-typedef struct {
-    const char *name;           /* Bonjour/MFi name, default "rt-carplay" */
-    const char *model;          /* default "ArtInChip" */
-    const char *ssid;           /* default "ArtInChip CarPlay" */
-    const char *passphrase;     /* default "88888888"; "" = open network */
-    uint8_t channel;            /* default 36 (5 GHz, as the vendor image) */
-    const char *pair_code;      /* NULL = "3939" (CarPlay's fixed AirPlay PIN) */
-    uint16_t width_pixels;      /* required display width */
-    uint16_t height_pixels;     /* required display height */
-    uint16_t rotation_degrees;  /* 0, 90, 180 or 270 */
-    const char *seed_path;      /* default "/data/rt-carplay.seed" */
-    const char *store_path;     /* default "/data/rt-carplay-pairings.bin" */
+typedef struct
+{
+    const char *name;                  /* Bonjour/MFi name, default "rt-carplay" */
+    const char *model;                 /* default "ArtInChip" */
+    const char *ssid;                  /* default "ArtInChip CarPlay" */
+    const char *passphrase;            /* default "88888888"; "" = open network */
+    uint8_t channel;                   /* default 36 (5 GHz, as the vendor image) */
+    const char *pair_code;             /* NULL = "3939" (CarPlay's fixed AirPlay PIN) */
+    uint16_t width_pixels;             /* required display width */
+    uint16_t height_pixels;            /* required display height */
+    uint16_t rotation_degrees;         /* 0, 90, 180 or 270 */
+    const char *seed_path;             /* default "/data/rt-carplay.seed" */
+    const char *store_path;            /* default "/data/rt-carplay-pairings.bin" */
     carplay_app_screen_cb_t on_screen; /* NULL = on-board sink if built in */
     void *screen_context;
     /* Wired CarPlay: skip the SoftAP/mDNS bring-up and serve AirPlay over
@@ -76,7 +77,8 @@ int carplay_app_session_state(rtcp_receiver_state_t *state);
 
 /* Copied display identity. Safe across stop/restart; returns ESTATE during
  * lifecycle changes and clears the output on failure. */
-typedef struct {
+typedef struct
+{
     uint16_t width, height;
     char pairing_code[5];
 } carplay_app_display_info_t;
@@ -96,7 +98,8 @@ const char *carplay_app_pairing_code(void);
  * key exactly as announced in the mDNS TXT record.  airplay_connected is a
  * snapshot; poll it to pace CarPlay re-invites.
  */
-typedef struct {
+typedef struct
+{
     char name[33];
     char model[33];
     char ssid[33];
@@ -127,7 +130,8 @@ int carplay_app_iap2_info(carplay_app_iap2_info_t *info);
  * RTCP_ENOENT when the wired receiver is up but the netif has no usable
  * address yet. Strings are copied; source_version is a static SDK constant.
  */
-typedef struct {
+typedef struct
+{
     char device_id[18];
     char public_key_hex[65];
     const char *source_version;
@@ -144,7 +148,8 @@ int carplay_app_wired_info(carplay_app_wired_info_t *info);
  * running both would split accepts and corrupt the stream.  Claim before
  * enabling the Bluetooth host; release on teardown.
  */
-typedef enum {
+typedef enum
+{
     CARPLAY_BT_OWNER_NONE = 0,
     CARPLAY_BT_OWNER_ECHO,
     CARPLAY_BT_OWNER_IAP2,

@@ -22,323 +22,511 @@ static atomic_uint actual_rate;
 static atomic_uint mixed_bytes;
 static atomic_bool mic_running;
 static atomic_uint reference_frames;
-bool carplay_audio_input_is_running(void) {return mic_running;}
-void carplay_audio_input_reference_queued(const int16_t *pcm,size_t n,uint32_t bytes)
-{assert(pcm && n==480 && bytes>=n*4);reference_frames+=(unsigned)n;}
+bool carplay_audio_input_is_running(void)
+{
+    return mic_running;
+}
+void carplay_audio_input_reference_queued(const int16_t *pcm, size_t n, uint32_t bytes)
+{
+    assert(pcm && n == 480 && bytes >= n * 4);
+    reference_frames += (unsigned)n;
+}
 static atomic_bool hold_output, output_entered, self_stop_requested;
 static atomic_int self_stop_result;
 static atomic_int reader_result, stop_result;
 static atomic_bool observe_sink;
 static atomic_uint observations;
-static void wait_probe(unsigned state) {
- for(unsigned i=0;i<300 && s_sink.probe_state!=state;++i)rt_thread_mdelay(10);
- assert(s_sink.probe_state==state);
+static void wait_probe(unsigned state)
+{
+    for (unsigned i = 0; i < 300 && s_sink.probe_state != state; ++i) rt_thread_mdelay(10);
+    assert(s_sink.probe_state == state);
 }
-rt_device_t rt_device_find(const char *n) { assert(!strcmp(n,"sound0"));return (void *)1; }
-int rt_device_open(rt_device_t d,int f) {(void)d;(void)f;++opened;return 0;}
-int rt_device_close(rt_device_t d) {(void)d;++closed;return 0;}
-int rt_device_control(rt_device_t d,int cmd,void *a) {
- (void)d;if(cmd==AUDIO_CTL_GETAVAIL) {*(uint32_t *)a=3840;return 0;}
- if(cmd==AUDIO_CTL_CONFIGURE) {struct rt_audio_caps *c=a;assert((c->udata.config.samplerate==48000 || (allow_native && c->udata.config.samplerate==44100)) && c->udata.config.channels==2 && c->udata.config.samplebits==16);actual_rate=c->udata.config.samplerate;} return 0;
+rt_device_t rt_device_find(const char *n)
+{
+    assert(!strcmp(n, "sound0"));
+    return (void *)1;
 }
-rt_size_t rt_device_write(rt_device_t d,int p,const void *data,rt_size_t n) {
- (void)d;(void)p;assert(n%4==0);const int16_t *pcm=data;
- if (atomic_exchange(&self_stop_requested, false))
-  atomic_store(&self_stop_result, carplay_audio_sink_stop());
- if (atomic_load(&hold_output)) {
-  output_entered = true;
-  while (atomic_load(&hold_output)) rt_thread_mdelay(1);
- }
- for(size_t i=0;i<n/2;++i) { if(check_samples && pcm[i]!=expected_sample) {fprintf(stderr,"sample=%d expected=%d offset=%zu\n",pcm[i],(int)expected_sample,i);assert(0); } }
- for(size_t i=0;i<n/2;++i) atomic_fetch_add(&energy,(unsigned long long)((int64_t)pcm[i]*pcm[i]));
- output_bytes+=(unsigned)n;if(actual_rate==48000)mixed_bytes+=(unsigned)n;rt_thread_mdelay(5);return n;
+int rt_device_open(rt_device_t d, int f)
+{
+    (void)d;
+    (void)f;
+    ++opened;
+    return 0;
+}
+int rt_device_close(rt_device_t d)
+{
+    (void)d;
+    ++closed;
+    return 0;
+}
+int rt_device_control(rt_device_t d, int cmd, void *a)
+{
+    (void)d;
+    if (cmd == AUDIO_CTL_GETAVAIL)
+    {
+        *(uint32_t *)a = 3840;
+        return 0;
+    }
+    if (cmd == AUDIO_CTL_CONFIGURE)
+    {
+        struct rt_audio_caps *c = a;
+        assert((c->udata.config.samplerate == 48000 || (allow_native && c->udata.config.samplerate == 44100)) && c->udata.config.channels == 2 && c->udata.config.samplebits == 16);
+        actual_rate = c->udata.config.samplerate;
+    }
+    return 0;
+}
+rt_size_t rt_device_write(rt_device_t d, int p, const void *data, rt_size_t n)
+{
+    (void)d;
+    (void)p;
+    assert(n % 4 == 0);
+    const int16_t *pcm = data;
+    if (atomic_exchange(&self_stop_requested, false))
+        atomic_store(&self_stop_result, carplay_audio_sink_stop());
+    if (atomic_load(&hold_output))
+    {
+        output_entered = true;
+        while (atomic_load(&hold_output)) rt_thread_mdelay(1);
+    }
+    for (size_t i = 0; i < n / 2; ++i)
+    {
+        if (check_samples && pcm[i] != expected_sample)
+        {
+            fprintf(stderr, "sample=%d expected=%d offset=%zu\n", pcm[i], (int)expected_sample, i);
+            assert(0);
+        }
+    }
+    for (size_t i = 0; i < n / 2; ++i) atomic_fetch_add(&energy, (unsigned long long)((int64_t)pcm[i] * pcm[i]));
+    output_bytes += (unsigned)n;
+    if (actual_rate == 48000)
+        mixed_bytes += (unsigned)n;
+    rt_thread_mdelay(5);
+    return n;
 }
 
-static void *read_volume(void *unused) {
- (void)unused; reader_result=carplay_audio_sink_volume_percent();return NULL;
+static void *read_volume(void *unused)
+{
+    (void)unused;
+    reader_result = carplay_audio_sink_volume_percent();
+    return NULL;
 }
-static void *stop_sink(void *unused) {
- (void)unused;stop_result=carplay_audio_sink_stop();return NULL;
+static void *stop_sink(void *unused)
+{
+    (void)unused;
+    stop_result = carplay_audio_sink_stop();
+    return NULL;
 }
-static void wait_flag(atomic_bool *flag) {
- for(unsigned i=0;i<3000 && !atomic_load(flag);++i)rt_thread_mdelay(1);
- assert(atomic_load(flag));
+static void wait_flag(atomic_bool *flag)
+{
+    for (unsigned i = 0; i < 3000 && !atomic_load(flag); ++i) rt_thread_mdelay(1);
+    assert(atomic_load(flag));
 }
-static void *observe_status(void *unused) {
- (void)unused;
- while (atomic_load(&observe_sink)) {
-  unsigned p,d,e,r;
-  (void)carplay_audio_sink_is_running();
-  carplay_audio_sink_stats(&p,&d,&e,&r);
-  (void)carplay_audio_sink_pending();
-  (void)carplay_audio_sink_volume_percent();
-  ++observations;
- }
- return NULL;
+static void *observe_status(void *unused)
+{
+    (void)unused;
+    while (atomic_load(&observe_sink))
+    {
+        unsigned p, d, e, r;
+        (void)carplay_audio_sink_is_running();
+        carplay_audio_sink_stats(&p, &d, &e, &r);
+        (void)carplay_audio_sink_pending();
+        (void)carplay_audio_sink_volume_percent();
+        ++observations;
+    }
+    return NULL;
 }
 
-int main(void) {
- host_rtthread_fail_start=1;assert(carplay_audio_sink_start()!=0);assert(!carplay_audio_sink_is_running());
- host_rtthread_fail_start=0;
- for(unsigned cycle=0;cycle<3;++cycle) {
-  assert(carplay_audio_sink_start()==0);
-  rtcp_audio_format_t format={.sample_rate=48000,.channels=1,.clock_rate=48000};
-  uint8_t pcm[960];for(size_t j=0;j<sizeof(pcm);j+=2) {pcm[j]=0xe8;pcm[j+1]=3;}
-  for(unsigned i=0;i<8;++i) { int rc=carplay_audio_sink_packet(102,&format,pcm,sizeof(pcm),480*i,sink_now_us());assert(rc==0 || rc==RTCP_ETIMEDOUT); }
-  if(!cycle) {
-   int rc=RTCP_ETIMEDOUT;
-   for(unsigned retry=0;retry<20 && rc==RTCP_ETIMEDOUT;++retry) {
-    rc=carplay_audio_sink_local_pcm(pcm,sizeof(pcm),48000,1,true);
-    if(rc==RTCP_ETIMEDOUT)rt_thread_mdelay(1);
-   }
-   assert(rc==RTCP_OK);
-   /* The actual writer may hold the nonblocking queue lock. Retry only that
+int main(void)
+{
+    host_rtthread_fail_start = 1;
+    assert(carplay_audio_sink_start() != 0);
+    assert(!carplay_audio_sink_is_running());
+    host_rtthread_fail_start = 0;
+    for (unsigned cycle = 0; cycle < 3; ++cycle)
+    {
+        assert(carplay_audio_sink_start() == 0);
+        rtcp_audio_format_t format = { .sample_rate = 48000, .channels = 1, .clock_rate = 48000 };
+        uint8_t pcm[960];
+        for (size_t j = 0; j < sizeof(pcm); j += 2)
+        {
+            pcm[j] = 0xe8;
+            pcm[j + 1] = 3;
+        }
+        for (unsigned i = 0; i < 8; ++i)
+        {
+            int rc = carplay_audio_sink_packet(102, &format, pcm, sizeof(pcm), 480 * i, sink_now_us());
+            assert(rc == 0 || rc == RTCP_ETIMEDOUT);
+        }
+        if (!cycle)
+        {
+            int rc = RTCP_ETIMEDOUT;
+            for (unsigned retry = 0; retry < 20 && rc == RTCP_ETIMEDOUT; ++retry)
+            {
+                rc = carplay_audio_sink_local_pcm(pcm, sizeof(pcm), 48000, 1, true);
+                if (rc == RTCP_ETIMEDOUT)
+                    rt_thread_mdelay(1);
+            }
+            assert(rc == RTCP_OK);
+            /* The actual writer may hold the nonblocking queue lock. Retry only that
     * documented contention result before checking critical-lane priority. */
-   rc=RTCP_ETIMEDOUT;
-   for(unsigned retry=0;retry<20 && rc==RTCP_ETIMEDOUT;++retry) {
-    rc=carplay_audio_sink_local_pcm(pcm,sizeof(pcm),48000,1,false);
-    if(rc==RTCP_ETIMEDOUT)rt_thread_mdelay(1);
-   }
-   assert(rc==RTCP_ESTATE);
-  }
-  rt_thread_mdelay(350);
-  carplay_audio_sink_stream_stop(102);
-  carplay_audio_sink_stop();host_rtthread_join();assert(!carplay_audio_sink_is_running());
- }
- /* Actual worker: 1024-frame 44.1 kHz bursts and local volume command.
+            rc = RTCP_ETIMEDOUT;
+            for (unsigned retry = 0; retry < 20 && rc == RTCP_ETIMEDOUT; ++retry)
+            {
+                rc = carplay_audio_sink_local_pcm(pcm, sizeof(pcm), 48000, 1, false);
+                if (rc == RTCP_ETIMEDOUT)
+                    rt_thread_mdelay(1);
+            }
+            assert(rc == RTCP_ESTATE);
+        }
+        rt_thread_mdelay(350);
+        carplay_audio_sink_stream_stop(102);
+        carplay_audio_sink_stop();
+        host_rtthread_join();
+        assert(!carplay_audio_sink_is_running());
+    }
+    /* Actual worker: 1024-frame 44.1 kHz bursts and local volume command.
   * A nonblocking test device exposes artificial silence at packet tails. */
- for(unsigned level=0;level<3;++level) {
-  assert(carplay_audio_sink_start()==0);
-  const char *value=level==0?"100":level==1?"50":"0";
-  char *args[]={"carplay_volume",(char *)value}; volume_command(2,args);
-  assert(carplay_audio_sink_volume_percent()==(level==0?100:level==1?50:0));
-  /* Same Q15 gain used by the sink, including quantization. */
-  unsigned gain=level==0?32768:level==1?(unsigned)(powf(10,-22.5f/20)*32768):0;
-  expected_sample=(int)(1000*gain/32768);check_samples=true;
-  unsigned before=output_bytes;
-  rtcp_audio_format_t f={.sample_rate=44100,.channels=2,.clock_rate=44100};
-  uint8_t pcm[4096];for(size_t j=0;j<sizeof(pcm);j+=2){pcm[j]=0xe8;pcm[j+1]=3;}
-  for(unsigned i=0;i<8;++i) {
-   int rc;do { rc=carplay_audio_sink_packet(102,&f,pcm,sizeof(pcm),1024*i,sink_now_us());
-    if(rc==RTCP_ETIMEDOUT)rt_thread_mdelay(1);
-   } while(rc==RTCP_ETIMEDOUT);assert(rc==0);
-  }
-  rt_thread_mdelay(500);
-  carplay_audio_sink_stop();host_rtthread_join();check_samples=false;
-  assert(output_bytes-before==18*480*4);
- }
- assert(output_bytes>0 && energy>0 && opened==closed);
- /* Sub-10 ms safety sounds remain playable without later packets. */
- assert(carplay_audio_sink_start()==0);
- unsigned before_alert=output_bytes;
- uint8_t alert[96];for(unsigned i=0;i<96;i+=2){alert[i]=0xe8;alert[i+1]=3;}
- assert(carplay_audio_sink_local_pcm(alert,sizeof(alert),48000,1,true)==RTCP_OK);
- rt_thread_mdelay(350);carplay_audio_sink_stop();host_rtthread_join();
- assert(output_bytes-before_alert==480*4);
- /* Direct media preserves source frames/rate and gain, then switches back. */
- allow_native=true;
- assert(carplay_audio_sink_start()==0);
- char *direct_args[]={"carplay_audio_path","direct"};audio_path_command(2,direct_args);
- carplay_audio_sink_set_volume_db(0);
- rtcp_audio_format_t native={.sample_rate=44100,.channels=2,.clock_rate=44100};
- uint8_t native_pcm[4096];for(unsigned i=0;i<4096;i+=2){native_pcm[i]=0xe8;native_pcm[i+1]=3;}
- unsigned before_direct=output_bytes;
- check_samples=true;expected_sample=1000;
- for(unsigned i=0;i<4;++i)assert(carplay_audio_sink_packet(102,&native,native_pcm,sizeof(native_pcm),1024*i,sink_now_us())==0);
- rt_thread_mdelay(450);
- assert(output_bytes-before_direct==4*4096 && actual_rate==44100 && s_sink.direct_active);
- carplay_audio_sink_set_volume_db(-144);expected_sample=0;
- for(unsigned i=4;i<8;++i)assert(carplay_audio_sink_packet(102,&native,native_pcm,sizeof(native_pcm),1024*i,sink_now_us())==0);
- rt_thread_mdelay(450);
- assert(output_bytes-before_direct==8*4096 && s_sink.direct_active);
- carplay_audio_sink_set_volume_db(0);expected_sample=1000;
- char *mixed_args[]={"carplay_audio_path","mixer"};audio_path_command(2,mixed_args);
- for(unsigned i=8;i<12;++i)assert(carplay_audio_sink_packet(102,&native,native_pcm,sizeof(native_pcm),1024*i,sink_now_us())==0);
- rt_thread_mdelay(450);
- assert(actual_rate==48000 && !s_sink.direct_active);
- assert(s_sink.diag[2].negative==0 && s_sink.diag[2].decode_errors==0);
- carplay_audio_sink_stop();host_rtthread_join();check_samples=false;
- /* A live 48 kHz microphone owns the shared codec clock. Even a requested
+    for (unsigned level = 0; level < 3; ++level)
+    {
+        assert(carplay_audio_sink_start() == 0);
+        const char *value = level == 0 ? "100" : level == 1 ? "50"
+                                                            : "0";
+        char *args[] = { "carplay_volume", (char *)value };
+        volume_command(2, args);
+        assert(carplay_audio_sink_volume_percent() == (level == 0 ? 100 : level == 1 ? 50
+                                                                                     : 0));
+        /* Same Q15 gain used by the sink, including quantization. */
+        unsigned gain = level == 0 ? 32768 : level == 1 ? (unsigned)(powf(10, -22.5f / 20) * 32768)
+                                                        : 0;
+        expected_sample = (int)(1000 * gain / 32768);
+        check_samples = true;
+        unsigned before = output_bytes;
+        rtcp_audio_format_t f = { .sample_rate = 44100, .channels = 2, .clock_rate = 44100 };
+        uint8_t pcm[4096];
+        for (size_t j = 0; j < sizeof(pcm); j += 2)
+        {
+            pcm[j] = 0xe8;
+            pcm[j + 1] = 3;
+        }
+        for (unsigned i = 0; i < 8; ++i)
+        {
+            int rc;
+            do
+            {
+                rc = carplay_audio_sink_packet(102, &f, pcm, sizeof(pcm), 1024 * i, sink_now_us());
+                if (rc == RTCP_ETIMEDOUT)
+                    rt_thread_mdelay(1);
+            } while (rc == RTCP_ETIMEDOUT);
+            assert(rc == 0);
+        }
+        rt_thread_mdelay(500);
+        carplay_audio_sink_stop();
+        host_rtthread_join();
+        check_samples = false;
+        assert(output_bytes - before == 18 * 480 * 4);
+    }
+    assert(output_bytes > 0 && energy > 0 && opened == closed);
+    /* Sub-10 ms safety sounds remain playable without later packets. */
+    assert(carplay_audio_sink_start() == 0);
+    unsigned before_alert = output_bytes;
+    uint8_t alert[96];
+    for (unsigned i = 0; i < 96; i += 2)
+    {
+        alert[i] = 0xe8;
+        alert[i + 1] = 3;
+    }
+    assert(carplay_audio_sink_local_pcm(alert, sizeof(alert), 48000, 1, true) == RTCP_OK);
+    rt_thread_mdelay(350);
+    carplay_audio_sink_stop();
+    host_rtthread_join();
+    assert(output_bytes - before_alert == 480 * 4);
+    /* Direct media preserves source frames/rate and gain, then switches back. */
+    allow_native = true;
+    assert(carplay_audio_sink_start() == 0);
+    char *direct_args[] = { "carplay_audio_path", "direct" };
+    audio_path_command(2, direct_args);
+    carplay_audio_sink_set_volume_db(0);
+    rtcp_audio_format_t native = { .sample_rate = 44100, .channels = 2, .clock_rate = 44100 };
+    uint8_t native_pcm[4096];
+    for (unsigned i = 0; i < 4096; i += 2)
+    {
+        native_pcm[i] = 0xe8;
+        native_pcm[i + 1] = 3;
+    }
+    unsigned before_direct = output_bytes;
+    check_samples = true;
+    expected_sample = 1000;
+    for (unsigned i = 0; i < 4; ++i) assert(carplay_audio_sink_packet(102, &native, native_pcm, sizeof(native_pcm), 1024 * i, sink_now_us()) == 0);
+    rt_thread_mdelay(450);
+    assert(output_bytes - before_direct == 4 * 4096 && actual_rate == 44100 && s_sink.direct_active);
+    carplay_audio_sink_set_volume_db(-144);
+    expected_sample = 0;
+    for (unsigned i = 4; i < 8; ++i) assert(carplay_audio_sink_packet(102, &native, native_pcm, sizeof(native_pcm), 1024 * i, sink_now_us()) == 0);
+    rt_thread_mdelay(450);
+    assert(output_bytes - before_direct == 8 * 4096 && s_sink.direct_active);
+    carplay_audio_sink_set_volume_db(0);
+    expected_sample = 1000;
+    char *mixed_args[] = { "carplay_audio_path", "mixer" };
+    audio_path_command(2, mixed_args);
+    for (unsigned i = 8; i < 12; ++i) assert(carplay_audio_sink_packet(102, &native, native_pcm, sizeof(native_pcm), 1024 * i, sink_now_us()) == 0);
+    rt_thread_mdelay(450);
+    assert(actual_rate == 48000 && !s_sink.direct_active);
+    assert(s_sink.diag[2].negative == 0 && s_sink.diag[2].decode_errors == 0);
+    carplay_audio_sink_stop();
+    host_rtthread_join();
+    check_samples = false;
+    /* A live 48 kHz microphone owns the shared codec clock. Even a requested
   * 44.1 kHz direct route must use the 48 kHz mixer and publish AEC reference. */
- mic_running=true;
- assert(carplay_audio_sink_start()==0);audio_path_command(2,direct_args);
- unsigned before_reference=reference_frames;
- for(unsigned i=0;i<4;++i)assert(carplay_audio_sink_packet(102,&native,native_pcm,sizeof(native_pcm),1024*i,sink_now_us())==0);
- rt_thread_mdelay(450);
- assert(actual_rate==48000 && !s_sink.direct_active && reference_frames>before_reference);
- carplay_audio_sink_stop();host_rtthread_join();mic_running=false;
- /* A requested direct route must yield to a queued critical local sound. */
- assert(carplay_audio_sink_start()==0);audio_path_command(2,direct_args);
- unsigned before_mixed=mixed_bytes;
- assert(carplay_audio_sink_local_pcm(alert,sizeof(alert),48000,1,true)==RTCP_OK);
- for(unsigned i=0;i<4;++i)assert(carplay_audio_sink_packet(102,&native,native_pcm,sizeof(native_pcm),1024*i,sink_now_us())==0);
- rt_thread_mdelay(450);carplay_audio_sink_stop();host_rtthread_join();
- assert(mixed_bytes>before_mixed && s_sink.output_frames>0);
- /* Negative timestamp discards were previously invisible in aggregate errors. */
- assert(carplay_audio_sink_start()==0);
- unsigned before_overlap=output_bytes;
- for(unsigned i=0;i<4;++i)assert(carplay_audio_sink_packet(102,&native,native_pcm,sizeof(native_pcm),512*i,sink_now_us())==0);
- rt_thread_mdelay(400);carplay_audio_sink_stop();host_rtthread_join();
- assert(s_sink.diag[2].negative==3 && s_sink.diag[2].overlap_frames==1536 &&
-        s_sink.diag[2].frames==4096 && s_sink.diag[2].decoded==4 && s_sink.write_errors==0);
- assert(output_bytes-before_overlap==5*480*4); /* Old whole-packet drops yielded only four chunks. */
- /* A large positive hole must not erase good PCM decoded before it. Hold
+    mic_running = true;
+    assert(carplay_audio_sink_start() == 0);
+    audio_path_command(2, direct_args);
+    unsigned before_reference = reference_frames;
+    for (unsigned i = 0; i < 4; ++i) assert(carplay_audio_sink_packet(102, &native, native_pcm, sizeof(native_pcm), 1024 * i, sink_now_us()) == 0);
+    rt_thread_mdelay(450);
+    assert(actual_rate == 48000 && !s_sink.direct_active && reference_frames > before_reference);
+    carplay_audio_sink_stop();
+    host_rtthread_join();
+    mic_running = false;
+    /* A requested direct route must yield to a queued critical local sound. */
+    assert(carplay_audio_sink_start() == 0);
+    audio_path_command(2, direct_args);
+    unsigned before_mixed = mixed_bytes;
+    assert(carplay_audio_sink_local_pcm(alert, sizeof(alert), 48000, 1, true) == RTCP_OK);
+    for (unsigned i = 0; i < 4; ++i) assert(carplay_audio_sink_packet(102, &native, native_pcm, sizeof(native_pcm), 1024 * i, sink_now_us()) == 0);
+    rt_thread_mdelay(450);
+    carplay_audio_sink_stop();
+    host_rtthread_join();
+    assert(mixed_bytes > before_mixed && s_sink.output_frames > 0);
+    /* Negative timestamp discards were previously invisible in aggregate errors. */
+    assert(carplay_audio_sink_start() == 0);
+    unsigned before_overlap = output_bytes;
+    for (unsigned i = 0; i < 4; ++i) assert(carplay_audio_sink_packet(102, &native, native_pcm, sizeof(native_pcm), 512 * i, sink_now_us()) == 0);
+    rt_thread_mdelay(400);
+    carplay_audio_sink_stop();
+    host_rtthread_join();
+    assert(s_sink.diag[2].negative == 3 && s_sink.diag[2].overlap_frames == 1536 &&
+           s_sink.diag[2].frames == 4096 && s_sink.diag[2].decoded == 4 && s_sink.write_errors == 0);
+    assert(output_bytes - before_overlap == 5 * 480 * 4); /* Old whole-packet drops yielded only four chunks. */
+    /* A large positive hole must not erase good PCM decoded before it. Hold
   * worker entry so both packets are decoded in the same drain budget. */
- host_rtthread_hold_entry=true;
- assert(carplay_audio_sink_start()==0);
- unsigned before_hole=output_bytes;
- assert(carplay_audio_sink_packet(102,&native,native_pcm,sizeof(native_pcm),0,sink_now_us())==0);
- assert(carplay_audio_sink_packet(102,&native,native_pcm,sizeof(native_pcm),17408,sink_now_us())==0);
- host_rtthread_hold_entry=false;
- rt_thread_mdelay(350);carplay_audio_sink_stop();host_rtthread_join();
- assert(s_sink.diag[2].gap_frames==16384 && s_sink.diag[2].decoded==2);
- assert(output_bytes-before_hole==4*480*4); /* Clearing good PCM yielded two. */
- /* A queue-lock timeout is a dropped packet, not a successful zero-error
+    host_rtthread_hold_entry = true;
+    assert(carplay_audio_sink_start() == 0);
+    unsigned before_hole = output_bytes;
+    assert(carplay_audio_sink_packet(102, &native, native_pcm, sizeof(native_pcm), 0, sink_now_us()) == 0);
+    assert(carplay_audio_sink_packet(102, &native, native_pcm, sizeof(native_pcm), 17408, sink_now_us()) == 0);
+    host_rtthread_hold_entry = false;
+    rt_thread_mdelay(350);
+    carplay_audio_sink_stop();
+    host_rtthread_join();
+    assert(s_sink.diag[2].gap_frames == 16384 && s_sink.diag[2].decoded == 2);
+    assert(output_bytes - before_hole == 4 * 480 * 4); /* Clearing good PCM yielded two. */
+    /* A queue-lock timeout is a dropped packet, not a successful zero-error
   * receive. The host mutex must honor the same bounded wait as RT-Thread. */
- assert(carplay_audio_sink_start()==0);
- assert(rt_mutex_take(s_sink.lock,RT_WAITING_FOREVER)==0);
- assert(carplay_audio_sink_packet(102,&native,native_pcm,sizeof(native_pcm),0,sink_now_us())==RTCP_ETIMEDOUT);
- assert(s_sink.diag[2].queue_busy==1 && s_sink.dropped_bytes==sizeof(native_pcm) && s_sink.packets==0);
- rt_mutex_release(s_sink.lock);
- assert(carplay_audio_sink_packet(102,&native,native_pcm,sizeof(native_pcm),0,sink_now_us())==0);
- rt_thread_mdelay(350);carplay_audio_sink_stop();host_rtthread_join();
- /* Capture pre-gain PCM, cap at two seconds, then replay continuously with
+    assert(carplay_audio_sink_start() == 0);
+    assert(rt_mutex_take(s_sink.lock, RT_WAITING_FOREVER) == 0);
+    assert(carplay_audio_sink_packet(102, &native, native_pcm, sizeof(native_pcm), 0, sink_now_us()) == RTCP_ETIMEDOUT);
+    assert(s_sink.diag[2].queue_busy == 1 && s_sink.dropped_bytes == sizeof(native_pcm) && s_sink.packets == 0);
+    rt_mutex_release(s_sink.lock);
+    assert(carplay_audio_sink_packet(102, &native, native_pcm, sizeof(native_pcm), 0, sink_now_us()) == 0);
+    rt_thread_mdelay(350);
+    carplay_audio_sink_stop();
+    host_rtthread_join();
+    /* Capture pre-gain PCM, cap at two seconds, then replay continuously with
   * no new network packets. Live media is deliberately ignored during replay. */
- assert(carplay_audio_sink_start()==0);audio_path_command(2,direct_args);
- char *capture_args[]={"carplay_audio_probe","capture"};
- char *replay_args[]={"carplay_audio_probe","replay"};
- char *clear_args[]={"carplay_audio_probe","clear"};
- carplay_audio_sink_set_volume_db(-144);expected_sample=0;check_samples=true;
- audio_probe_command(2,capture_args);wait_probe(PROBE_CAPTURE);
- for(unsigned i=0;i<90;++i) {
-  int rc;do {rc=carplay_audio_sink_packet(102,&native,native_pcm,sizeof(native_pcm),1024*i,sink_now_us());
-   if(rc==RTCP_ETIMEDOUT || rc==RTCP_ENOMEM)rt_thread_mdelay(10);
-  } while(rc==RTCP_ETIMEDOUT || rc==RTCP_ENOMEM);assert(rc==0);rt_thread_mdelay(10);
- }
- wait_probe(PROBE_READY);rt_thread_mdelay(250);
- assert(s_sink.probe_frames==88200 && s_sink.probe_rate==44100);
- for(unsigned i=0;i<88200*2;++i)assert(s_sink.probe_pcm[i]==1000);
- unsigned before_probe=output_bytes;
- carplay_audio_sink_set_volume_db(0);expected_sample=1000;
- audio_probe_command(2,replay_args);wait_probe(PROBE_REPLAY);
- assert(carplay_audio_sink_packet(102,&native,native_pcm,sizeof(native_pcm),0,sink_now_us())==0);
- wait_probe(PROBE_READY);
- assert(output_bytes-before_probe==88200*4 && s_sink.probe_ignored==1 && actual_rate==44100);
- check_samples=false;
- /* Critical local audio preempts the probe, then normal mixing resumes. */
- audio_probe_command(2,replay_args);wait_probe(PROBE_REPLAY);
- before_mixed=mixed_bytes;
- assert(carplay_audio_sink_local_pcm(alert,sizeof(alert),48000,1,true)==RTCP_OK);
- wait_probe(PROBE_READY);
- for(unsigned i=0;i<300 && mixed_bytes==before_mixed;++i)rt_thread_mdelay(10);
- assert(mixed_bytes>before_mixed);
- audio_probe_command(2,clear_args);wait_probe(PROBE_IDLE);
- assert(!s_sink.probe_pcm && !s_sink.probe_frames);
- carplay_audio_sink_stop();host_rtthread_join();
+    assert(carplay_audio_sink_start() == 0);
+    audio_path_command(2, direct_args);
+    char *capture_args[] = { "carplay_audio_probe", "capture" };
+    char *replay_args[] = { "carplay_audio_probe", "replay" };
+    char *clear_args[] = { "carplay_audio_probe", "clear" };
+    carplay_audio_sink_set_volume_db(-144);
+    expected_sample = 0;
+    check_samples = true;
+    audio_probe_command(2, capture_args);
+    wait_probe(PROBE_CAPTURE);
+    for (unsigned i = 0; i < 90; ++i)
+    {
+        int rc;
+        do
+        {
+            rc = carplay_audio_sink_packet(102, &native, native_pcm, sizeof(native_pcm), 1024 * i, sink_now_us());
+            if (rc == RTCP_ETIMEDOUT || rc == RTCP_ENOMEM)
+                rt_thread_mdelay(10);
+        } while (rc == RTCP_ETIMEDOUT || rc == RTCP_ENOMEM);
+        assert(rc == 0);
+        rt_thread_mdelay(10);
+    }
+    wait_probe(PROBE_READY);
+    rt_thread_mdelay(250);
+    assert(s_sink.probe_frames == 88200 && s_sink.probe_rate == 44100);
+    for (unsigned i = 0; i < 88200 * 2; ++i) assert(s_sink.probe_pcm[i] == 1000);
+    unsigned before_probe = output_bytes;
+    carplay_audio_sink_set_volume_db(0);
+    expected_sample = 1000;
+    audio_probe_command(2, replay_args);
+    wait_probe(PROBE_REPLAY);
+    assert(carplay_audio_sink_packet(102, &native, native_pcm, sizeof(native_pcm), 0, sink_now_us()) == 0);
+    wait_probe(PROBE_READY);
+    assert(output_bytes - before_probe == 88200 * 4 && s_sink.probe_ignored == 1 && actual_rate == 44100);
+    check_samples = false;
+    /* Critical local audio preempts the probe, then normal mixing resumes. */
+    audio_probe_command(2, replay_args);
+    wait_probe(PROBE_REPLAY);
+    before_mixed = mixed_bytes;
+    assert(carplay_audio_sink_local_pcm(alert, sizeof(alert), 48000, 1, true) == RTCP_OK);
+    wait_probe(PROBE_READY);
+    for (unsigned i = 0; i < 300 && mixed_bytes == before_mixed; ++i) rt_thread_mdelay(10);
+    assert(mixed_bytes > before_mixed);
+    audio_probe_command(2, clear_args);
+    wait_probe(PROBE_IDLE);
+    assert(!s_sink.probe_pcm && !s_sink.probe_frames);
+    carplay_audio_sink_stop();
+    host_rtthread_join();
 #ifdef RTCP_AUDIO_CODECS
- /* Real AAC on the default 48 kHz mixer route, including FAAD priming and
+    /* Real AAC on the default 48 kHz mixer route, including FAAD priming and
   * packet-boundary continuity, not only the diagnostic direct route. */
- assert(carplay_audio_sink_start()==0);
- assert(rtcp_audio_format_parse(0x400000,&native));
- FILE *mixed_file=fopen(RTCP_AUDIO_FIXTURE,"rb");assert(mixed_file);
- uint8_t mixed_aac[4096];size_t mixed_length=fread(mixed_aac,1,sizeof(mixed_aac),mixed_file);fclose(mixed_file);
- uint32_t mixed_ts=0;
- for(size_t off=0;off<mixed_length;) {
-  size_t n=((size_t)(mixed_aac[off+3]&3)<<11)|((size_t)mixed_aac[off+4]<<3)|(mixed_aac[off+5]>>5);
-  assert(n>=7 && n<=mixed_length-off);
-  int rc;do {rc=carplay_audio_sink_packet(102,&native,mixed_aac+off+7,n-7,mixed_ts,sink_now_us());
-   if(rc==RTCP_ETIMEDOUT)rt_thread_mdelay(1);
-  } while(rc==RTCP_ETIMEDOUT);assert(rc==0);off+=n;mixed_ts+=1024;
- }
- rt_thread_mdelay(500);
- assert(actual_rate==48000 && !s_sink.direct_active && s_sink.output_peak>0 && s_sink.output_frames>0);
- assert(!s_sink.diag[2].negative && !s_sink.diag[2].decode_errors && !s_sink.diag[2].gap_frames);
- carplay_audio_sink_stop();host_rtthread_join();
- /* Real AAC -> actual board worker -> native-rate output, no mixer/timeline. */
- assert(carplay_audio_sink_start()==0);audio_path_command(2,direct_args);
- audio_probe_command(2,capture_args);wait_probe(PROBE_CAPTURE);
- assert(rtcp_audio_format_parse(0x400000,&native));
- FILE *file=fopen(RTCP_AUDIO_FIXTURE,"rb");assert(file);
- uint8_t aac[4096];size_t length=fread(aac,1,sizeof(aac),file);fclose(file);
- uint32_t ts=0;
- for(size_t off=0;off<length;) {
-  size_t n=((size_t)(aac[off+3]&3)<<11)|((size_t)aac[off+4]<<3)|(aac[off+5]>>5);
-  assert(n>=7 && n<=length-off);
-  int rc;do {rc=carplay_audio_sink_packet(102,&native,aac+off+7,n-7,ts,sink_now_us());
-   if(rc==RTCP_ETIMEDOUT)rt_thread_mdelay(1);
-  } while(rc==RTCP_ETIMEDOUT);assert(rc==0);off+=n;ts+=1024;
- }
- rt_thread_mdelay(500);
- assert(s_sink.probe_frames==s_sink.diag[2].frames && s_sink.probe_frames>0);
- char *stop_args[]={"carplay_audio_probe","stop"};audio_probe_command(2,stop_args);wait_probe(PROBE_READY);
- before_probe=output_bytes;audio_probe_command(2,replay_args);wait_probe(PROBE_REPLAY);wait_probe(PROBE_READY);
- assert(output_bytes-before_probe==s_sink.probe_frames*4);
- unsigned live_frames=s_sink.diag[2].frames,probe_frames=s_sink.probe_frames;
- carplay_audio_sink_stop();host_rtthread_join();
- assert(actual_rate==44100 && s_sink.output_frames==live_frames+probe_frames && !s_sink.probe_pcm);
- assert(s_sink.diag[2].decoded>=5 && s_sink.diag[2].peak_pcm>0 && !s_sink.diag[2].decode_errors);
+    assert(carplay_audio_sink_start() == 0);
+    assert(rtcp_audio_format_parse(0x400000, &native));
+    FILE *mixed_file = fopen(RTCP_AUDIO_FIXTURE, "rb");
+    assert(mixed_file);
+    uint8_t mixed_aac[4096];
+    size_t mixed_length = fread(mixed_aac, 1, sizeof(mixed_aac), mixed_file);
+    fclose(mixed_file);
+    uint32_t mixed_ts = 0;
+    for (size_t off = 0; off < mixed_length;)
+    {
+        size_t n = ((size_t)(mixed_aac[off + 3] & 3) << 11) | ((size_t)mixed_aac[off + 4] << 3) | (mixed_aac[off + 5] >> 5);
+        assert(n >= 7 && n <= mixed_length - off);
+        int rc;
+        do
+        {
+            rc = carplay_audio_sink_packet(102, &native, mixed_aac + off + 7, n - 7, mixed_ts, sink_now_us());
+            if (rc == RTCP_ETIMEDOUT)
+                rt_thread_mdelay(1);
+        } while (rc == RTCP_ETIMEDOUT);
+        assert(rc == 0);
+        off += n;
+        mixed_ts += 1024;
+    }
+    rt_thread_mdelay(500);
+    assert(actual_rate == 48000 && !s_sink.direct_active && s_sink.output_peak > 0 && s_sink.output_frames > 0);
+    assert(!s_sink.diag[2].negative && !s_sink.diag[2].decode_errors && !s_sink.diag[2].gap_frames);
+    carplay_audio_sink_stop();
+    host_rtthread_join();
+    /* Real AAC -> actual board worker -> native-rate output, no mixer/timeline. */
+    assert(carplay_audio_sink_start() == 0);
+    audio_path_command(2, direct_args);
+    audio_probe_command(2, capture_args);
+    wait_probe(PROBE_CAPTURE);
+    assert(rtcp_audio_format_parse(0x400000, &native));
+    FILE *file = fopen(RTCP_AUDIO_FIXTURE, "rb");
+    assert(file);
+    uint8_t aac[4096];
+    size_t length = fread(aac, 1, sizeof(aac), file);
+    fclose(file);
+    uint32_t ts = 0;
+    for (size_t off = 0; off < length;)
+    {
+        size_t n = ((size_t)(aac[off + 3] & 3) << 11) | ((size_t)aac[off + 4] << 3) | (aac[off + 5] >> 5);
+        assert(n >= 7 && n <= length - off);
+        int rc;
+        do
+        {
+            rc = carplay_audio_sink_packet(102, &native, aac + off + 7, n - 7, ts, sink_now_us());
+            if (rc == RTCP_ETIMEDOUT)
+                rt_thread_mdelay(1);
+        } while (rc == RTCP_ETIMEDOUT);
+        assert(rc == 0);
+        off += n;
+        ts += 1024;
+    }
+    rt_thread_mdelay(500);
+    assert(s_sink.probe_frames == s_sink.diag[2].frames && s_sink.probe_frames > 0);
+    char *stop_args[] = { "carplay_audio_probe", "stop" };
+    audio_probe_command(2, stop_args);
+    wait_probe(PROBE_READY);
+    before_probe = output_bytes;
+    audio_probe_command(2, replay_args);
+    wait_probe(PROBE_REPLAY);
+    wait_probe(PROBE_READY);
+    assert(output_bytes - before_probe == s_sink.probe_frames * 4);
+    unsigned live_frames = s_sink.diag[2].frames, probe_frames = s_sink.probe_frames;
+    carplay_audio_sink_stop();
+    host_rtthread_join();
+    assert(actual_rate == 44100 && s_sink.output_frames == live_frames + probe_frames && !s_sink.probe_pcm);
+    assert(s_sink.diag[2].decoded >= 5 && s_sink.diag[2].peak_pcm > 0 && !s_sink.diag[2].decode_errors);
 #endif
- /* Actual blocking output retains device/queues until late worker retirement. */
- assert(carplay_audio_sink_start()==RTCP_OK);
- hold_output=true;output_entered=false;self_stop_requested=true;
- self_stop_result=RTCP_OK;
- assert(carplay_audio_sink_local_pcm(alert,sizeof(alert),48000,1,true)==RTCP_OK);
- wait_flag(&output_entered);
- assert(self_stop_result==RTCP_ESTATE && carplay_audio_sink_is_running());
- unsigned before_close=closed;
- rt_device_t retained_dev=s_sink.dev;
- rt_mutex_t retained_lock=s_sink.lock;
- rt_sem_t retained_wake=s_sink.wake;
- rtcp_audio_mixer_t *retained_mixer=s_sink.mixer;
- assert(carplay_audio_sink_stop()==RTCP_ETIMEDOUT);
- assert(!carplay_audio_sink_is_running() && s_sink.thread_running);
- assert(s_sink.dev==retained_dev && s_sink.lock==retained_lock &&
-        s_sink.wake==retained_wake && s_sink.mixer==retained_mixer && closed==before_close);
- assert(carplay_audio_sink_start()==RTCP_ESTATE);
- hold_output=false;host_rtthread_join();
- assert(!s_sink.thread_running && closed==before_close);
- assert(carplay_audio_sink_start()==RTCP_ESTATE); /* late exit still needs cleanup */
- assert(carplay_audio_sink_stop()==RTCP_OK);
- assert(closed==before_close+1 && !s_sink.dev && !s_sink.lock && !s_sink.wake && !s_sink.mixer);
- assert(carplay_audio_sink_stop()==RTCP_OK);
+    /* Actual blocking output retains device/queues until late worker retirement. */
+    assert(carplay_audio_sink_start() == RTCP_OK);
+    hold_output = true;
+    output_entered = false;
+    self_stop_requested = true;
+    self_stop_result = RTCP_OK;
+    assert(carplay_audio_sink_local_pcm(alert, sizeof(alert), 48000, 1, true) == RTCP_OK);
+    wait_flag(&output_entered);
+    assert(self_stop_result == RTCP_ESTATE && carplay_audio_sink_is_running());
+    unsigned before_close = closed;
+    rt_device_t retained_dev = s_sink.dev;
+    rt_mutex_t retained_lock = s_sink.lock;
+    rt_sem_t retained_wake = s_sink.wake;
+    rtcp_audio_mixer_t *retained_mixer = s_sink.mixer;
+    assert(carplay_audio_sink_stop() == RTCP_ETIMEDOUT);
+    assert(!carplay_audio_sink_is_running() && s_sink.thread_running);
+    assert(s_sink.dev == retained_dev && s_sink.lock == retained_lock &&
+           s_sink.wake == retained_wake && s_sink.mixer == retained_mixer && closed == before_close);
+    assert(carplay_audio_sink_start() == RTCP_ESTATE);
+    hold_output = false;
+    host_rtthread_join();
+    assert(!s_sink.thread_running && closed == before_close);
+    assert(carplay_audio_sink_start() == RTCP_ESTATE); /* late exit still needs cleanup */
+    assert(carplay_audio_sink_stop() == RTCP_OK);
+    assert(closed == before_close + 1 && !s_sink.dev && !s_sink.lock && !s_sink.wake && !s_sink.mixer);
+    assert(carplay_audio_sink_stop() == RTCP_OK);
 
- /* Stop must drain a real public reader before deleting its queue mutex. */
- assert(carplay_audio_sink_start()==RTCP_OK);
- carplay_audio_sink_set_volume_db(0);
- assert(rt_mutex_take(s_sink.lock,RT_WAITING_FOREVER)==RT_EOK);
- pthread_t reader,stopper;
- assert(!pthread_create(&reader,NULL,read_volume,NULL));
- for(unsigned i=0;i<3000 && atomic_load(&s_audio_access)!=1U;++i)rt_thread_mdelay(1);
- assert(atomic_load(&s_audio_access)==1U);
- assert(!pthread_create(&stopper,NULL,stop_sink,NULL));
- for(unsigned i=0;i<3000 && !(atomic_load(&s_audio_access)&AUDIO_RETIRING);++i)rt_thread_mdelay(1);
- assert(atomic_load(&s_audio_access)==(AUDIO_RETIRING|1U));
- assert(carplay_audio_sink_start()==RTCP_ESTATE && carplay_audio_sink_stop()==RTCP_ESTATE);
- assert(!carplay_audio_sink_is_running() && !carplay_audio_sink_pending());
- assert(carplay_audio_sink_volume_percent()==-1);
- assert(carplay_audio_sink_packet(102,&native,native_pcm,sizeof(native_pcm),0,sink_now_us())==RTCP_ESTATE);
- assert(carplay_audio_sink_local_pcm(alert,sizeof(alert),48000,1,true)==RTCP_ESTATE);
- assert(!carplay_audio_sink_duck(true,-10,100));
- carplay_audio_sink_set_volume_db(-144); /* cannot touch the held queue mutex */
- carplay_audio_sink_slot_stop(2);carplay_audio_sink_stream_stop(102);
- carplay_audio_sink_modes(&(airplay_audio_modes_t){.has_call=true,.call_active=true});
- carplay_audio_sink_diagnostics();
- audio_probe_command(2,capture_args);audio_path_command(2,direct_args);
- unsigned p=1,d=1,e=1,r=1;carplay_audio_sink_stats(&p,&d,&e,&r);
- assert(!p && !d && !e && !r && s_sink.volume_level==100);
- rt_mutex_release(s_sink.lock);
- assert(!pthread_join(reader,NULL) && !pthread_join(stopper,NULL));
- assert(reader_result==100 && stop_result==RTCP_OK);host_rtthread_join();
- observe_sink=true;
- pthread_t observer;assert(!pthread_create(&observer,NULL,observe_status,NULL));
- for(unsigned i=0;i<3000 && !observations;++i)rt_thread_mdelay(1);
- assert(observations);
- for(unsigned cycle=0;cycle<32;++cycle) {
-  assert(carplay_audio_sink_start()==RTCP_OK);
-  assert(carplay_audio_sink_stop()==RTCP_OK);host_rtthread_join();
- }
- observe_sink=false;assert(!pthread_join(observer,NULL));
- assert(opened==closed);
- puts("actual RT-Thread audio sink: worker playback, failed startup, selective stop and repeated cleanup passed");
- puts("actual audio lifecycle: self-join, timeout retention/retry, concurrent reader retirement and 32 restarts passed");
+    /* Stop must drain a real public reader before deleting its queue mutex. */
+    assert(carplay_audio_sink_start() == RTCP_OK);
+    carplay_audio_sink_set_volume_db(0);
+    assert(rt_mutex_take(s_sink.lock, RT_WAITING_FOREVER) == RT_EOK);
+    pthread_t reader, stopper;
+    assert(!pthread_create(&reader, NULL, read_volume, NULL));
+    for (unsigned i = 0; i < 3000 && atomic_load(&s_audio_access) != 1U; ++i) rt_thread_mdelay(1);
+    assert(atomic_load(&s_audio_access) == 1U);
+    assert(!pthread_create(&stopper, NULL, stop_sink, NULL));
+    for (unsigned i = 0; i < 3000 && !(atomic_load(&s_audio_access) & AUDIO_RETIRING); ++i) rt_thread_mdelay(1);
+    assert(atomic_load(&s_audio_access) == (AUDIO_RETIRING | 1U));
+    assert(carplay_audio_sink_start() == RTCP_ESTATE && carplay_audio_sink_stop() == RTCP_ESTATE);
+    assert(!carplay_audio_sink_is_running() && !carplay_audio_sink_pending());
+    assert(carplay_audio_sink_volume_percent() == -1);
+    assert(carplay_audio_sink_packet(102, &native, native_pcm, sizeof(native_pcm), 0, sink_now_us()) == RTCP_ESTATE);
+    assert(carplay_audio_sink_local_pcm(alert, sizeof(alert), 48000, 1, true) == RTCP_ESTATE);
+    assert(!carplay_audio_sink_duck(true, -10, 100));
+    carplay_audio_sink_set_volume_db(-144); /* cannot touch the held queue mutex */
+    carplay_audio_sink_slot_stop(2);
+    carplay_audio_sink_stream_stop(102);
+    carplay_audio_sink_modes(&(airplay_audio_modes_t){ .has_call = true, .call_active = true });
+    carplay_audio_sink_diagnostics();
+    audio_probe_command(2, capture_args);
+    audio_path_command(2, direct_args);
+    unsigned p = 1, d = 1, e = 1, r = 1;
+    carplay_audio_sink_stats(&p, &d, &e, &r);
+    assert(!p && !d && !e && !r && s_sink.volume_level == 100);
+    rt_mutex_release(s_sink.lock);
+    assert(!pthread_join(reader, NULL) && !pthread_join(stopper, NULL));
+    assert(reader_result == 100 && stop_result == RTCP_OK);
+    host_rtthread_join();
+    observe_sink = true;
+    pthread_t observer;
+    assert(!pthread_create(&observer, NULL, observe_status, NULL));
+    for (unsigned i = 0; i < 3000 && !observations; ++i) rt_thread_mdelay(1);
+    assert(observations);
+    for (unsigned cycle = 0; cycle < 32; ++cycle)
+    {
+        assert(carplay_audio_sink_start() == RTCP_OK);
+        assert(carplay_audio_sink_stop() == RTCP_OK);
+        host_rtthread_join();
+    }
+    observe_sink = false;
+    assert(!pthread_join(observer, NULL));
+    assert(opened == closed);
+    puts("actual RT-Thread audio sink: worker playback, failed startup, selective stop and repeated cleanup passed");
+    puts("actual audio lifecycle: self-join, timeout retention/retry, concurrent reader retirement and 32 restarts passed");
 }

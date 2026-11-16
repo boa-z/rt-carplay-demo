@@ -39,7 +39,8 @@
 
 #define MFI_LUBANLITE_WRITE_MAX 160U
 
-static struct {
+static struct
+{
     struct rt_i2c_bus_device *bus;
     uint8_t address;
     rtcp_mfi2c_t device;
@@ -63,7 +64,8 @@ static struct {
 static uint32_t mfi_fnv1a32(const uint8_t *data, size_t len)
 {
     uint32_t hash = 2166136261u;
-    for (size_t i = 0; i < len; ++i) {
+    for (size_t i = 0; i < len; ++i)
+    {
         hash ^= data[i];
         hash *= 16777619u;
     }
@@ -78,17 +80,25 @@ static bool mfi_cert_plausible(const uint8_t *der, size_t len)
     size_t header;
     size_t declared;
 
-    if (len < 4U || der[0] != 0x30U) return false;
-    if (der[1] == 0x82U) {
+    if (len < 4U || der[0] != 0x30U)
+        return false;
+    if (der[1] == 0x82U)
+    {
         header = 4U;
         declared = ((size_t)der[2] << 8) | der[3];
-    } else if (der[1] == 0x81U) {
+    }
+    else if (der[1] == 0x81U)
+    {
         header = 3U;
         declared = der[2];
-    } else if (der[1] < 0x80U) {
+    }
+    else if (der[1] < 0x80U)
+    {
         header = 2U;
         declared = der[1];
-    } else {
+    }
+    else
+    {
         return false;
     }
     return header + declared == len;
@@ -99,7 +109,8 @@ static int bus_write(void *context, uint8_t reg, const uint8_t *data,
 {
     struct rt_i2c_bus_device *bus = context;
     if (bus == NULL || data == NULL || len == 0U ||
-        len > MFI_LUBANLITE_WRITE_MAX) {
+        len > MFI_LUBANLITE_WRITE_MAX)
+    {
         return RTCP_EINVAL;
     }
 
@@ -115,9 +126,11 @@ static int bus_read(void *context, uint8_t reg, uint8_t *data, size_t len,
                     int retries, int delay_ms)
 {
     struct rt_i2c_bus_device *bus = context;
-    if (bus == NULL || data == NULL || len == 0U) return RTCP_EINVAL;
+    if (bus == NULL || data == NULL || len == 0U)
+        return RTCP_EINVAL;
 
-    for (int attempt = 0; attempt <= retries; ++attempt) {
+    for (int attempt = 0; attempt <= retries; ++attempt)
+    {
         /* The register write and the data read are two separate transfers,
          * each with STOP, and the part needs a settling gap between them.
          * The vendor driver does write -> 50 ms -> read; rt_i2c_read_reg()
@@ -125,11 +138,14 @@ static int bus_read(void *context, uint8_t reg, uint8_t *data, size_t len,
          * Keep the vendor timing here. */
         rt_size_t sent = rt_i2c_master_send(bus, s_mfi.address, RT_I2C_WR,
                                             &reg, 1U);
-        if (sent != 1U) {
-            if (delay_ms > 0) aicos_msleep((uint32_t)delay_ms);
+        if (sent != 1U)
+        {
+            if (delay_ms > 0)
+                aicos_msleep((uint32_t)delay_ms);
             continue;
         }
-        if (delay_ms > 0) aicos_msleep((uint32_t)delay_ms);
+        if (delay_ms > 0)
+            aicos_msleep((uint32_t)delay_ms);
         rt_size_t got = rt_i2c_master_recv(bus, s_mfi.address, 0U, data,
                                            (rt_uint32_t)len);
 
@@ -143,8 +159,10 @@ static int bus_read(void *context, uint8_t reg, uint8_t *data, size_t len,
          * for the 908-byte certificate). */
         aicos_msleep((uint32_t)(150U * len / 1000U + 1U));
 
-        if (got == len) return RTCP_OK;
-        if (delay_ms > 0) aicos_msleep((uint32_t)delay_ms);
+        if (got == len)
+            return RTCP_OK;
+        if (delay_ms > 0)
+            aicos_msleep((uint32_t)delay_ms);
     }
     return RTCP_EIO;
 }
@@ -170,7 +188,8 @@ static bool s_mfi_lock_ready;
 static void mfi_lock(void)
 {
     rt_enter_critical();
-    if (!s_mfi_lock_ready) {
+    if (!s_mfi_lock_ready)
+    {
         rt_mutex_init(&s_mfi_transaction, "cp-mfi", RT_IPC_FLAG_PRIO);
         s_mfi_lock_ready = true;
     }
@@ -179,11 +198,14 @@ static void mfi_lock(void)
 }
 static int mfi_start_unlocked(const char *i2c_bus_name, uint8_t address)
 {
-    if (s_mfi.ready) return RTCP_OK;
-    if (i2c_bus_name == NULL || i2c_bus_name[0] == '\0') return RTCP_EINVAL;
+    if (s_mfi.ready)
+        return RTCP_OK;
+    if (i2c_bus_name == NULL || i2c_bus_name[0] == '\0')
+        return RTCP_EINVAL;
 
     s_mfi.bus = rt_i2c_bus_device_find(i2c_bus_name);
-    if (s_mfi.bus == NULL) {
+    if (s_mfi.bus == NULL)
+    {
         RTCP_LOGE("mfi", "I2C bus %s not found", i2c_bus_name);
         return RTCP_ENOENT;
     }
@@ -191,7 +213,8 @@ static int mfi_start_unlocked(const char *i2c_bus_name, uint8_t address)
     rtcp_mfi2c_init(&s_mfi.device, &s_bus_ops, s_mfi.bus, s_mfi.address);
 
     int result = rtcp_mfi2c_probe(&s_mfi.device, &s_mfi.info);
-    if (result != RTCP_OK) {
+    if (result != RTCP_OK)
+    {
         RTCP_LOGE("mfi", "no coprocessor at %s 0x%02x (%d)", i2c_bus_name,
                   (unsigned)s_mfi.address, result);
         return result;
@@ -203,10 +226,12 @@ static int mfi_start_unlocked(const char *i2c_bus_name, uint8_t address)
      * artifact, not a bad part; bus_read() now matches the vendor's
      * per-byte settling delay.) */
     if (s_mfi.info.id32 != 0x00000200u && s_mfi.info.id32 != 0x00000300u &&
-        s_mfi.info.cert_len != 908u) {
+        s_mfi.info.cert_len != 908u)
+    {
         RTCP_LOGE("mfi", "%s 0x%02x answered but not like a 2.0C: "
-                  "id=0x%08x version=%02x.%02x.%02x.%02x cert=%u; run "
-                  "'carplay_mfi' for a raw bus dump", i2c_bus_name,
+                         "id=0x%08x version=%02x.%02x.%02x.%02x cert=%u; run "
+                         "'carplay_mfi' for a raw bus dump",
+                  i2c_bus_name,
                   (unsigned)s_mfi.address, (unsigned)s_mfi.info.id32,
                   s_mfi.info.version[0], s_mfi.info.version[1],
                   s_mfi.info.version[2], s_mfi.info.version[3],
@@ -216,7 +241,8 @@ static int mfi_start_unlocked(const char *i2c_bus_name, uint8_t address)
 
     s_mfi.ready = true;
     RTCP_LOGI("mfi", "2.0C at %s 0x%02x: id=0x%08x version=%02x.%02x.%02x.%02x "
-              "cert=%u%s", i2c_bus_name, (unsigned)s_mfi.address,
+                     "cert=%u%s",
+              i2c_bus_name, (unsigned)s_mfi.address,
               (unsigned)s_mfi.info.id32,
               s_mfi.info.version[0], s_mfi.info.version[1],
               s_mfi.info.version[2], s_mfi.info.version[3],
@@ -257,10 +283,13 @@ static int diag_read_shape(struct rt_i2c_bus_device *bus, uint8_t addr,
 {
     rt_size_t sent = rt_i2c_master_send(bus, addr, RT_I2C_WR, &reg, 1U);
 
-    if (sent != 1U) return -1;
-    if (delay_ms > 0) aicos_msleep((uint32_t)delay_ms);
+    if (sent != 1U)
+        return -1;
+    if (delay_ms > 0)
+        aicos_msleep((uint32_t)delay_ms);
     return rt_i2c_master_recv(bus, addr, 0U, buf, (rt_uint32_t)len) == len
-               ? 0 : -1;
+               ? 0
+               : -1;
 }
 
 static int diag_read_combined(struct rt_i2c_bus_device *bus, uint8_t addr,
@@ -297,10 +326,12 @@ void rtcp_mfi_lubanlite_dump(const char *i2c_bus_name, uint8_t address)
 
     if (i2c_bus_name == NULL || i2c_bus_name[0] == '\0')
         i2c_bus_name = "i2c0";
-    if (address == 0U) address = RTCP_MFI2C_ADDR_DEFAULT;
+    if (address == 0U)
+        address = RTCP_MFI2C_ADDR_DEFAULT;
 
     bus = rt_i2c_bus_device_find(i2c_bus_name);
-    if (bus == NULL) {
+    if (bus == NULL)
+    {
         rt_kprintf("[mfi] bus %s not found\n", i2c_bus_name);
         return;
     }
@@ -311,11 +342,13 @@ void rtcp_mfi_lubanlite_dump(const char *i2c_bus_name, uint8_t address)
     ok = diag_read_shape(bus, address, 0x4E, buf, sizeof(buf), 50);
     diag_dump("reg 0x4E len 31 vendor   ", ok, buf, 8);
 
-    for (pass = 0; pass < 2; pass++) {
+    for (pass = 0; pass < 2; pass++)
+    {
         memset(buf, 0xAA, sizeof(buf));
         ok = diag_read_shape(bus, address, 0x04, buf, 4, 50);
         diag_dump(pass == 0 ? "reg 0x04 len 4  vendor   "
-                            : "reg 0x04 len 4  vendor#2 ", ok, buf, 4);
+                            : "reg 0x04 len 4  vendor#2 ",
+                  ok, buf, 4);
     }
 
     memset(buf, 0xAA, sizeof(buf));
@@ -339,10 +372,12 @@ void rtcp_mfi_lubanlite_dump(const char *i2c_bus_name, uint8_t address)
     diag_dump("reg 0x30 len 2  vendor   ", ok, buf, 2);
 
     rt_kprintf("[mfi] scan %s:", i2c_bus_name);
-    for (a = 0x08; a <= 0x77; a++) {
+    for (a = 0x08; a <= 0x77; a++)
+    {
         uint8_t v = 0;
 
-        if (diag_read_shape(bus, (uint8_t)a, 0x00, &v, 1, 5) == 0) {
+        if (diag_read_shape(bus, (uint8_t)a, 0x00, &v, 1, 5) == 0)
+        {
             rt_kprintf(" 0x%02x=0x%02x", a, v);
             acked++;
         }
@@ -356,16 +391,19 @@ void rtcp_mfi_lubanlite_dump(const char *i2c_bus_name, uint8_t address)
 
 static int mfi_info(struct rtcp_mfi_info *out)
 {
-    if (out == NULL) return RTCP_EINVAL;
-    if (!s_mfi.ready) return RTCP_ESTATE;
+    if (out == NULL)
+        return RTCP_EINVAL;
+    if (!s_mfi.ready)
+        return RTCP_ESTATE;
     *out = s_mfi.info;
     return RTCP_OK;
 }
 
 static int mfi_sign_unlocked(const uint8_t *challenge, size_t len, uint8_t *sig,
-                    size_t sig_cap, size_t *sig_len)
+                             size_t sig_cap, size_t *sig_len)
 {
-    if (!s_mfi.ready) return RTCP_ESTATE;
+    if (!s_mfi.ready)
+        return RTCP_ESTATE;
 
     /* Bring-up visibility: the iAP2 MFiChallenge payload length is the first
      * thing to check when signing fails (the 2.0C accepts exactly 20 bytes;
@@ -373,18 +411,22 @@ static int mfi_sign_unlocked(const uint8_t *challenge, size_t len, uint8_t *sig,
     char challenge_head[3 * 8 + 1];
     size_t shown = len < 8U ? len : 8U;
     size_t pos = 0U;
-    for (size_t i = 0; i < shown; ++i) {
+    for (size_t i = 0; i < shown; ++i)
+    {
         int written = rt_snprintf(&challenge_head[pos],
                                   sizeof(challenge_head) - pos, "%02X ",
                                   challenge[i]);
-        if (written <= 0) break;
+        if (written <= 0)
+            break;
         pos += (size_t)written;
     }
-    if (pos != 0U) challenge_head[pos - 1U] = '\0';
+    if (pos != 0U)
+        challenge_head[pos - 1U] = '\0';
 
     int result = rtcp_mfi2c_sign(&s_mfi.device, challenge, len, sig, sig_cap,
                                  sig_len);
-    if (result != RTCP_OK) {
+    if (result != RTCP_OK)
+    {
         RTCP_LOGE("mfi", "sign failed rc=%d challenge len=%u head=%s",
                   result, (unsigned)len, challenge_head);
         return result;
@@ -392,30 +434,37 @@ static int mfi_sign_unlocked(const uint8_t *challenge, size_t len, uint8_t *sig,
 
     pos = 0U;
     shown = *sig_len < 8U ? *sig_len : 8U;
-    for (size_t i = 0; i < shown; ++i) {
+    for (size_t i = 0; i < shown; ++i)
+    {
         int written = rt_snprintf(&challenge_head[pos],
                                   sizeof(challenge_head) - pos, "%02X ",
                                   sig[i]);
-        if (written <= 0) break;
+        if (written <= 0)
+            break;
         pos += (size_t)written;
     }
-    if (pos != 0U) challenge_head[pos - 1U] = '\0';
+    if (pos != 0U)
+        challenge_head[pos - 1U] = '\0';
 
     RTCP_LOGI("mfi", "signature %u bytes (challenge %u bytes; signature head=%s)",
               (unsigned)*sig_len, (unsigned)len, challenge_head);
     return RTCP_OK;
 }
 
-#define MFI_CERT_ATTEMPTS 5
+#define MFI_CERT_ATTEMPTS    5
 #define MFI_CERT_RECOVERY_MS 400
 
 static int mfi_read_cert_unlocked(uint8_t *der, size_t cap, size_t *der_len)
 {
-    if (!s_mfi.ready) return RTCP_ESTATE;
-    if (der == NULL || der_len == NULL) return RTCP_EINVAL;
+    if (!s_mfi.ready)
+        return RTCP_ESTATE;
+    if (der == NULL || der_len == NULL)
+        return RTCP_EINVAL;
 
-    if (s_mfi.cert_valid) {
-        if (cap < s_mfi.cert_len) return RTCP_EINVAL;
+    if (s_mfi.cert_valid)
+    {
+        if (cap < s_mfi.cert_len)
+            return RTCP_EINVAL;
         memcpy(der, s_mfi.cert, s_mfi.cert_len);
         *der_len = s_mfi.cert_len;
         RTCP_LOGI("mfi", "cert_cache=hit bytes=%u checksum=%08X",
@@ -425,17 +474,19 @@ static int mfi_read_cert_unlocked(uint8_t *der, size_t cap, size_t *der_len)
 
     int result = RTCP_EIO;
     size_t n = 0U;
-    for (int attempt = 1; attempt <= MFI_CERT_ATTEMPTS; ++attempt) {
+    for (int attempt = 1; attempt <= MFI_CERT_ATTEMPTS; ++attempt)
+    {
         n = 0U;
         result = rtcp_mfi2c_read_cert(&s_mfi.device, der, cap, &n);
-        if (result == RTCP_OK && n > 0U && mfi_cert_plausible(der, n)) {
+        if (result == RTCP_OK && n > 0U && mfi_cert_plausible(der, n))
+        {
             s_mfi.cert_len = n;
             memcpy(s_mfi.cert, der, n);
             s_mfi.cert_checksum = mfi_fnv1a32(der, n);
             s_mfi.cert_valid = true;
             *der_len = n;
             RTCP_LOGI("mfi", "certificate %u bytes header %02X %02X %02X %02X "
-                      "tail %02X %02X %02X %02X checksum=%08X attempt=%d",
+                             "tail %02X %02X %02X %02X checksum=%08X attempt=%d",
                       (unsigned)n, der[0], der[1], der[2], der[3],
                       der[n - 4U], der[n - 3U], der[n - 2U], der[n - 1U],
                       (unsigned)s_mfi.cert_checksum, attempt);
@@ -444,7 +495,7 @@ static int mfi_read_cert_unlocked(uint8_t *der, size_t cap, size_t *der_len)
 
         uint32_t checksum = n > 0U ? mfi_fnv1a32(der, n) : 0U;
         RTCP_LOGE("mfi", "certificate read attempt=%d failed rc=%d bytes=%u "
-                  "plausible=%d checksum=%08X",
+                         "plausible=%d checksum=%08X",
                   attempt, result, (unsigned)n,
                   n > 0U ? (int)mfi_cert_plausible(der, n) : 0,
                   (unsigned)checksum);
@@ -506,27 +557,32 @@ static uint8_t s_lazy_addr;
 
 static int lazy_ensure(void)
 {
-    if (s_mfi.ready) return RTCP_OK;
-    if (s_lazy_bus[0] == '\0') return RTCP_ESTATE;
+    if (s_mfi.ready)
+        return RTCP_OK;
+    if (s_lazy_bus[0] == '\0')
+        return RTCP_ESTATE;
     return rtcp_mfi_lubanlite_start(s_lazy_bus, s_lazy_addr);
 }
 
 static int lazy_info(struct rtcp_mfi_info *out)
 {
-    if (lazy_ensure() != RTCP_OK) return RTCP_ESTATE;
+    if (lazy_ensure() != RTCP_OK)
+        return RTCP_ESTATE;
     return mfi_info(out);
 }
 
 static int lazy_sign(const uint8_t *challenge, size_t len, uint8_t *sig,
                      size_t sig_cap, size_t *sig_len)
 {
-    if (lazy_ensure() != RTCP_OK) return RTCP_ESTATE;
+    if (lazy_ensure() != RTCP_OK)
+        return RTCP_ESTATE;
     return mfi_sign(challenge, len, sig, sig_cap, sig_len);
 }
 
 static int lazy_read_cert(uint8_t *der, size_t cap, size_t *der_len)
 {
-    if (lazy_ensure() != RTCP_OK) return RTCP_ESTATE;
+    if (lazy_ensure() != RTCP_OK)
+        return RTCP_ESTATE;
     return mfi_read_cert(der, cap, der_len);
 }
 
@@ -540,7 +596,8 @@ const struct rtcp_mfi *rtcp_mfi_lubanlite_lazy(const char *i2c_bus_name,
                                                uint8_t address)
 {
     size_t len = i2c_bus_name != NULL ? strlen(i2c_bus_name) : 0U;
-    if (len == 0U || len >= sizeof(s_lazy_bus)) return NULL;
+    if (len == 0U || len >= sizeof(s_lazy_bus))
+        return NULL;
     memcpy(s_lazy_bus, i2c_bus_name, len + 1U);
     s_lazy_addr = address;
     return &s_lazy_ops;

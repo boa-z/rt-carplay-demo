@@ -59,7 +59,8 @@ void carplay_video_sink_frame(bool configuration, const uint8_t *annex_b,
 
 /* Coherent diagnostic counters copied with interrupts briefly masked on this
  * single-core target. These are elapsed wall times, not isolated CPU costs. */
-typedef struct {
+typedef struct
+{
     unsigned frames, latched, packets, drops, errors, pending, queue_peak;
     /* latched counts new decoded frames with a successful DE update/vsync,
      * including retained-frame retries, excluding static layout reapplication. */

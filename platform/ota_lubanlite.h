@@ -13,10 +13,12 @@
 #include <rtthread.h>
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-typedef enum {
+typedef enum
+{
     CARPLAY_OTA_IDLE = 0,
     CARPLAY_OTA_CHECKING,
     CARPLAY_OTA_UP_TO_DATE,
@@ -27,7 +29,8 @@ typedef enum {
     CARPLAY_OTA_FAILED,
 } carplay_ota_state_t;
 
-typedef struct {
+typedef struct
+{
     carplay_ota_state_t state;
     int progress;            /* 0..100 while downloading/applying, -1 unknown */
     char current[24];        /* version compiled into the running image */

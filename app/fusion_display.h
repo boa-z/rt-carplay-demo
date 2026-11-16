@@ -6,14 +6,21 @@
 #include <stdint.h>
 #include "rtcp/display.h"
 
-typedef enum { CARPLAY_FULLSCREEN, CARPLAY_FUSION, CARPLAY_LOCAL } carplay_display_mode_t;
-typedef struct {
+typedef enum
+{
+    CARPLAY_FULLSCREEN,
+    CARPLAY_FUSION,
+    CARPLAY_LOCAL
+} carplay_display_mode_t;
+typedef struct
+{
     uint16_t speed_kph;
     uint8_t battery_percent;
     char gear[8];
     bool available, simulated;
 } carplay_vehicle_sample_t;
-typedef struct {
+typedef struct
+{
     bool initialized, video_active;
     carplay_display_mode_t requested, effective;
     uint16_t width, height, local_width, logical_width, logical_height;
@@ -22,8 +29,14 @@ typedef struct {
     int error;
     carplay_vehicle_sample_t vehicle;
 } carplay_fusion_snapshot_t;
-typedef enum { CARPLAY_TOUCH_NONE, CARPLAY_TOUCH_LOCAL, CARPLAY_TOUCH_PHONE } carplay_touch_owner_t;
-typedef struct {
+typedef enum
+{
+    CARPLAY_TOUCH_NONE,
+    CARPLAY_TOUCH_LOCAL,
+    CARPLAY_TOUCH_PHONE
+} carplay_touch_owner_t;
+typedef struct
+{
     carplay_touch_owner_t owner;
     uint8_t phase;
     uint16_t id, x, y;
@@ -42,9 +55,9 @@ void carplay_fusion_use_simulated(void);
 /* Decoder-worker geometry and latch observations. LOCAL keeps any connected
  * video behind opaque local UI; disconnected LOCAL has no decoder workload. */
 bool carplay_fusion_video_target(uint16_t panel_width, uint16_t panel_height,
-    rtcp_display_rect_t *, uint32_t *generation);
+                                 rtcp_display_rect_t *, uint32_t *generation);
 void carplay_fusion_video_latched(const rtcp_display_rect_t *, uint16_t logical_width,
-    uint16_t logical_height, uint32_t generation, uint32_t now_ms);
+                                  uint16_t logical_height, uint32_t generation, uint32_t now_ms);
 void carplay_fusion_video_stopped(void);
 void carplay_fusion_display_error(int error);
 /* Single-pointer gesture ownership. A changed layout/session cancels a held

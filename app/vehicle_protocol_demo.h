@@ -5,11 +5,13 @@
 
 /* Explicit protocol bench. These are simulated combustion-engine RPM values,
  * never road speed, gear, battery SOC or a physical vehicle provider. Owner only. */
-typedef struct {
+typedef struct
+{
     rtcp_vehicle_t *model;
     uint64_t sample_slot;
 } carplay_vehicle_protocol_demo_t;
-typedef struct {
+typedef struct
+{
     uint32_t rpm;
     int sample_error;
     rtcp_vehicle_status_t model;
@@ -24,5 +26,5 @@ int carplay_vehicle_protocol_demo_tick(carplay_vehicle_protocol_demo_t *, uint64
 /* Copy only on the Receiver owner. Publish under the application's lock before
  * allowing another thread to inspect this snapshot. Never publish model pointers. */
 void carplay_vehicle_protocol_demo_snapshot(const carplay_vehicle_protocol_demo_t *,
-    rtcp_receiver_t *, carplay_vehicle_protocol_snapshot_t *);
+                                            rtcp_receiver_t *, carplay_vehicle_protocol_snapshot_t *);
 #endif

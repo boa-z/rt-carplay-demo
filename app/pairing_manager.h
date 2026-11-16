@@ -2,9 +2,10 @@
 #pragma once
 #include <stdbool.h>
 #include <stddef.h>
-#define CARPLAY_PAIR_FILES_MAX 12
+#define CARPLAY_PAIR_FILES_MAX    12
 #define CARPLAY_PAIR_FILENAME_MAX 96
-typedef struct {
+typedef struct
+{
     char name[CARPLAY_PAIR_FILENAME_MAX];
     size_t bytes;
 } carplay_pair_file_t;

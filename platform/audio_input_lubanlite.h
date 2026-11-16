@@ -19,5 +19,5 @@ void carplay_audio_input_reference(const int16_t *stereo, size_t frames);
 /* Reference for a complete 10 ms 48 kHz output chunk, with measured queued
  * playback bytes (stereo s16). Only the playback worker calls this. */
 void carplay_audio_input_reference_queued(const int16_t *stereo, size_t frames,
-                                         uint32_t queued_bytes);
+                                          uint32_t queued_bytes);
 void carplay_audio_input_status(void);

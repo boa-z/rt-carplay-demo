@@ -3,6 +3,7 @@
 """Actual wireless owner/session code with modeled Bluetooth and scheduling."""
 from pathlib import Path
 import os
+import re
 import subprocess
 import tempfile
 
@@ -21,7 +22,7 @@ def function(signature):
     return text[start:end]
 
 
-owner = text[text.index("typedef struct {"):text.index("/* ------------------------------------------------------------------ */")]
+owner = text[re.search(r"typedef\s+struct\s*\{", text).start():text.index("/* ------------------------------------------------------------------ */")]
 # MFi probing is a hardware boundary. Everything from state publication,
 # actual iAP2 callbacks/configuration/session through start/stop is retained.
 owner = owner.replace(function("static const struct rtcp_mfi *link_mfi(void)"),

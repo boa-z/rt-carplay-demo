@@ -139,8 +139,15 @@ bool rtcp_bt_lubanlite_link_up(void);
 uint8_t rtcp_bt_lubanlite_channel(void);
 unsigned rtcp_bt_lubanlite_rx_dropped(void);
 
-enum { RTCP_BT_PAIR_NONE, RTCP_BT_PAIR_DISPLAY, RTCP_BT_PAIR_COMPARE, RTCP_BT_PAIR_CONSENT };
-typedef struct {
+enum
+{
+    RTCP_BT_PAIR_NONE,
+    RTCP_BT_PAIR_DISPLAY,
+    RTCP_BT_PAIR_COMPARE,
+    RTCP_BT_PAIR_CONSENT
+};
+typedef struct
+{
     uint32_t request, passkey;
     unsigned kind, failures, bond_count, bond_capacity;
     uint8_t hci_error, security_error;

@@ -57,7 +57,7 @@
 #define USB_CMD_TAG "carplay_usb"
 
 #define APPLE_REQUEST_CARPLAY_CONFIGS 0x52U
-#define APPLE_CARPLAY_CONFIGS_WINDEX 0x0004U
+#define APPLE_CARPLAY_CONFIGS_WINDEX  0x0004U
 
 #define MUX_REPLY_MAX 2048U
 
@@ -83,17 +83,18 @@ static void iap2_usb_request_stop(void);
 
 static const char *speed_name(uint8_t speed)
 {
-    switch (speed) {
-        case RTCP_USB_SPEED_LOW:
-            return "low";
-        case RTCP_USB_SPEED_FULL:
-            return "full";
-        case RTCP_USB_SPEED_HIGH:
-            return "high";
-        case RTCP_USB_SPEED_SUPER:
-            return "super";
-        default:
-            return "unknown";
+    switch (speed)
+    {
+    case RTCP_USB_SPEED_LOW:
+        return "low";
+    case RTCP_USB_SPEED_FULL:
+        return "full";
+    case RTCP_USB_SPEED_HIGH:
+        return "high";
+    case RTCP_USB_SPEED_SUPER:
+        return "super";
+    default:
+        return "unknown";
     }
 }
 
@@ -101,9 +102,12 @@ static void usb_event(struct rtcp_usb *usb, rtcp_usb_event_t event, void *user)
 {
     (void)usb;
     (void)user;
-    if (event == RTCP_USB_EVENT_ATTACHED) {
+    if (event == RTCP_USB_EVENT_ATTACHED)
+    {
         rt_kprintf("[carplay_usb] event=attached\n");
-    } else {
+    }
+    else
+    {
         rt_kprintf("[carplay_usb] event=detached\n");
         /* The carkit stream is gone with the device.  Ask the iAP2 thread to
          * stop; it releases the stream and MFi provider in its own context. */
@@ -116,14 +120,17 @@ static void print_interface(const rtcp_usb_interface_t *interface)
     rt_kprintf("  intf %u class=%02x/%02x/%02x alts=%u\n",
                interface->number, interface->class_code, interface->subclass,
                interface->protocol, interface->altsetting_count);
-    for (uint8_t alt = 0U; alt < interface->altsetting_count; ++alt) {
+    for (uint8_t alt = 0U; alt < interface->altsetting_count; ++alt)
+    {
         const rtcp_usb_altsetting_t *setting = &interface->altsettings[alt];
-        if (setting->endpoint_count == 0U) {
+        if (setting->endpoint_count == 0U)
+        {
             continue;
         }
         rt_kprintf("    alt %u endpoints=%u\n", setting->alternate_setting,
                    setting->endpoint_count);
-        for (uint8_t e = 0U; e < setting->endpoint_count; ++e) {
+        for (uint8_t e = 0U; e < setting->endpoint_count; ++e)
+        {
             const rtcp_usb_endpoint_t *endpoint = &setting->endpoints[e];
             rt_kprintf("      ep 0x%02x %s mps=%u\n", endpoint->address,
                        (endpoint->address & 0x80U) != 0U ? "in" : "out",
@@ -137,9 +144,11 @@ static int cmd_status(void)
     static rtcp_usb_device_t device;
     int ret = rtcp_usb_lubanlite.ops->get_device(
         rtcp_usb_lubanlite.context, &device);
-    if (ret != RTCP_OK) {
+    if (ret != RTCP_OK)
+    {
         rt_kprintf("[carplay_usb] not attached (ret=%d); run "
-                   "'carplay_usb start' before plugging the phone\n", ret);
+                   "'carplay_usb start' before plugging the phone\n",
+                   ret);
         return 0;
     }
 
@@ -154,18 +163,21 @@ static int cmd_status(void)
                device.interface_count, device.configuration_total_length,
                rtcp_usb_is_carplay_configuration(&device) ? "yes" : "no");
 
-    for (uint8_t i = 0U; i < device.interface_count; ++i) {
+    for (uint8_t i = 0U; i < device.interface_count; ++i)
+    {
         print_interface(&device.interfaces[i]);
     }
 
     int mux = rtcp_usb_find_interface(&device, RTCP_USB_CLASS_VENDOR,
                                       RTCP_USB_APPLE_SUBCLASS_USBMUX,
                                       RTCP_USB_APPLE_PROTOCOL_USBMUX);
-    if (mux >= 0) {
+    if (mux >= 0)
+    {
         uint8_t out = 0U;
         uint8_t in = 0U;
         if (rtcp_usb_interface_bulk_endpoints(&device.interfaces[mux], &out,
-                                              &in)) {
+                                              &in))
+        {
             rt_kprintf("[carplay_usb] usbmux out=0x%02x in=0x%02x\n", out, in);
         }
     }
@@ -177,7 +189,8 @@ static int cmd_request(void)
     static rtcp_usb_device_t device;
     int ret = rtcp_usb_lubanlite.ops->get_device(
         rtcp_usb_lubanlite.context, &device);
-    if (ret != RTCP_OK) {
+    if (ret != RTCP_OK)
+    {
         rt_kprintf("[carplay_usb] not attached\n");
         return 0;
     }
@@ -201,11 +214,14 @@ static int cmd_request(void)
         (uint16_t)(RTCP_USB_DESC_DEVICE << 8), 0U, descriptor,
         sizeof(descriptor), 1000U);
     if (ret >= (int)sizeof(descriptor) && descriptor[0] == 18U &&
-        descriptor[1] == RTCP_USB_DESC_DEVICE) {
+        descriptor[1] == RTCP_USB_DESC_DEVICE)
+    {
         rt_kprintf("[carplay_usb] bNumConfigurations now %u (was %u); "
                    "replug or reboot to enumerate the new set\n",
                    descriptor[17], device.configuration_count);
-    } else {
+    }
+    else
+    {
         rt_kprintf("[carplay_usb] device descriptor read ret=%d\n", ret);
     }
     return 0;
@@ -215,7 +231,8 @@ static int cmd_request(void)
 /* USBMUX end-to-end smoke test                                        */
 /* ------------------------------------------------------------------ */
 
-static struct {
+static struct
+{
     uint8_t out_endpoint;
     uint8_t in_endpoint;
 } s_mux_transport;
@@ -226,7 +243,8 @@ void carplay_usb_mux_probe_report(void)
 {
     static uint32_t previous;
     uint32_t now = (uint32_t)rt_tick_get_millisecond();
-    if ((uint32_t)(now - previous) < 5000) return;
+    if ((uint32_t)(now - previous) < 5000)
+        return;
     previous = now;
     rt_base_t f = rt_hw_interrupt_disable();
     unsigned attempts = s_mux.tx_attempts, failures = s_mux.tx_failures;
@@ -236,9 +254,11 @@ void carplay_usb_mux_probe_report(void)
     unsigned controls = s_mux.control_count;
     bool started = s_mux.started;
     rt_hw_interrupt_enable(f);
-    if (started) rt_kprintf("[mux-perf] total_tx=%u failed=%u controls=%u\n", attempts, failures, controls);
-    if (started && failures) rt_kprintf("[mux-perf] last_failed_index=%u port=%u flags=%02x length=%u rc=%d\n",
-        index, port, flags, length, result);
+    if (started)
+        rt_kprintf("[mux-perf] total_tx=%u failed=%u controls=%u\n", attempts, failures, controls);
+    if (started && failures)
+        rt_kprintf("[mux-perf] last_failed_index=%u port=%u flags=%02x length=%u rc=%d\n",
+                   index, port, flags, length, result);
 }
 static uint8_t s_mux_reply[MUX_REPLY_MAX];
 
@@ -248,7 +268,8 @@ static int mux_transport_send(void *user, const uint8_t *data, size_t length)
     int ret = rtcp_usb_lubanlite.ops->bulk_transfer(
         rtcp_usb_lubanlite.context, s_mux_transport.out_endpoint,
         (void *)data, length, 1000U);
-    if (ret < 0) {
+    if (ret < 0)
+    {
         return ret;
     }
     return (size_t)ret == length ? RTCP_OK : RTCP_EIO;
@@ -265,7 +286,8 @@ static int mux_transport_recv(void *user, uint8_t *data, size_t capacity,
 
 #define LOCKDOWN_CONNECTIONS 2U
 
-typedef struct {
+typedef struct
+{
     bool used;
     rtcp_usbmux_connection_t *connection;
 } lockdown_connection_t;
@@ -290,8 +312,8 @@ static int lockdown_connection_read(void *context, void *data, size_t length,
 {
     lockdown_connection_t *slot = context;
     return rtcp_usbmux_connection_read_wait(&s_mux, slot->connection, data,
-                                           length, timeout_ms,
-                                           lockdown_clock_ms, NULL);
+                                            length, timeout_ms,
+                                            lockdown_clock_ms, NULL);
 }
 
 static int lockdown_connection_write(void *context, const void *data,
@@ -312,7 +334,8 @@ static int cmd_mux(void)
     static rtcp_usb_device_t device;
     int ret = rtcp_usb_lubanlite.ops->get_device(
         rtcp_usb_lubanlite.context, &device);
-    if (ret != RTCP_OK) {
+    if (ret != RTCP_OK)
+    {
         rt_kprintf("[carplay_usb] mux: not attached\n");
         return 0;
     }
@@ -325,11 +348,13 @@ static int cmd_mux(void)
     if (mux_interface < 0 ||
         !rtcp_usb_interface_bulk_endpoints(&device.interfaces[mux_interface],
                                            &out, &in) ||
-        out == 0U || in == 0U) {
+        out == 0U || in == 0U)
+    {
         rt_kprintf("[carplay_usb] mux: no USBMUX bulk pair\n");
         return 0;
     }
-    if (!rtcp_usb_is_carplay_configuration(&device)) {
+    if (!rtcp_usb_is_carplay_configuration(&device))
+    {
         rt_kprintf("[carplay_usb] mux: current configuration is not a "
                    "CarPlay one; replug the phone after 'carplay_usb "
                    "start'\n");
@@ -350,7 +375,8 @@ static int cmd_mux(void)
                (unsigned)s_mux.version_received, (unsigned)s_mux.peer_major,
                (unsigned)s_mux.peer_minor, (unsigned)s_mux.rx_bytes,
                (unsigned)s_mux.rx_frames);
-    if (ret < 0) {
+    if (ret < 0)
+    {
         return 0;
     }
 
@@ -361,34 +387,38 @@ static int cmd_mux(void)
     rt_kprintf("[carplay_usb] mux: rxbytes=%u frames=%u pending=%u\n",
                (unsigned)s_mux.rx_bytes, (unsigned)s_mux.rx_frames,
                (unsigned)s_mux.reassembly_length);
-    if (ret < 0) {
+    if (ret < 0)
+    {
         return 0;
     }
 
     uint8_t request[RTCP_LOCKDOWN_REQUEST_MAX];
     size_t request_length = rtcp_lockdown_build_get_value(
         request, sizeof(request), "rt-carplay", "ProductVersion");
-    if (request_length == 0U) {
+    if (request_length == 0U)
+    {
         rt_kprintf("[carplay_usb] mux: cannot build lockdown request\n");
         rtcp_usbmux_connection_close(&s_mux, connection);
         return 0;
     }
     /* Use the same four-byte big-endian plist framing as pairing. Sending
      * bare XML directly to a Lockdown stream is not a valid request. */
-    lockdown_connection_t slot = {.used = true, .connection = connection};
-    rtcp_stream_t stream = {.ops = &lockdown_connection_ops, .context = &slot};
+    lockdown_connection_t slot = { .used = true, .connection = connection };
+    rtcp_stream_t stream = { .ops = &lockdown_connection_ops, .context = &slot };
     size_t reply_length = 0U;
     ret = rtcp_lockdown_exchange(&stream, request, request_length, s_mux_reply,
-                                  sizeof(s_mux_reply) - 1U, &reply_length, 5000U);
+                                 sizeof(s_mux_reply) - 1U, &reply_length, 5000U);
     s_mux_reply[reply_length] = '\0';
     rt_kprintf("[carplay_usb] mux: GetValue exchange ret=%d bytes=%u\n",
                ret, (unsigned)request_length);
     rt_kprintf("[carplay_usb] mux: reply bytes=%u complete=%u\n",
                (unsigned)reply_length, ret == RTCP_OK ? 1U : 0U);
-    if (reply_length != 0U) {
+    if (reply_length != 0U)
+    {
         char version[32];
         if (rtcp_lockdown_extract_string(s_mux_reply, reply_length, "Value",
-                                         version, sizeof(version)) == RTCP_OK) {
+                                         version, sizeof(version)) == RTCP_OK)
+        {
             rt_kprintf("[carplay_usb] mux: ProductVersion=%s\n", version);
         }
         rt_kprintf("%s\n", (const char *)s_mux_reply);
@@ -405,15 +435,18 @@ static int lockdown_open_connection(void *user, uint16_t port,
                                     rtcp_stream_t *stream)
 {
     (void)user;
-    for (unsigned i = 0U; i < LOCKDOWN_CONNECTIONS; ++i) {
+    for (unsigned i = 0U; i < LOCKDOWN_CONNECTIONS; ++i)
+    {
         lockdown_connection_t *slot = &s_lockdown_connections[i];
-        if (slot->used) {
+        if (slot->used)
+        {
             continue;
         }
         rtcp_usbmux_connection_t *connection = NULL;
         int ret = rtcp_usbmux_connect(&s_mux, port, lockdown_now_ms(),
                                       5000U, &connection);
-        if (ret != RTCP_OK) {
+        if (ret != RTCP_OK)
+        {
             return ret;
         }
         slot->connection = connection;
@@ -430,7 +463,8 @@ static void lockdown_close_connection(void *user, const rtcp_stream_t *stream)
     lockdown_connection_t *slot = stream->context;
 
     (void)user;
-    if (slot->connection != NULL) {
+    if (slot->connection != NULL)
+    {
         rtcp_usbmux_connection_close(&s_mux, slot->connection);
     }
     slot->connection = NULL;
@@ -456,23 +490,31 @@ static bool lockdown_session_active(void)
 }
 
 static atomic_int s_trust_cache; /* 0 unknown, 1 new, 2 reused, 3 saved, negative I/O */
-int carplay_usb_trust_cache_status(void) { return s_trust_cache; }
+int carplay_usb_trust_cache_status(void)
+{
+    return s_trust_cache;
+}
 
 static bool pair_cache_path(char *path, size_t capacity)
 {
-    rtcp_stream_t stream = {0};
-    if (lockdown_open_connection(NULL, 62078U, &stream) != RTCP_OK) return false;
+    rtcp_stream_t stream = { 0 };
+    if (lockdown_open_connection(NULL, 62078U, &stream) != RTCP_OK)
+        return false;
     uint8_t request[1024], reply[2048];
     size_t n = rtcp_lockdown_build_get_value(request, sizeof(request), "rt-carplay", "UniqueDeviceID"), got = 0;
     int ret = rtcp_lockdown_exchange(&stream, request, n, reply, sizeof(reply), &got, 30000U);
     lockdown_close_connection(NULL, &stream);
     char identifier[65];
-    if (ret != RTCP_OK || rtcp_plist_get_string(reply, got, "Value", identifier, sizeof(identifier)) != RTCP_OK) return false;
+    if (ret != RTCP_OK || rtcp_plist_get_string(reply, got, "Value", identifier, sizeof(identifier)) != RTCP_OK)
+        return false;
     size_t length = strlen(identifier);
-    if (length < 16) return false;
-    for (size_t i=0; i<length; ++i) {
-        char c=identifier[i];
-        if (!((c>='0'&&c<='9')||(c>='a'&&c<='z')||(c>='A'&&c<='Z')||c=='-')) return false;
+    if (length < 16)
+        return false;
+    for (size_t i = 0; i < length; ++i)
+    {
+        char c = identifier[i];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-'))
+            return false;
     }
     int written = snprintf(path, capacity, "/data/rt-carplay-usb-%s.bin", identifier);
     return written > 0 && (size_t)written < capacity;
@@ -484,7 +526,8 @@ static int cmd_pair(void)
     static rtcp_usb_device_t device;
     int ret;
 
-    if (lockdown_session_active()) {
+    if (lockdown_session_active())
+    {
         rt_kprintf("[carplay_usb] pair: a session is already open; run "
                    "'carplay_usb unpair' first\n");
         return 0;
@@ -492,7 +535,8 @@ static int cmd_pair(void)
     s_network_generation = rtcp_usb_lubanlite_generation();
     ret = rtcp_usb_lubanlite.ops->get_device(rtcp_usb_lubanlite.context,
                                              &device);
-    if (ret != RTCP_OK) {
+    if (ret != RTCP_OK)
+    {
         rt_kprintf("[carplay_usb] pair: not attached; run 'carplay_usb "
                    "start' before plugging the phone\n");
         return 0;
@@ -506,7 +550,8 @@ static int cmd_pair(void)
         !rtcp_usb_interface_bulk_endpoints(&device.interfaces[mux_interface],
                                            &out, &in) ||
         out == 0U || in == 0U ||
-        !rtcp_usb_is_carplay_configuration(&device)) {
+        !rtcp_usb_is_carplay_configuration(&device))
+    {
         rt_kprintf("[carplay_usb] pair: the current configuration is not a "
                    "CarPlay one; replug the phone after 'carplay_usb "
                    "start'\n");
@@ -527,7 +572,8 @@ static int cmd_pair(void)
                (unsigned)s_mux.version_received, (unsigned)s_mux.peer_major,
                (unsigned)s_mux.peer_minor, (unsigned)s_mux.rx_bytes,
                (unsigned)s_mux.rx_frames);
-    if (ret < 0) {
+    if (ret < 0)
+    {
         return 0;
     }
 
@@ -549,7 +595,7 @@ static int cmd_pair(void)
     memset(&s_pair_record, 0, sizeof(s_pair_record));
     memset(&s_lockdown_session, 0, sizeof(s_lockdown_session));
 
-    char cache_path[128] = {0};
+    char cache_path[128] = { 0 };
     bool cacheable = pair_cache_path(cache_path, sizeof(cache_path));
     int cached = cacheable ? carplay_usb_pair_cache_load(cache_path, &s_pair_record) : RTCP_ENOENT;
     config.resume_pairing = cached == RTCP_OK;
@@ -562,14 +608,16 @@ static int cmd_pair(void)
         s_lockdown_session.stage == RTCP_LOCKDOWN_STAGE_START_SESSION &&
         (!strcmp(s_lockdown_session.remote_error, "InvalidHostID") ||
          !strcmp(s_lockdown_session.remote_error, "InvalidPairRecord") ||
-         !strcmp(s_lockdown_session.remote_error, "MissingPairRecord"))) {
+         !strcmp(s_lockdown_session.remote_error, "MissingPairRecord")))
+    {
         rt_kprintf("[carplay_usb] saved trust rejected; pairing again\n");
         memset(&s_pair_record, 0, sizeof(s_pair_record));
         config.resume_pairing = false;
         s_trust_cache = 1;
         ret = rtcp_lockdown_session_open(&s_lockdown_session, &config);
     }
-    if (ret != RTCP_OK) {
+    if (ret != RTCP_OK)
+    {
         rt_kprintf("[carplay_usb] pair: failed ret=%d stage=%s error='%s'\n",
                    ret, rtcp_lockdown_stage_name(s_lockdown_session.stage),
                    s_lockdown_session.remote_error);
@@ -594,8 +642,10 @@ static int cmd_pair(void)
     rt_kprintf("[carplay_usb] network activation: host_session=%s policy=usb-session-v1; Carrier/RX remain observed\n",
                current ? "ready" : "stale");
 #endif
-    if (!cacheable) cacheable = pair_cache_path(cache_path, sizeof(cache_path));
-    if (cacheable && !config.resume_pairing) {
+    if (!cacheable)
+        cacheable = pair_cache_path(cache_path, sizeof(cache_path));
+    if (cacheable && !config.resume_pairing)
+    {
         int saved = carplay_usb_pair_cache_save(cache_path, &s_pair_record);
         s_trust_cache = saved == RTCP_OK ? 3 : saved;
         rt_kprintf("[carplay_usb] trust cache save=%d\n", saved);
@@ -619,11 +669,12 @@ static int cmd_pair(void)
 /* ------------------------------------------------------------------ */
 
 #define IAP2_USB_RX_TIMEOUT_MS 200U
-#define IAP2_USB_STACK_BYTES (12U * 1024U)
-#define IAP2_USB_PRIORITY 20U
-#define IAP2_USB_TICK 20U
+#define IAP2_USB_STACK_BYTES   (12U * 1024U)
+#define IAP2_USB_PRIORITY      20U
+#define IAP2_USB_TICK          20U
 
-typedef struct {
+typedef struct
+{
     iap2_session_t *session;
     iap2_stream_rx_t rx;
     _Atomic(rt_thread_t) thread;
@@ -645,7 +696,8 @@ static iap2_usb_link_t s_iap2_usb;
 
 static void iap2_usb_release_provider(iap2_usb_link_t *link)
 {
-    if (link->provider_installed) carplay_mfi_provider_release(link->mfi);
+    if (link->provider_installed)
+        carplay_mfi_provider_release(link->mfi);
     link->provider_installed = false;
     link->mfi = NULL;
 }
@@ -679,7 +731,8 @@ static bool iap2_usb_tx(const uint8_t *bytes, size_t length, void *context)
 {
     iap2_usb_link_t *link = context;
 
-    if (link->rx.stream.ops == NULL || link->rx.stream.ops->write == NULL) {
+    if (link->rx.stream.ops == NULL || link->rx.stream.ops->write == NULL)
+    {
         return false;
     }
     return link->rx.stream.ops->write(link->rx.stream.context, bytes, length) ==
@@ -699,8 +752,10 @@ static bool iap2_usb_get_airplay(iap2_session_airplay_t *out, void *context)
     iap2_usb_link_t *link = context;
     carplay_app_wired_info_t snapshot;
 
-    if (carplay_app_wired_info(&snapshot) != RTCP_OK) {
-        if (!link->airplay_unavailable_logged) {
+    if (carplay_app_wired_info(&snapshot) != RTCP_OK)
+    {
+        if (!link->airplay_unavailable_logged)
+        {
             link->airplay_unavailable_logged = true;
             rt_kprintf("[carplay_usb] iap2: waiting for valid wired IPv6; "
                        "0x4301 deferred, identification/MFi continue\n");
@@ -712,7 +767,8 @@ static bool iap2_usb_get_airplay(iap2_session_airplay_t *out, void *context)
     const carplay_app_wired_info_t *info = &link->endpoint;
     int written = rt_snprintf(link->ip_address, sizeof(link->ip_address),
                               "%s", info->ipv6);
-    if (written <= 0 || (size_t)written >= sizeof(link->ip_address)) {
+    if (written <= 0 || (size_t)written >= sizeof(link->ip_address))
+    {
         return false;
     }
 
@@ -726,7 +782,8 @@ static bool iap2_usb_get_airplay(iap2_session_airplay_t *out, void *context)
     out->mdns_ready = true;
     out->event_connected = info->airplay_connected;
     rtcp_receiver_state_t state;
-    if (carplay_app_session_state(&state) != RTCP_OK) return false;
+    if (carplay_app_session_state(&state) != RTCP_OK)
+        return false;
     out->transport_connected = state.transport_connected;
     rt_kprintf("[carplay_usb] iap2: wired AirPlay endpoint [%s]:%u\n",
                link->ip_address, (unsigned)info->airplay_port);
@@ -742,38 +799,48 @@ static void iap2_usb_trace_bytes(const char *label, const uint8_t *body, size_t 
     size_t count = length > 128 ? 128 : length;
     static const char digits[] = "0123456789abcdef";
     rt_kprintf("[wired-csm] %s bytes=%u captured=%u truncated=%u\n", label,
-        (unsigned)length, (unsigned)count, length > count);
-    for (size_t offset = 0; offset < count; offset += 16) {
+               (unsigned)length, (unsigned)count, length > count);
+    for (size_t offset = 0; offset < count; offset += 16)
+    {
         char hex[33];
         size_t chunk = count - offset;
-        if (chunk > 16) chunk = 16;
-        for (size_t i = 0; i < chunk; ++i) {
-            hex[2*i] = digits[body[offset+i] >> 4];
-            hex[2*i+1] = digits[body[offset+i] & 15];
+        if (chunk > 16)
+            chunk = 16;
+        for (size_t i = 0; i < chunk; ++i)
+        {
+            hex[2 * i] = digits[body[offset + i] >> 4];
+            hex[2 * i + 1] = digits[body[offset + i] & 15];
         }
-        hex[2*chunk] = 0;
+        hex[2 * chunk] = 0;
         rt_kprintf("[wired-csm] %s offset=%u hex=%s\n", label,
-            (unsigned)offset, hex);
+                   (unsigned)offset, hex);
     }
 }
 static void iap2_usb_observe(bool outgoing, uint16_t id,
-                              const uint8_t *body, size_t length, void *context)
+                             const uint8_t *body, size_t length, void *context)
 {
     iap2_usb_link_t *link = context;
     if (outgoing ? (id != 0x1d01 && id != 0xae03 && id != 0x4301)
-                 : (id != 0x4300 && id != 0x4e0e)) return;
-    if (link->protocol_records++ >= 16) return;
-    if (!body && length) return;
+                 : (id != 0x4300 && id != 0x4e0e))
+        return;
+    if (link->protocol_records++ >= 16)
+        return;
+    if (!body && length)
+        return;
     bool valid = iap2_param_validate(body, length);
     rt_kprintf("[wired-csm] %s id=%04x bytes=%u tlv_valid=%u\n",
-        outgoing ? "queued" : "RX", id, (unsigned)length, valid);
-    if (!outgoing) {
+               outgoing ? "queued" : "RX", id, (unsigned)length, valid);
+    if (!outgoing)
+    {
         /* Raw peer values are evidence; no invented fields or policy gates. */
         iap2_usb_trace_bytes("raw", body, length);
     }
-    if (!valid) return;
-    const uint8_t *group, *value; size_t group_len, size;
-    if (id == 0x4300 && iap2_param_find_single(body, length, 0, &group, &group_len)) {
+    if (!valid)
+        return;
+    const uint8_t *group, *value;
+    size_t group_len, size;
+    if (id == 0x4300 && iap2_param_find_single(body, length, 0, &group, &group_len))
+    {
         if (iap2_param_find_single(group, group_len, 0, &value, &size) && size == 1)
             rt_kprintf("[wired-csm] wired_available_raw=%u\n", value[0]);
         if (iap2_param_find_single(group, group_len, 1, &value, &size))
@@ -782,13 +849,15 @@ static void iap2_usb_observe(bool outgoing, uint16_t id,
     if (id == 0x1d01 && iap2_param_find_single(body, length, 16, &group, &group_len) &&
         iap2_param_find_single(group, group_len, 3, &value, &size) && size == 1)
         rt_kprintf("[wired-csm] identification_ncm_interface=%u\n", value[0]);
-    if (id == 0xae03) {
+    if (id == 0xae03)
+    {
         if (iap2_param_find_single(body, length, 0, &value, &size) && size == 2)
             rt_kprintf("[wired-csm] available_current_ma=%u\n", ((unsigned)value[0] << 8) | value[1]);
         if (iap2_param_find_single(body, length, 1, &value, &size) && size == 1)
             rt_kprintf("[wired-csm] battery_should_charge=%u\n", value[0]);
     }
-    if (id == 0x4301) {
+    if (id == 0x4301)
+    {
         for (unsigned field = 0; field <= 8; ++field)
             if (iap2_param_find_single(body, length, field, &value, &size))
                 rt_kprintf("[wired-csm] startup_field=%u bytes=%u\n", field, (unsigned)size);
@@ -801,52 +870,53 @@ static void iap2_usb_event(iap2_session_event_t event, void *context)
     iap2_usb_link_t *link = context;
 
     ++link->events;
-    switch (event) {
-        case IAP2_SESSION_EVENT_IDENTIFICATION_ACCEPTED:
-            link->identified = true;
-            rt_kprintf("[carplay_usb] iap2: identification accepted\n");
-            break;
-        case IAP2_SESSION_EVENT_IDENTIFICATION_REJECTED:
-            rt_kprintf("[carplay_usb] iap2: identification rejected\n");
-            break;
-        case IAP2_SESSION_EVENT_MFI_CERTIFICATE_SENT:
-            rt_kprintf("[carplay_usb] iap2: MFi certificate sent\n");
-            break;
-        case IAP2_SESSION_EVENT_MFI_AUTHENTICATED:
-            link->authenticated = true;
-            rt_kprintf("[carplay_usb] iap2: MFi authenticated\n");
-            break;
-        case IAP2_SESSION_EVENT_MFI_FAILED:
-            rt_kprintf("[carplay_usb] iap2: MFi failed\n");
-            break;
-        case IAP2_SESSION_EVENT_SUBSCRIPTIONS_SENT:
-            rt_kprintf("[carplay_usb] iap2: subscriptions sent\n");
-            break;
-        case IAP2_SESSION_EVENT_CARPLAY_INVITE_SENT:
-            rt_kprintf("[carplay_usb] iap2: CarPlayStartSession sent\n");
-            break;
-        case IAP2_SESSION_EVENT_CARPLAY_REINVITE_SENT:
-            rt_kprintf("[carplay_usb] iap2: CarPlayStartSession startup retry sent (no TCP)\n");
-            break;
-        case IAP2_SESSION_EVENT_CARPLAY_INVITE_ACKED:
-            rt_kprintf("[carplay_usb] iap2: CarPlayStartSession link ACK (not AirPlay acceptance)\n");
-            break;
-        case IAP2_SESSION_EVENT_CARPLAY_AVAILABILITY_RECEIVED:
-            rt_kprintf("[carplay_usb] iap2: CarPlayAvailability received\n");
-            break;
-        case IAP2_SESSION_EVENT_LINK_READY:
-            rt_kprintf("[carplay_usb] iap2: link ready\n");
-            break;
-        case IAP2_SESSION_EVENT_LINK_DEAD:
-            /* Stop at the worker's next loop boundary. The SDK invokes this
+    switch (event)
+    {
+    case IAP2_SESSION_EVENT_IDENTIFICATION_ACCEPTED:
+        link->identified = true;
+        rt_kprintf("[carplay_usb] iap2: identification accepted\n");
+        break;
+    case IAP2_SESSION_EVENT_IDENTIFICATION_REJECTED:
+        rt_kprintf("[carplay_usb] iap2: identification rejected\n");
+        break;
+    case IAP2_SESSION_EVENT_MFI_CERTIFICATE_SENT:
+        rt_kprintf("[carplay_usb] iap2: MFi certificate sent\n");
+        break;
+    case IAP2_SESSION_EVENT_MFI_AUTHENTICATED:
+        link->authenticated = true;
+        rt_kprintf("[carplay_usb] iap2: MFi authenticated\n");
+        break;
+    case IAP2_SESSION_EVENT_MFI_FAILED:
+        rt_kprintf("[carplay_usb] iap2: MFi failed\n");
+        break;
+    case IAP2_SESSION_EVENT_SUBSCRIPTIONS_SENT:
+        rt_kprintf("[carplay_usb] iap2: subscriptions sent\n");
+        break;
+    case IAP2_SESSION_EVENT_CARPLAY_INVITE_SENT:
+        rt_kprintf("[carplay_usb] iap2: CarPlayStartSession sent\n");
+        break;
+    case IAP2_SESSION_EVENT_CARPLAY_REINVITE_SENT:
+        rt_kprintf("[carplay_usb] iap2: CarPlayStartSession startup retry sent (no TCP)\n");
+        break;
+    case IAP2_SESSION_EVENT_CARPLAY_INVITE_ACKED:
+        rt_kprintf("[carplay_usb] iap2: CarPlayStartSession link ACK (not AirPlay acceptance)\n");
+        break;
+    case IAP2_SESSION_EVENT_CARPLAY_AVAILABILITY_RECEIVED:
+        rt_kprintf("[carplay_usb] iap2: CarPlayAvailability received\n");
+        break;
+    case IAP2_SESSION_EVENT_LINK_READY:
+        rt_kprintf("[carplay_usb] iap2: link ready\n");
+        break;
+    case IAP2_SESSION_EVENT_LINK_DEAD:
+        /* Stop at the worker's next loop boundary. The SDK invokes this
              * from feed/advance: destroying the session here would free the
              * active callback's owner. The worker releases it before marking
              * itself quiescent, allowing the connection manager to recover. */
-            link->run = false;
-            rt_kprintf("[carplay_usb] iap2: link failed\n");
-            break;
-        default:
-            break;
+        link->run = false;
+        rt_kprintf("[carplay_usb] iap2: link failed\n");
+        break;
+    default:
+        break;
     }
 }
 
@@ -872,11 +942,13 @@ static const struct rtcp_mfi *iap2_usb_mfi(void)
 #if defined(RTCARPLAY_MFI)
     int ret = rtcp_mfi_lubanlite_start(RTCARPLAY_MFI_I2C_BUS,
                                        RTCARPLAY_MFI_I2C_ADDR);
-    if (ret == RTCP_OK) {
+    if (ret == RTCP_OK)
+    {
         return rtcp_mfi_lubanlite();
     }
     rt_kprintf("[carplay_usb] iap2: MFi coprocessor not ready rc=%d; the "
-               "phone's authentication request will fail\n", ret);
+               "phone's authentication request will fail\n",
+               ret);
 #else
     rt_kprintf("[carplay_usb] iap2: MFi support not built in; only "
                "identification can complete\n");
@@ -888,29 +960,37 @@ static void iap2_usb_thread(void *parameter)
 {
     iap2_usb_link_t *link = parameter;
 
-    if (link->run && link->stop_generation == atomic_load(&s_usb_stop_generation)) {
+    if (link->run && link->stop_generation == atomic_load(&s_usb_stop_generation))
+    {
         iap2_session_link_up(link->session, iap2_usb_now_ms());
         rt_kprintf("[carplay_usb] iap2: link up\n");
     }
-    while (link->run) {
+    while (link->run)
+    {
         /* The generic stream helper returns zero both for fed data and EOF
          * (RTCP_OK). Preserve the raw read result here so a closed CarKit
          * stream cannot spin forever while the owner still reports running. */
         int ret = link->rx.stream.ops->read(link->rx.stream.context,
-                    link->rx.buffer, sizeof(link->rx.buffer), IAP2_USB_RX_TIMEOUT_MS);
+                                            link->rx.buffer, sizeof(link->rx.buffer), IAP2_USB_RX_TIMEOUT_MS);
         uint64_t now = iap2_usb_now_ms();
-        if (ret > (int)sizeof(link->rx.buffer)) ret = RTCP_EIO;
-        if (ret > 0) {
+        if (ret > (int)sizeof(link->rx.buffer))
+            ret = RTCP_EIO;
+        if (ret > 0)
+        {
             iap2_session_feed(link->session, link->rx.buffer, (size_t)ret, now);
         }
-        if (ret > 0 || ret == RTCP_ETIMEDOUT) {
+        if (ret > 0 || ret == RTCP_ETIMEDOUT)
+        {
             iap2_session_advance(link->session, now);
             continue;
         }
-        if (ret == 0) {
+        if (ret == 0)
+        {
             rt_kprintf("[carplay_usb] iap2: carkit stream closed by the "
                        "phone\n");
-        } else {
+        }
+        else
+        {
             rt_kprintf("[carplay_usb] iap2: carkit stream error rc=%d\n", ret);
         }
         break;
@@ -937,8 +1017,10 @@ static int iap2_usb_start_worker(void)
                                          IAP2_USB_STACK_BYTES,
                                          IAP2_USB_PRIORITY, IAP2_USB_TICK);
     int result = RTCP_ENOMEM;
-    if (s_iap2_usb.thread != NULL) {
-        if (rt_thread_startup(s_iap2_usb.thread) == RT_EOK) return RTCP_OK;
+    if (s_iap2_usb.thread != NULL)
+    {
+        if (rt_thread_startup(s_iap2_usb.thread) == RT_EOK)
+            return RTCP_OK;
         (void)rt_thread_delete(s_iap2_usb.thread);
         s_iap2_usb.thread = NULL;
         result = RTCP_EIO;
@@ -954,18 +1036,21 @@ static int iap2_usb_start_worker(void)
 static int cmd_iap2(void)
 {
     unsigned stop_generation = atomic_load(&s_usb_stop_generation);
-    if (!lockdown_session_active()) {
+    if (!lockdown_session_active())
+    {
         rt_kprintf("[carplay_usb] iap2: no open carkit session; run "
                    "'carplay_usb pair' first\n");
         return 0;
     }
-    if (s_iap2_usb.running) {
+    if (s_iap2_usb.running)
+    {
         rt_kprintf("[carplay_usb] iap2: already running\n");
         return 0;
     }
 
     rtcp_stream_t service = rtcp_lockdown_session_service(&s_lockdown_session);
-    if (service.ops == NULL) {
+    if (service.ops == NULL)
+    {
         rt_kprintf("[carplay_usb] iap2: carkit service stream is not open\n");
         return 0;
     }
@@ -973,19 +1058,22 @@ static int cmd_iap2(void)
     rtcp_usb_device_t device;
     int ret = rtcp_usb_lubanlite.ops->get_device(rtcp_usb_lubanlite.context,
                                                  &device);
-    if (ret != RTCP_OK) {
+    if (ret != RTCP_OK)
+    {
         rt_kprintf("[carplay_usb] iap2: device is no longer attached\n");
         return 0;
     }
     int interface_number = rtcp_usb_carplay_interface_number(&device);
 #ifdef RTCARPLAY_NATIVE_NCM
     /* Native NCM is usable only when identity and network binding agree. */
-    if (carplay_native_ncm_interface() != interface_number || interface_number < 0) {
+    if (carplay_native_ncm_interface() != interface_number || interface_number < 0)
+    {
         rt_kprintf("[carplay_usb] iap2: native NCM binding unavailable/mismatched\n");
         return RTCP_ESTATE;
     }
 #endif
-    if (interface_number < 0) {
+    if (interface_number < 0)
+    {
         rt_kprintf("[carplay_usb] iap2: the active configuration has no "
                    "NCM control or Apple Ethernet interface; replug the "
                    "phone\n");
@@ -1001,11 +1089,13 @@ static int cmd_iap2(void)
     config.identity = identity;
     s_iap2_usb.mfi = iap2_usb_mfi();
     config.mfi = s_iap2_usb.mfi;
-    if (s_iap2_usb.mfi != NULL) {
+    if (s_iap2_usb.mfi != NULL)
+    {
         s_iap2_usb.provider_installed =
             carplay_mfi_provider_install(s_iap2_usb.mfi) == RTCP_OK;
     }
-    if (s_iap2_usb.mfi != NULL && !s_iap2_usb.provider_installed) {
+    if (s_iap2_usb.mfi != NULL && !s_iap2_usb.provider_installed)
+    {
         rt_kprintf("[carplay_usb] iap2: AirPlay /auth-setup MFi provider "
                    "unavailable; auth-setup would return 503\n");
     }
@@ -1023,14 +1113,16 @@ static int cmd_iap2(void)
     config.car_play_interface_number = (uint8_t)interface_number;
 
     s_iap2_usb.session = iap2_session_create(&config);
-    if (s_iap2_usb.session == NULL) {
+    if (s_iap2_usb.session == NULL)
+    {
         iap2_usb_release_provider(&s_iap2_usb);
         rt_kprintf("[carplay_usb] iap2: cannot allocate the session\n");
         return 0;
     }
 
     ret = iap2_usb_start_worker();
-    if (ret != RTCP_OK) {
+    if (ret != RTCP_OK)
+    {
         rt_kprintf("[carplay_usb] iap2: cannot start the link thread rc=%d\n", ret);
         return ret;
     }
@@ -1053,20 +1145,24 @@ static void iap2_usb_request_stop(void)
  * thread can still read from it. */
 static bool cmd_iap2_stop(void)
 {
-    if (!s_iap2_usb.running) {
+    if (!s_iap2_usb.running)
+    {
         rt_kprintf("[carplay_usb] iap2: not running\n");
         return true;
     }
-    if (atomic_load(&s_iap2_usb.thread) == rt_thread_self()) {
+    if (atomic_load(&s_iap2_usb.thread) == rt_thread_self())
+    {
         rt_kprintf("[carplay_usb] iap2: cannot wait for its own worker\n");
         return false;
     }
     s_iap2_usb.run = false;
     for (unsigned waited = 0U; s_iap2_usb.running && waited < 3000U;
-         waited += 10U) {
+         waited += 10U)
+    {
         rt_thread_mdelay(10);
     }
-    if (s_iap2_usb.running) {
+    if (s_iap2_usb.running)
+    {
         rt_kprintf("[carplay_usb] iap2: stop timed out; the thread still "
                    "owns the carkit stream\n");
         return false;
@@ -1080,7 +1176,8 @@ static int cmd_unpair(void)
     /* Never close the lockdown session while the iAP2 thread can still use
      * its stream.  A timed-out stop leaves the thread alive; the user can
      * retry after it notices the link is gone. */
-    if (!cmd_iap2_stop()) {
+    if (!cmd_iap2_stop())
+    {
         rt_kprintf("[carplay_usb] unpair: refused while the iAP2 thread is "
                    "alive; retry 'carplay_usb iap2stop'\n");
         return 0;
@@ -1104,22 +1201,24 @@ static int cmd_net(void)
     const char *route = "none";
 
     if (rtcp_usb_lubanlite.ops->get_device(rtcp_usb_lubanlite.context,
-                                           &device) == RTCP_OK) {
+                                           &device) == RTCP_OK)
+    {
         apple_ethernet = rtcp_usb_find_interface(
                              &device, RTCP_USB_CLASS_VENDOR,
                              RTCP_USB_APPLE_SUBCLASS_ETH,
                              RTCP_USB_APPLE_PROTOCOL_ETH) >= 0;
         ncm_link = rtcp_usb_configuration_has_ncm_link(&device);
-        switch (rtcp_usb_configuration_kind(&device)) {
-            case RTCP_USB_CONFIG_NCM:
-                route = "ncm";
-                break;
-            case RTCP_USB_CONFIG_APPLE_ETHERNET:
-                route = "apple-ethernet";
-                break;
-            default:
-                route = "none";
-                break;
+        switch (rtcp_usb_configuration_kind(&device))
+        {
+        case RTCP_USB_CONFIG_NCM:
+            route = "ncm";
+            break;
+        case RTCP_USB_CONFIG_APPLE_ETHERNET:
+            route = "apple-ethernet";
+            break;
+        default:
+            route = "none";
+            break;
         }
     }
 
@@ -1132,15 +1231,21 @@ static int cmd_net(void)
 #ifdef RTCARPLAY_NATIVE_NCM
     carplay_native_ncm_status();
 #endif
-    if (found) {
+    if (found)
+    {
         rt_kprintf("[carplay_usb] net: ipv6=%s (%s)\n", address,
                    valid ? "valid" : "tentative");
-    } else {
+    }
+    else
+    {
         rt_kprintf("[carplay_usb] net: ipv6=unavailable\n");
-        if (apple_ethernet && !ncm_link && !up) {
+        if (apple_ethernet && !ncm_link && !up)
+        {
             rt_kprintf("[carplay_usb] net: Apple Ethernet selected; "
                        "run ipheth_status for RX readiness and carrier\n");
-        } else if (ncm_link && !up) {
+        }
+        else if (ncm_link && !up)
+        {
             rt_kprintf("[carplay_usb] net: the selected configuration has "
                        "CDC-NCM but the NCM netif is down; check "
                        "LPKG_CHERRYUSB_HOST_NCM and the enumeration log\n");
@@ -1153,7 +1258,8 @@ static int cmd_net(void)
  * No blocking work runs in LVGL. */
 int carplay_usb_open(void)
 {
-    if (!usb_call_enter()) return RTCP_ESTATE;
+    if (!usb_call_enter())
+        return RTCP_ESTATE;
     int result = rtcp_usb_lubanlite.ops->open(rtcp_usb_lubanlite.context, usb_event, NULL);
     usb_call_leave();
     return result;
@@ -1167,7 +1273,8 @@ bool carplay_usb_attached(void)
 
 int carplay_usb_pair(void)
 {
-    if (!usb_call_enter()) return RTCP_ESTATE;
+    if (!usb_call_enter())
+        return RTCP_ESTATE;
     (void)cmd_pair();
     rtcp_stream_t service = rtcp_lockdown_session_service(&s_lockdown_session);
     int result = service.ops != NULL ? RTCP_OK : RTCP_EIO;
@@ -1177,14 +1284,19 @@ int carplay_usb_pair(void)
 
 int carplay_usb_start_iap2(void)
 {
-    if (!usb_call_enter()) return RTCP_ESTATE;
+    if (!usb_call_enter())
+        return RTCP_ESTATE;
     int result = cmd_iap2();
-    if (result == RTCP_OK) result = s_iap2_usb.running ? RTCP_OK : RTCP_EIO;
+    if (result == RTCP_OK)
+        result = s_iap2_usb.running ? RTCP_OK : RTCP_EIO;
     usb_call_leave();
     return result;
 }
 
-bool carplay_usb_iap2_running(void) { return s_iap2_usb.running; }
+bool carplay_usb_iap2_running(void)
+{
+    return s_iap2_usb.running;
+}
 
 /* Optional RT-Thread IPHETH diagnostic provider; CDC-NCM builds do not
  * need to link the Apple Ethernet class. */
@@ -1192,17 +1304,22 @@ extern void ipheth_status(void) __attribute__((weak));
 extern void usbh_ehci_network_snapshot(void) __attribute__((weak));
 void carplay_usb_network_status(void)
 {
-    if (!usb_call_enter()) return;
+    if (!usb_call_enter())
+        return;
     (void)cmd_net();
-    if (ipheth_status != NULL) ipheth_status();
-    if (usbh_ehci_network_snapshot != NULL) usbh_ehci_network_snapshot();
+    if (ipheth_status != NULL)
+        ipheth_status();
+    if (usbh_ehci_network_snapshot != NULL)
+        usbh_ehci_network_snapshot();
     usb_call_leave();
 }
 
 int carplay_usb_close_session(void)
 {
-    if (!usb_call_enter()) return RTCP_ESTATE;
-    if (!cmd_iap2_stop()) {
+    if (!usb_call_enter())
+        return RTCP_ESTATE;
+    if (!cmd_iap2_stop())
+    {
         usb_call_leave();
         return RTCP_ETIMEDOUT;
     }
@@ -1218,21 +1335,25 @@ static int cmd_carplay_usb_owned(int argc, char **argv)
     const char *what = argc > 1 ? argv[1] : "status";
 #if defined(RTCARPLAY_DEMO_LAUNCHER) || defined(RTCARPLAY_AUTO_CONNECT)
     if (strcmp(what, "status") != 0 && strcmp(what, "net") != 0 &&
-        !(strcmp(what, "desc") == 0 && argc == 2)) {
+        !(strcmp(what, "desc") == 0 && argc == 2))
+    {
         rt_kprintf("[carplay_usb] automatic demo owns USB; unplug to end the session\n");
         return 1;
     }
 #endif
 
-    if (strcmp(what, "start") == 0) {
+    if (strcmp(what, "start") == 0)
+    {
         int ret = rtcp_usb_lubanlite.ops->open(
             rtcp_usb_lubanlite.context, usb_event, NULL);
         rt_kprintf("[carplay_usb] start ret=%d; plug the iPhone now\n", ret);
         return 0;
     }
-    if (strcmp(what, "stop") == 0) {
+    if (strcmp(what, "stop") == 0)
+    {
         /* The hook must outlive the stream owner, including a timed-out stop. */
-        if (!cmd_iap2_stop()) return 1;
+        if (!cmd_iap2_stop())
+            return 1;
         rtcp_lockdown_session_close(&s_lockdown_session);
         memset(&s_lockdown_session, 0, sizeof(s_lockdown_session));
         rtcp_usb_lubanlite.ops->close(rtcp_usb_lubanlite.context);
@@ -1240,36 +1361,46 @@ static int cmd_carplay_usb_owned(int argc, char **argv)
                    "configured\n");
         return 0;
     }
-    if (strcmp(what, "status") == 0) {
+    if (strcmp(what, "status") == 0)
+    {
         return cmd_status();
     }
-    if (strcmp(what, "request") == 0) {
+    if (strcmp(what, "request") == 0)
+    {
         return cmd_request();
     }
-    if (strcmp(what, "mux") == 0) {
-        if (lockdown_session_active()) {
+    if (strcmp(what, "mux") == 0)
+    {
+        if (lockdown_session_active())
+        {
             rt_kprintf("[carplay_usb] mux: a pairing session is open; run "
                        "'carplay_usb unpair' first\n");
             return 0;
         }
         return cmd_mux();
     }
-    if (strcmp(what, "pair") == 0) {
+    if (strcmp(what, "pair") == 0)
+    {
         return cmd_pair();
     }
-    if (strcmp(what, "unpair") == 0) {
+    if (strcmp(what, "unpair") == 0)
+    {
         return cmd_unpair();
     }
-    if (strcmp(what, "iap2") == 0) {
+    if (strcmp(what, "iap2") == 0)
+    {
         return cmd_iap2();
     }
-    if (strcmp(what, "iap2stop") == 0) {
+    if (strcmp(what, "iap2stop") == 0)
+    {
         return cmd_iap2_stop() ? 0 : 1;
     }
-    if (strcmp(what, "net") == 0) {
+    if (strcmp(what, "net") == 0)
+    {
         return cmd_net();
     }
-    if (strcmp(what, "desc") == 0) {
+    if (strcmp(what, "desc") == 0)
+    {
         bool request = argc > 2 && strcmp(argv[2], "request") == 0;
         rtcp_usb_lubanlite_dump_configurations(request);
         return 0;
@@ -1282,7 +1413,8 @@ static int cmd_carplay_usb_owned(int argc, char **argv)
 
 static int cmd_carplay_usb(int argc, char **argv)
 {
-    if (!usb_call_enter()) {
+    if (!usb_call_enter())
+    {
         rt_kprintf("[carplay_usb] another command owns USB; retry later\n");
         return RTCP_ESTATE;
     }
@@ -1292,6 +1424,6 @@ static int cmd_carplay_usb(int argc, char **argv)
 }
 
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_usb, carplay_usb,
-                     Wired CarPlay USB host bring-up (Luban-Lite CherryUSB));
+                     Wired CarPlay USB host bring - up(Luban - Lite CherryUSB));
 
 #endif /* LPKG_RT_CARPLAY_LUBANLITE_USB */
