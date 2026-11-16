@@ -176,7 +176,7 @@ static bool mode_changed(void)
 static int start_receiver(void)
 {
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
-    return carplay_app_autostart_display(status.wireless,applied_width,600);
+    return carplay_app_autostart_display(!status.wireless,applied_width,600);
 #else
     return status.wireless ? carplay_app_autostart() : carplay_app_autostart_wired();
 #endif

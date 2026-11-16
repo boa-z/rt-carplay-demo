@@ -19,11 +19,12 @@ static unsigned display_step, started_width;
 static carplay_display_mode_t displayed_mode;
 int carplay_fusion_set_mode(carplay_display_mode_t mode)
 { displayed_mode=mode; return RTCP_OK; }
-int carplay_app_autostart_display(bool usb_wireless, uint16_t width, uint16_t height)
+int carplay_app_autostart_display(bool wired_mode, uint16_t width, uint16_t height)
 {
     assert((width==768 || width==1024) && height==600);
     started_width=width;
-    return usb_wireless ? carplay_app_autostart() : carplay_app_autostart_wired();
+    assert(wired_mode == !status.wireless);
+    return wired_mode ? carplay_app_autostart_wired() : carplay_app_autostart();
 }
 #endif
 static unsigned elapsed(void) { return now - boot; }
