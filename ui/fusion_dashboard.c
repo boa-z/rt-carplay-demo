@@ -8,6 +8,9 @@
 #include <rtthread.h>
 #include <stdio.h>
 #include <string.h>
+#include "ui_language.h"
+#define lv_label_set_text carplay_ui_set_text
+#define TR carplay_ui_translate
 #if defined(LPKG_USING_CPU_USAGE)
 #include "cpu_usage.h"
 #endif
@@ -16,17 +19,18 @@
  * lv_conf.h leaves them disabled despite launcher Kconfig selections. */
 LV_FONT_DECLARE(lv_font_montserrat_24);
 LV_FONT_DECLARE(lv_font_montserrat_32);
+LV_FONT_DECLARE(carplay_cjk_24);
 
 static lv_obj_t *dashboard, *launcher_screen, *background;
 static lv_obj_t *title, *source_label, *speed, *gear, *battery, *connection, *metrics;
-static lv_obj_t *view_button, *connections_button, *full_button;
+static lv_obj_t *view_button, *connections_button, *menu_button;
 static bool showing_launcher;
 static int arranged_mode=-1;
 static uint32_t stats_ms;
 static unsigned stats_frames, rate_tenths;
 
 static void text(lv_obj_t *obj, const char *value)
-{ if (strcmp(lv_label_get_text(obj),value)) lv_label_set_text(obj,value); }
+{ if (strcmp(lv_label_get_text(obj),TR(value))) lv_label_set_text(obj,value); }
 
 static lv_obj_t *make_label(lv_obj_t *parent, uint32_t color, bool large)
 {
@@ -38,22 +42,25 @@ static lv_obj_t *make_label(lv_obj_t *parent, uint32_t color, bool large)
 
 static void show_dashboard(lv_event_t *event)
 {
-    (void)event; showing_launcher=false;
-    (void)carplay_connection_set_display_mode(CARPLAY_FUSION);
+    (void)event; carplay_fusion_ui_resume();
+}
+void carplay_fusion_ui_show_launcher(void)
+{
+    showing_launcher=true;
+    (void)carplay_fusion_set_mode(CARPLAY_LOCAL);
+    if (lv_screen_active()!=launcher_screen) lv_screen_load(launcher_screen);
+}
+void carplay_fusion_ui_resume(void)
+{
+    demo_status_t status={0};
+    showing_launcher=false;
+    if (carplay_connection_status(&status))
+        (void)carplay_fusion_set_mode(status.display_reconfiguring ? CARPLAY_LOCAL : status.display_requested);
 }
 static void show_connections(lv_event_t *event)
-{
-    (void)event; showing_launcher=true;
-    (void)carplay_fusion_set_mode(CARPLAY_LOCAL);
-}
-static void change_view(lv_event_t *event)
-{
-    (void)event;
-    carplay_fusion_snapshot_t s; carplay_fusion_snapshot(rt_tick_get_millisecond(),&s);
-    (void)carplay_connection_set_display_mode(s.requested == CARPLAY_FUSION ? CARPLAY_LOCAL : CARPLAY_FUSION);
-}
-static void fullscreen(lv_event_t *event)
-{ (void)event; (void)carplay_connection_set_display_mode(CARPLAY_FULLSCREEN); }
+{ (void)event; carplay_fusion_ui_show_launcher(); }
+static void open_display(lv_event_t *event)
+{ (void)event; carplay_launcher_open_display_settings(); }
 
 static lv_obj_t *make_button(lv_obj_t *parent, const char *caption, lv_event_cb_t callback)
 {
@@ -74,6 +81,15 @@ static void arrange(const carplay_fusion_snapshot_t *s)
     if (arranged_mode == (int)s->effective) return;
     arranged_mode=s->effective;
     bool fusion=s->effective == CARPLAY_FUSION;
+    bool fullscreen=s->effective == CARPLAY_FULLSCREEN;
+    lv_obj_t *instruments[]={background,title,source_label,speed,gear,battery,connection,metrics,view_button,connections_button};
+    for (unsigned i=0;i<sizeof(instruments)/sizeof(instruments[0]);++i) {
+        if (fullscreen) lv_obj_add_flag(instruments[i],LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_remove_flag(instruments[i],LV_OBJ_FLAG_HIDDEN);
+    }
+    if (fullscreen) lv_obj_remove_flag(menu_button,LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(menu_button,LV_OBJ_FLAG_HIDDEN);
+    if (fullscreen) return;
     int x=fusion ? s->width-s->local_width+16 : 40;
     int w=fusion ? s->local_width-32 : s->width-80;
     lv_obj_set_pos(background,fusion ? s->width-s->local_width : 16,fusion ? 0 : 96);
@@ -84,22 +100,20 @@ static void arrange(const carplay_fusion_snapshot_t *s)
     place(battery,fusion ? x : 680,fusion ? 242 : 120,fusion ? w : 280);
     place(connection,x,fusion ? 304 : 236,w);
     place(metrics,x,fusion ? 370 : 344,w);
-    lv_obj_set_style_text_font(gear,fusion ? &lv_font_montserrat_24 : &lv_font_montserrat_32,0);
-    lv_obj_set_style_text_font(battery,fusion ? &lv_font_montserrat_24 : &lv_font_montserrat_32,0);
+    lv_obj_set_style_text_font(gear,carplay_ui_is_chinese() ? &carplay_cjk_24 : fusion ? &lv_font_montserrat_24 : &lv_font_montserrat_32,0);
+    lv_obj_set_style_text_font(battery,carplay_ui_is_chinese() ? &carplay_cjk_24 : fusion ? &lv_font_montserrat_24 : &lv_font_montserrat_32,0);
     lv_obj_set_style_text_font(metrics,&lv_font_montserrat_12,0);
-    lv_obj_set_pos(view_button,x,fusion ? s->height-160 : s->height-68);
-    lv_obj_set_pos(connections_button,fusion ? x : x+244,fusion ? s->height-108 : s->height-68);
-    lv_obj_set_pos(full_button,fusion ? x : x+488,fusion ? s->height-56 : s->height-68);
+    lv_obj_set_pos(view_button,x,fusion ? s->height-108 : s->height-68);
+    lv_obj_set_pos(connections_button,fusion ? x : x+244,fusion ? s->height-56 : s->height-68);
     int button_width=fusion ? w : 220;
     lv_obj_set_width(view_button,button_width); lv_obj_set_width(connections_button,button_width);
-    lv_obj_set_width(full_button,button_width);
 }
 
 void carplay_fusion_ui_init(lv_obj_t *launcher, uint16_t width, uint16_t height)
 {
     if (dashboard || carplay_fusion_init(width,height)) return;
     launcher_screen=launcher;
-    lv_obj_t *back=make_button(launcher,"Vehicle instruments",show_dashboard);
+    lv_obj_t *back=make_button(launcher,"Resume CarPlay",show_dashboard);
     lv_obj_set_pos(back,410,36); lv_obj_set_width(back,220);
     dashboard=lv_obj_create(NULL);
     lv_obj_set_style_bg_color(dashboard,lv_color_hex(0x080F17),0);
@@ -115,9 +129,11 @@ void carplay_fusion_ui_init(lv_obj_t *launcher, uint16_t width, uint16_t height)
     speed=make_label(dashboard,0x72E8C3,true);
     gear=make_label(dashboard,0xEDF6FF,true); battery=make_label(dashboard,0xEDF6FF,true);
     connection=make_label(dashboard,0xB1C9DB,false); metrics=make_label(dashboard,0x8FA8B9,false);
-    view_button=make_button(dashboard,"Video + meters / Local",change_view);
-    connections_button=make_button(dashboard,"Connections",show_connections);
-    full_button=make_button(dashboard,"Fullscreen 1024x600",fullscreen);
+    view_button=make_button(dashboard,"Display",open_display);
+    connections_button=make_button(dashboard,"Home",show_connections);
+    menu_button=make_button(dashboard,LV_SYMBOL_SETTINGS,open_display);
+    lv_obj_set_pos(menu_button,width-56,8); lv_obj_set_size(menu_button,48,48);
+    showing_launcher=true;
 }
 
 bool carplay_fusion_ui_update(const demo_status_t *status)
@@ -138,19 +154,19 @@ bool carplay_fusion_ui_update(const demo_status_t *status)
         return false;
     }
     if (lv_screen_active() != dashboard) lv_screen_load(dashboard);
-    if (s.effective == CARPLAY_FULLSCREEN) return true; /* Preserve Classic refresh cost. */
     arrange(&s);
+    if (s.effective == CARPLAY_FULLSCREEN) return true;
     char line[256];
     text(source_label,s.vehicle.simulated ? "SIMULATED DATA" : s.vehicle.available ? "VEHICLE PROVIDER" : "DATA UNAVAILABLE");
     if (s.vehicle.available) {
         snprintf(line,sizeof(line),"%u km/h",s.vehicle.speed_kph); text(speed,line);
-        snprintf(line,sizeof(line),"GEAR  %s",s.vehicle.gear); text(gear,line);
-        snprintf(line,sizeof(line),"SOC  %u%%",s.vehicle.battery_percent); text(battery,line);
+        snprintf(line,sizeof(line),TR("GEAR  %s"),s.vehicle.gear); text(gear,line);
+        snprintf(line,sizeof(line),TR("SOC  %u%%"),s.vehicle.battery_percent); text(battery,line);
     } else { text(speed,"-- km/h"); text(gear,"GEAR  --"); text(battery,"SOC  --"); }
     const char *stage=status->stage == DEMO_LIVE ? "CONNECTED" : status->stage == DEMO_CLOSING ? "CLOSING" :
         status->stage == DEMO_FAILED ? "CONNECTION ERROR" : status->stage >= DEMO_PAIR ? "CONNECTING" : "WAITING FOR PHONE";
-    snprintf(line,sizeof(line),"%s\n%s | %s",stage,carplay_fusion_mode_name(s.effective),
-        status->wireless ? "WIRELESS" : "USB"); text(connection,line);
+    snprintf(line,sizeof(line),"%s\n%s | %s",TR(status->display_reconfiguring ? "Switching..." : stage),
+        TR(carplay_fusion_mode_name(s.effective)),TR(status->wireless ? "WIRELESS" : "USB")); text(connection,line);
     carplay_video_perf_t p; carplay_video_sink_perf(&p);
     uint32_t elapsed=now-stats_ms;
     if (!stats_ms || elapsed >= 1000U) {
@@ -166,11 +182,9 @@ bool carplay_fusion_ui_update(const demo_status_t *status)
     rt_size_t total,used,peak; rt_memory_info(&total,&used,&peak);
     snprintf(heap,sizeof(heap),"%u KiB",(unsigned)(used/1024U));
 #endif
-    snprintf(line,sizeof(line),"VIDEO %u.%u fps | drop %u\nQ/D/P avg %u/%u/%u ms\nCPU %s | heap %s",
-        rate_tenths/10,rate_tenths%10,p.drops,
-        p.dequeued ? (unsigned)(p.queue_ms/p.dequeued) : 0,
-        p.decode_calls ? (unsigned)(p.decode_ms/p.decode_calls) : 0,
-        p.present_calls ? (unsigned)(p.present_ms/p.present_calls) : 0,cpu,heap); text(metrics,line);
+    snprintf(line,sizeof(line),"%u.%u fps\nCPU %s | %s",
+        rate_tenths/10,rate_tenths%10,cpu,
+        heap); text(metrics,line);
     return true;
 }
 #endif

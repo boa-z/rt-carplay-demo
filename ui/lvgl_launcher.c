@@ -13,6 +13,10 @@
 #include "touch_panel_lubanlite.h"
 #include "rtcp/rtcp.h"
 #include "rtcp/input.h"
+#include "ui_language.h"
+#define lv_label_set_text carplay_ui_set_text
+#define lv_label_set_text_fmt carplay_ui_set_text_fmt
+#define TR carplay_ui_translate
 #if defined(RTCARPLAY_MICROPHONE)
 #include "audio_input_lubanlite.h"
 #endif
@@ -27,8 +31,11 @@ static lv_obj_t *step_labels[3], *path_labels[2], *session_note, *uptime_label;
 static lv_obj_t *settings_panel, *settings_note, *wireless_setting, *microphone_setting;
 static lv_obj_t *settings_button, *diagnostics_panel, *modal_scrim;
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
-static lv_obj_t *display_panel, *display_note;
+static lv_obj_t *display_panel, *display_note, *display_modes[3];
+static carplay_display_mode_t display_choice=CARPLAY_FUSION;
 #endif
+static lv_obj_t *language_buttons[2];
+static void update_page(lv_timer_t *timer);
 static lv_obj_t *network_panel, *network_button, *network_summary, *network_detail, *network_check, *network_note;
 static lv_obj_t *bt_panel, *bt_text, *bt_accept;
 static uint32_t visible_pairing_request;
@@ -223,17 +230,13 @@ static void audio_update(void)
     if (!open) { lv_obj_add_flag(audio_panel, LV_OBJ_FLAG_HIDDEN); return; }
     const char *names[]={"PCM tone","PCM silence","AAC fixture","Mic level","Mic loopback"};
     lv_label_set_text_fmt(audio_settings,"Selected: %s | %u Hz | %s | Volume %u%% %s",
-      names[config.mode],config.mode==AUDIO_TEST_AAC?44100:
+      TR(names[config.mode]),config.mode==AUDIO_TEST_AAC?44100:
       config.mode>=AUDIO_TEST_MIC_LEVEL?48000:config.rate,
-      config.channel==1?"Left":config.channel==2?"Right":"Both",s.volume,s.muted?"MUTED":"");
+      TR(config.channel==1?"Left":config.channel==2?"Right":"Both"),s.volume,s.muted?TR("MUTED"):"");
     lv_label_set_text_fmt(audio_note,
-      "%s | Frames %u | Bytes %u | Writes %u\nInput peak L/R: %u / %u (0..32768) | Error %d\n%s",
-      exiting?"Stopping / returning":!ready?"Releasing CarPlay audio...":s.running?"TEST RUNNING":"STOPPED / READY",
-      s.frames,s.bytes,s.writes,s.peak_left,s.peak_right,result?result:s.error,
-      config.mode==AUDIO_TEST_AAC?"Short synthetic AAC clip; tap Start to replay.":
-      config.mode==AUDIO_TEST_MIC_LEVEL?"Speak near the microphone; input peaks should change.":
-      config.mode==AUDIO_TEST_MIC_LOOP?"Microphone to speaker, max 10 s. Start at low volume.":
-      "Direct PCM -> sound0 -> Speaker. Tone/silence lasts up to 10 s.");
+      "%s | Error %d\nInput L/R: %u / %u",
+      TR(exiting?"Stopping...":!ready?"Starting...":s.running?"Running":"Ready"),
+      result?result:s.error,s.peak_left,s.peak_right);
     if(ready && !exiting)lv_obj_remove_state(audio_play,LV_STATE_DISABLED);
     else lv_obj_add_state(audio_play,LV_STATE_DISABLED);
     lv_bar_set_value(audio_meters[0],(int)s.peak_left,LV_ANIM_OFF);
@@ -283,14 +286,50 @@ static void open_panel(lv_event_t *event)
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
 static void select_display(lv_event_t *event)
 {
-    carplay_display_mode_t mode=(carplay_display_mode_t)(uintptr_t)lv_event_get_user_data(event);
-    bool accepted=carplay_connection_set_display_mode(mode);
-    lv_label_set_text(display_note,!accepted ? "Display change unavailable. Close device/audio tools and retry." :
-        mode==CARPLAY_FULLSCREEN ? "Full screen: reconnecting CarPlay at 1024 x 600. Settings reset at reboot." :
-        mode==CARPLAY_FUSION ? "Video + meters: reconnecting CarPlay at 768 x 600. Settings reset at reboot." :
-        "Local instruments selected. Phone geometry is retained.");
+    display_choice=(carplay_display_mode_t)(uintptr_t)lv_event_get_user_data(event);
+    for (unsigned i=0;i<3;++i)
+        lv_obj_set_style_bg_color(display_modes[i],lv_color_hex(i==(unsigned)display_choice ? 0x236859 : 0x20344B),0);
+    lv_label_set_text(display_note,"Resolution changes reconnect CarPlay.");
+}
+void carplay_launcher_open_display_settings(void)
+{
+    demo_status_t status={0};
+    if (carplay_connection_status(&status)) display_choice=status.display_requested;
+    /* Pause composition only while the shared menu is visible. The selected
+     * receiver geometry and wired/wireless transport do not change here. */
+    carplay_fusion_ui_show_launcher();
+    lv_obj_add_flag(settings_panel,LV_OBJ_FLAG_HIDDEN);
+    for (unsigned i=0;i<3;++i)
+        lv_obj_set_style_bg_color(display_modes[i],lv_color_hex(i==(unsigned)display_choice ? 0x236859 : 0x20344B),0);
+    lv_label_set_text(display_note,status.display_reconfiguring ? "Reconnecting..." : "Resolution changes reconnect CarPlay.");
+    show_modal(display_panel);
+}
+static void open_display(lv_event_t *event)
+{ (void)event; carplay_launcher_open_display_settings(); }
+static void resume_display(lv_event_t *event)
+{
+    (void)event;
+    lv_obj_add_flag(display_panel,LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(settings_panel,LV_OBJ_FLAG_HIDDEN);
+    update_scrim();
+    carplay_fusion_ui_resume();
+}
+static void apply_display(lv_event_t *event)
+{
+    if (!carplay_connection_set_display_mode(display_choice)) {
+        lv_label_set_text(display_note,"Close device/audio tools first."); return;
+    }
+    resume_display(event);
 }
 #endif
+static void select_language(lv_event_t *event)
+{
+    bool chinese=(uintptr_t)lv_event_get_user_data(event)!=0;
+    carplay_ui_set_chinese(chinese);
+    for (unsigned i=0;i<2;++i)
+        lv_obj_set_style_bg_color(language_buttons[i],lv_color_hex(i==(unsigned)chinese ? 0x236859 : 0x20344B),0);
+    update_page(NULL);
+}
 
 static void toggle_wireless(lv_event_t *event)
 {
@@ -313,11 +352,11 @@ static void toggle_microphone(lv_event_t *event)
 static void device_title(const char *name, char *out, size_t size)
 {
     size_t n = strlen(name);
-    if (!strcmp(name, "Bluetooth bonds")) snprintf(out, size, "All Bluetooth phones");
-    else if (!strcmp(name, "rt-carplay-pairings.bin")) snprintf(out, size, "CarPlay trusted phones");
+    if (!strcmp(name, "Bluetooth bonds")) snprintf(out, size, "%s",TR("All Bluetooth phones"));
+    else if (!strcmp(name, "rt-carplay-pairings.bin")) snprintf(out, size, "%s",TR("CarPlay trusted phones"));
     else if (n > 26 && !strncmp(name, "rt-carplay-usb-", 14))
-        snprintf(out, size, "Wired iPhone  /  %.8s", name + n - 12);
-    else snprintf(out, size, "Saved phone record");
+        snprintf(out, size, TR("Wired iPhone  /  %.8s"), name + n - 12);
+    else snprintf(out, size, "%s",TR("Saved phone record"));
 }
 static void answer_bluetooth(lv_event_t *event)
 {
@@ -345,12 +384,12 @@ static void select_file(lv_event_t *event)
     snprintf(selected_file, sizeof(selected_file), "%s", name);
     char title[96]; device_title(name, title, sizeof(title));
     lv_label_set_text_fmt(confirm_text,
-        "Forget %s?\n\n%s\n\nThe display identity will be kept.", title,
+        "Forget %s?\n\n%s", title,
         !strcmp(name, "Bluetooth bonds") ?
-        "This removes all saved Bluetooth phones.\nForget this display on your iPhone, then pair again." :
+        TR("All Bluetooth phones will need to pair again.") :
         !strcmp(name, "rt-carplay-pairings.bin") ?
-        "This resets CarPlay permissions for all trusted phones.\nEach phone will need to pair again." :
-        "This iPhone may ask you to tap Trust again.");
+        TR("All CarPlay phones will need to pair again.") :
+        TR("This iPhone may ask you to tap Trust again."));
     lv_obj_remove_flag(confirm_panel, LV_OBJ_FLAG_HIDDEN);
 }
 static void select_bluetooth_bonds(lv_event_t *event)
@@ -374,8 +413,8 @@ static void update_files(void)
         lv_obj_set_user_data(row, visible[i].name);
     }
     lv_label_set_text_fmt(file_note,
-        "Saved trust records: %u%s | Result: %d\nSelect a phone or permission group to forget it.",
-        count, more ? "+ (refresh after deletion for more)" : "", result);
+        "Saved devices: %u%s | Error %d",
+        count, more ? "+" : "", result);
 }
 
 static void network_check_now(lv_event_t *event)
@@ -388,7 +427,7 @@ static void network_check_now(lv_event_t *event)
 static void ota_check_now(lv_event_t *event)
 {
     (void)event;
-    ota_notice = carplay_ota_check() == RT_EOK ? NULL : "Update check could not start; retry when the worker is idle.";
+    ota_notice = carplay_ota_check() == RT_EOK ? NULL : "Update service busy.";
 }
 /* Nightly channel: the download starts only after this explicit confirmation. */
 static void ota_install_now(lv_event_t *event)
@@ -404,10 +443,7 @@ static void ota_install_now(lv_event_t *event)
     else
         snprintf(target, sizeof(target), "version %s", ota.remote);
     lv_label_set_text_fmt(ota_confirm_text,
-        "Install %s?\n\n"
-        "Installed now: %s (%.8s)\n\n"
-        "Disconnect CarPlay and keep power connected.\n"
-        "The unit reboots after package verification and inactive-slot writing.",
+        "Install %s?\n\nCurrent: %s (%.8s)\n\nDisconnect CarPlay. Keep power connected.\nRestart after installation.",
         target, ota.current, ota.current_commit);
     lv_obj_remove_flag(ota_confirm_panel, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(ota_confirm_panel);
@@ -419,7 +455,7 @@ static void ota_confirm_install(lv_event_t *event)
     lv_obj_add_flag(ota_confirm_panel, LV_OBJ_FLAG_HIDDEN);
     update_scrim();
     ota_notice = carplay_ota_install(ota_confirm_commit) == RT_EOK ? NULL :
-        "The update target changed or the worker is busy. Check and confirm again.";
+        "Update changed or busy. Check again.";
 }
 static void ota_confirm_cancel(lv_event_t *event)
 {
@@ -434,7 +470,7 @@ static void ota_update(void)
 
     carplay_ota_status_t ota;
     carplay_ota_status(&ota);
-    lv_label_set_text_fmt(ota_version_label, "Firmware %s (%.8s)  |  Slot %s  |  Preview channel",
+    lv_label_set_text_fmt(ota_version_label, "Firmware %s (%.8s) | %s",
                           ota.current,
                           ota.current_commit[0] ? ota.current_commit : "unknown",
                           ota.slot);
@@ -446,15 +482,17 @@ static void ota_update(void)
     case CARPLAY_OTA_DOWNLOADING:
     case CARPLAY_OTA_APPLYING:
         if (ota.progress >= 0)
-            snprintf(text, sizeof(text), "%s  %d%%", ota.message, ota.progress);
+            snprintf(text, sizeof(text), "%s  %d%%", TR(ota.state==CARPLAY_OTA_DOWNLOADING ? "Downloading" : "Installing"), ota.progress);
         else
-            snprintf(text, sizeof(text), "%s", ota.message);
+            snprintf(text, sizeof(text), "%s", TR(ota.state==CARPLAY_OTA_DOWNLOADING ? "Downloading" : "Installing"));
         break;
     case CARPLAY_OTA_UP_TO_DATE:
     case CARPLAY_OTA_AVAILABLE:
     case CARPLAY_OTA_FAILED:
     case CARPLAY_OTA_REBOOTING:
-        snprintf(text, sizeof(text), "%s", ota.message);
+        snprintf(text, sizeof(text), "%s",TR(ota.state==CARPLAY_OTA_UP_TO_DATE ? "Up to date" :
+            ota.state==CARPLAY_OTA_AVAILABLE ? "Update available" :
+            ota.state==CARPLAY_OTA_FAILED ? "Update failed" : "Restarting"));
         break;
     default:
         snprintf(text, sizeof(text),
@@ -486,28 +524,26 @@ static void network_update(void)
         !n.route_ready ? "No gateway" :
         n.checking ? "Checking..." : !n.checked ? "Not checked" :
         n.reachable ? "Internet verified" : n.age_ms > 45000U ? "Check expired" : "Check failed";
-    lv_label_set_text_fmt(network_summary, "Ethernet: %s", state);
+    lv_label_set_text_fmt(network_summary, "Ethernet: %s", TR(state));
     lv_obj_set_style_text_color(network_summary, lv_color_hex(n.reachable ? 0x58E0BF : 0xC1CFDF), 0);
     if (n.available && n.route_ready && !n.checking) lv_obj_remove_state(network_check, LV_STATE_DISABLED);
     else lv_obj_add_state(network_check, LV_STATE_DISABLED);
     char age[32];
-    if (n.checked) snprintf(age, sizeof(age), "%lu s ago", (unsigned long)(n.age_ms / 1000U));
-    else snprintf(age, sizeof(age), "Never");
-    lv_label_set_text_fmt(network_note, "Probe: %s\nChecks this head unit through Ethernet, without an iPhone.\nFailure can mean DNS, timeout or a captive portal; other sites may still work.",
+    if (n.checked) snprintf(age, sizeof(age), "%lu s", (unsigned long)(n.age_ms / 1000U));
+    else snprintf(age, sizeof(age), "%s",TR("Never"));
+    lv_label_set_text_fmt(network_note, "HTTP 204: %s",
         n.available ? n.probe_url : "Not built or service unavailable");
     lv_label_set_text_fmt(network_detail,
-        "ETHERNET UPLINK                         %s\n\n"
-        "Adapter       %s\nCable link     %s\nIPv4             %s\nSubnet mask  %s\nGateway       %s\nDNS              %s\n\n"
-        "HTTP 204 check: %s   |   Last result: %s\n"
-        "CarPlay Internet sharing: %s",
-        state, n.device ? "Detected" : "Not detected", n.link ? "Up" : "Down",
-        n.address, n.mask, n.gateway, n.dns, n.checking ? "Running" : n.checked ? (n.reachable ? "Passed" : "Failed / expired") : "Not run",
-        age, n.sharing ? "Active" : "Inactive");
+        "%s\n\nIPv4       %s\nMask      %s\nGateway %s\nDNS       %s\n\nHTTP 204: %s | %s\nCarPlay sharing: %s",
+        TR(state),n.address,n.mask,n.gateway,n.dns,TR(n.checking ? "Running" : n.checked ? (n.reachable ? "Passed" : "Failed / expired") : "Not run"),
+        age,TR(n.sharing ? "Active" : "Inactive"));
 }
 
 static void update_page(lv_timer_t *timer)
 {
     (void)timer;
+    for (unsigned i=0;i<2;++i) if (language_buttons[i])
+        lv_obj_set_style_bg_color(language_buttons[i],lv_color_hex(i==(unsigned)carplay_ui_is_chinese() ? 0x236859 : 0x20344B),0);
     /* Same GUI startup owner retries a failed worker allocation/schedule.
      * Successful manager startup is idempotent and creates no second worker. */
     static bool attempted;
@@ -552,11 +588,11 @@ static void update_page(lv_timer_t *timer)
         if (visible_pairing_request != s.pairing.request) {
             visible_pairing_request = s.pairing.request;
             if (s.pairing.kind == RTCP_BT_PAIR_CONSENT)
-                lv_label_set_text(bt_text, "Allow Bluetooth pairing?\nConfirm only if you started pairing on your iPhone.");
+                lv_label_set_text(bt_text, "Allow Bluetooth pairing?");
             else lv_label_set_text_fmt(bt_text,
                 s.pairing.kind == RTCP_BT_PAIR_COMPARE ?
-                "%06u\n\nCheck that your iPhone shows the same number.\nThen confirm on both screens." :
-                "%06u\n\nEnter this number on your iPhone.", s.pairing.passkey);
+                "%06u\n\nConfirm this number on your iPhone." :
+                "%06u\n\nEnter on your iPhone.", s.pairing.passkey);
             if (s.pairing.kind == RTCP_BT_PAIR_DISPLAY) lv_obj_add_state(bt_accept, LV_STATE_DISABLED);
             else lv_obj_remove_state(bt_accept, LV_STATE_DISABLED);
             show_modal(bt_panel);
@@ -572,11 +608,11 @@ static void update_page(lv_timer_t *timer)
     const char *wireless = !s.wireless_enabled ? "Paused in Settings" :
         !s.wireless ? "Standby after USB session" :
         s.bt_connected ? "Phone connected" : s.bt_ready ? "Discoverable as rt-carplay" : "Starting Bluetooth / Wi-Fi";
-    lv_label_set_text_fmt(path_labels[0], "WIRED USB\n%s", usb);
-    lv_label_set_text_fmt(path_labels[1], "WIRELESS\n%s", wireless);
+    lv_label_set_text_fmt(path_labels[0], "WIRED USB\n%s", TR(usb));
+    lv_label_set_text_fmt(path_labels[1], "WIRELESS\n%s", TR(wireless));
     lv_label_set_text_fmt(session_note, "%s\n%s",
-        s.stage == DEMO_LIVE ? "Session connected" : "One phone at a time",
-        s.retry_seconds ? "Waiting before automatic retry" : "Automatic discovery is on");
+        TR(s.stage == DEMO_LIVE ? "Session connected" : "One phone at a time"),
+        TR(s.retry_seconds ? "Waiting before automatic retry" : "Automatic discovery is on"));
     lv_label_set_text(lv_obj_get_child(wireless_setting, 0),
         s.wireless_enabled ? "Wireless discovery: ON" : "Wireless discovery: OFF");
 #if defined(RTCARPLAY_MICROPHONE)
@@ -602,45 +638,41 @@ static void update_page(lv_timer_t *timer)
     case DEMO_WAIT:
         title = "Ready when you are.";
         detail = s.wireless_enabled ?
-            "Connect with USB, or pair Bluetooth.\nCarPlay opens automatically." :
-            "Connect an unlocked iPhone with USB.\nCarPlay opens automatically.";
+            "Connect USB or pair Bluetooth." : "Connect your iPhone with USB.";
         tag = "AUTO CONNECT"; break;
     case DEMO_PAIR:
         title = s.wireless ? "Pair your iPhone." : "Trust this display.";
-        detail = s.wireless ? "Confirm the Bluetooth request on both screens.\nKeep Wi-Fi enabled for CarPlay." :
-            "Unlock your iPhone and tap Trust if asked.\nYour saved permissions will be reused.";
+        detail = s.wireless ? "Confirm pairing on your iPhone." : "Unlock iPhone and tap Trust.";
         tag = "VERIFYING"; break;
     case DEMO_NETWORK:
         title = "Making the connection.";
-        detail = s.wireless ? "Your iPhone is joining CarPlay Wi-Fi.\nThis may take a moment." :
-            "Trust is established.\nPreparing the wired network.";
+        detail = s.wireless ? "Joining Wi-Fi..." : "Preparing USB...";
         tag = "CONNECTING"; break;
     case DEMO_CONNECT:
         title = "Opening CarPlay.";
-        detail = "Allow CarPlay on your iPhone if asked.\nWaiting for the first displayed frame.";
+        detail = "Waiting for video...";
         tag = "ALMOST READY"; break;
     case DEMO_LIVE:
         title = "Check display handoff.";
-        detail = "Video is ready but the launcher is still visible.\nOpen Diagnostics and check the display layer.";
+        detail = "See Diagnostics.";
         tag = "DISPLAY CHECK"; break;
     case DEMO_CLOSING:
         title = "Getting ready again.";
-        detail = "Finishing the previous connection.\nDiscovery resumes after resources are released.";
+        detail = "Closing session...";
         tag = "RETURNING"; break;
     case DEMO_FAILED:
         title = "Let's reconnect.";
-        detail = s.storage_error ? "Pairing could not be saved.\nCheck Diagnostics and device storage." :
-            "Check Bluetooth, Wi-Fi and the USB cable.\nAutomatic retry will keep trying.";
+        detail = s.storage_error ? "Pairing storage error." : "Retrying automatically...";
         tag = "RECONNECTING"; break;
     default:
         title = "Your drive, connected.";
-        detail = "Starting USB and wireless discovery.\nYour iPhone will connect automatically.";
+        detail = "Starting...";
         tag = "LAUNCHER 02"; break;
     }
     lv_label_set_text(heading, title); lv_label_set_text(description, detail);
     lv_label_set_text(badge, tag);
     lv_label_set_text_fmt(pin_label, "Bluetooth: rt-carplay  |  CarPlay PIN: %s\nWi-Fi: %s",
-        s.pin[0] ? s.pin : "preparing", s.ssid[0] ? s.ssid : s.wireless_enabled ? "preparing" : "paused");
+        s.pin[0] ? s.pin : TR("preparing"), s.ssid[0] ? s.ssid : TR(s.wireless_enabled ? "preparing" : "paused"));
     for (unsigned i = 0; i < 3; ++i) {
         bool active = (int)s.stage >= DEMO_PAIR + (int)i && s.stage <= DEMO_LIVE;
         lv_obj_set_style_bg_color(steps[i], lv_color_hex(active ? 0x58E0BF : 0x26384B), 0);
@@ -658,7 +690,7 @@ static void update_page(lv_timer_t *timer)
             "Trust cache: %d    Pairing write: %d    Bonds: %u/%u\n"
             "BT HCI/security: %02x/%u    Invite/ACK/retry: %u/%u/%u\n"
             "Recovery cycles: %u    Current retry wait: %u s",
-            s.wireless ? "Wireless" : "USB", stage_name(s.stage), s.error, s.last_error,
+            TR(s.wireless ? "WIRELESS" : "USB"), stage_name(s.stage), s.error, s.last_error,
             s.usb_ready ? "ready" : "starting", s.usb ? "yes" : "no", s.usb_error,
             s.wireless_enabled ? "enabled" : "paused", s.bt_connected ? "connected" : s.bt_ready ? "ready" : "inactive",
             s.bt_authenticated ? "authenticated" : "waiting", s.wireless_error,
@@ -706,7 +738,7 @@ void carplay_demo_launcher_init(void)
     int width = lv_display_get_horizontal_resolution(NULL);
     int height = lv_display_get_vertical_resolution(NULL);
     label(screen, "CARPLAY", 36, 30, 300, 0xEDF5FF, true);
-    label(screen, "YOUR IPHONE. EVERY DRIVE.", 36, 65, 420, 0x8FA5BF, false);
+    label(screen, "", 36, 65, 420, 0x8FA5BF, false);
     uptime_label = label(screen, "UPTIME  00:00:00", 410, 40, 230, 0x8FA5BF, false);
     lv_obj_t *card = panel(screen, 36, 110, width - 422, height - 282);
     badge = label(card, "LAUNCHER 02", 0, 0, 480, 0x58E0BF, false);
@@ -757,17 +789,20 @@ void carplay_demo_launcher_init(void)
     lv_obj_add_flag(modal_scrim, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(modal_scrim, LV_OBJ_FLAG_SCROLLABLE);
     settings_panel = panel(screen, 30, 25, width - 60, height - 50);
-    label(settings_panel, "SETTINGS", 10, 0, 700, 0xF2F7FF, true);
+    label(settings_panel, "SETTINGS", 10, 0, 320, 0xF2F7FF, true);
+    language_buttons[0]=button(settings_panel,"English",width-460,0,150,NULL);
+    language_buttons[1]=button(settings_panel,"中文",width-296,0,150,NULL);
+    lv_obj_add_event_cb(language_buttons[0],select_language,LV_EVENT_CLICKED,(void *)0);
+    lv_obj_add_event_cb(language_buttons[1],select_language,LV_EVENT_CLICKED,(void *)1);
+    lv_obj_set_style_bg_color(language_buttons[0],lv_color_hex(0x236859),0);
     settings_note = label(settings_panel,
-        "Settings apply now and reset at reboot.",
-        10, 42, width - 140, 0x8FA5BF, false);
-    wireless_setting = button(settings_panel, "Wireless discovery: ON", 10, 100, 300, toggle_wireless);
-    label(settings_panel, "USB always stays enabled.\nChange discovery while idle.", 340, 103, 500, 0xC1CFDF, false);
-    microphone_setting = button(settings_panel, "Microphone not enabled", 10, 182, 300, toggle_microphone);
+        "Settings reset at reboot.",
+        10, 52, width - 140, 0x8FA5BF, false);
+    wireless_setting = button(settings_panel, "Wireless discovery: ON", 10, 178, 330, toggle_wireless);
+    microphone_setting = button(settings_panel, "Microphone not enabled", 360, 178, 330, toggle_microphone);
 #if !defined(RTCARPLAY_MICROPHONE)
     lv_obj_add_state(microphone_setting, LV_STATE_DISABLED);
 #endif
-    label(settings_panel, "Mute applies to CarPlay microphone uplink.\nSpeaker and microphone tests are on the Audio page.", 340, 185, 500, 0xC1CFDF, false);
 #if defined(RTCARPLAY_OTA)
     label(settings_panel, "FIRMWARE & UPDATES", 10, 264, 500, 0x58E0BF, false);
     ota_version_label = label(settings_panel, "Installed firmware", 10, 296, width - 140, 0xC1CFDF, false);
@@ -778,36 +813,29 @@ void carplay_demo_launcher_init(void)
     ota_install_button = button(settings_panel, "Install update", 255, 388, 230, ota_install_now);
     lv_obj_add_state(ota_check_button, LV_STATE_DISABLED);
     lv_obj_add_state(ota_install_button, LV_STATE_DISABLED);
-    lv_obj_t *ota_note = label(settings_panel,
-        "Disconnect CarPlay before installing. Downloads are staged in /data and verified.\n"
-        "Keep power connected while writing the inactive slot. The unit then reboots.",
-        10, 448, width - 140, 0x8FA5BF, false);
-#if LV_FONT_MONTSERRAT_14
-    lv_obj_set_style_text_font(ota_note, &lv_font_montserrat_14, 0);
-#endif
 #else
     label(settings_panel, "SYSTEM", 10, 280, 500, 0x58E0BF, false);
     lv_obj_t *system = label(settings_panel, "", 10, 316, width - 140, 0xC1CFDF, false);
     lv_label_set_text_fmt(system, "Launcher V2  |  ArtInChip D213  |  LVGL 9\nDisplay: %d x %d  |  One active CarPlay session", width, height);
 #endif
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
-    lv_obj_t *display_settings=button(settings_panel,"Display mode",width-312,0,190,NULL);
+    button(settings_panel,"Display mode",10,100,330,open_display);
     display_panel=panel(screen,30,25,width-60,height-50);
     label(display_panel,"CARPLAY DISPLAY",10,0,width-140,0xF2F7FF,true);
-    label(display_panel,"Choose the phone layout. Changing resolution reconnects CarPlay.",
+    label(display_panel,"USB and wireless",
         10,52,width-140,0xC1CFDF,false);
-    lv_obj_t *display_full=button(display_panel,"Full screen 1024 x 600",10,110,380,NULL);
-    lv_obj_add_event_cb(display_full,select_display,LV_EVENT_CLICKED,(void *)(uintptr_t)CARPLAY_FULLSCREEN);
-    lv_obj_t *display_fusion=button(display_panel,"Video + meters 768 x 600",10,190,380,NULL);
-    lv_obj_add_event_cb(display_fusion,select_display,LV_EVENT_CLICKED,(void *)(uintptr_t)CARPLAY_FUSION);
-    lv_obj_t *display_local=button(display_panel,"Local instruments",10,270,380,NULL);
-    lv_obj_add_event_cb(display_local,select_display,LV_EVENT_CLICKED,(void *)(uintptr_t)CARPLAY_LOCAL);
-    display_note=label(display_panel,"Full screen uses the entire 1024 x 600 panel.\nVideo + meters reserves the right 256 pixels for local instruments.",
-        10,360,width-140,0x8FA5BF,false);
-    lv_obj_t *display_back=button(display_panel,"Back to settings",10,440,230,NULL);
-    lv_obj_add_event_cb(display_back,close_panel,LV_EVENT_CLICKED,display_panel);
-    lv_obj_add_event_cb(display_back,open_panel,LV_EVENT_CLICKED,settings_panel);
-    lv_obj_add_event_cb(display_settings,open_panel,LV_EVENT_CLICKED,display_panel);
+    const char *mode_names[]={"Full screen","Fusion","Local instruments"};
+    const char *mode_sizes[]={"1024 x 600","768 x 600 + meters","Instruments only"};
+    for (unsigned i=0;i<3;++i) {
+        int x=10+(int)i*300;
+        display_modes[i]=button(display_panel,mode_names[i],x,125,280,NULL);
+        lv_obj_set_height(display_modes[i],100);
+        lv_obj_add_event_cb(display_modes[i],select_display,LV_EVENT_CLICKED,(void *)(uintptr_t)i);
+        label(display_panel,mode_sizes[i],x,246,280,0x8FA5BF,false);
+    }
+    display_note=label(display_panel,"Resolution changes reconnect CarPlay.",10,330,width-140,0x8FA5BF,false);
+    button(display_panel,"Cancel",10,440,180,resume_display);
+    button(display_panel,"Apply",700,440,190,apply_display);
     lv_obj_add_flag(display_panel,LV_OBJ_FLAG_HIDDEN);
 #endif
     lv_obj_t *legal = label(settings_panel,
@@ -820,7 +848,11 @@ void carplay_demo_launcher_init(void)
 #endif
     lv_obj_t *back = button(settings_panel, "Back",
                             width - 268, 388, 160, NULL);
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    lv_obj_add_event_cb(back,resume_display,LV_EVENT_CLICKED,NULL);
+#else
     lv_obj_add_event_cb(back, close_panel, LV_EVENT_CLICKED, settings_panel);
+#endif
     lv_obj_add_flag(settings_panel, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(settings_button, open_panel, LV_EVENT_CLICKED, settings_panel);
 #if defined(RTCARPLAY_OTA)

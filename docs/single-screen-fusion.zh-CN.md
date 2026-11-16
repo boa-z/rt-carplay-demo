@@ -6,7 +6,13 @@ Ultra GUI 开发配置在 D213 1024×600 屏幕上启用 `RTCARPLAY_SINGLE_SCREE
 
 ## 原生全屏与融合显示设置
 
-进入 **Connections > Settings > Display mode**，选择 **Full screen 1024 x 600**、**Video + meters 768 x 600** 或 **Local instruments**。仪表页全屏按钮也改为同一原生尺寸请求。几何变化异步执行：连接管理器先关闭 USB/iAP2 借用者，再停止旧 Receiver，以新尺寸重建 Receiver、HID、视频接收器和 `/info`，随后在同一有线/无线连接所有者上等待重连。退出期间保持本地仪表，LOCAL 保留已选手机几何；重复同尺寸请求不重连，待处理请求合并。设备/音频工具打开时可暂时拒绝切换。设置保存在 RAM，重启恢复默认。本版本真实 iPhone 重连和原生尺寸输出仍为 NOT_RUN。
+进入 **设置 > 显示模式**，或点击仪表页的 **显示**。选择 **全屏 / 融合 / 本地仪表** 后点击 **应用**；高亮卡片表示待应用选择，取消保留当前模式。全屏请求原生 1024x600 视频，融合请求 768x600 视频并在右侧保留 256 像素仪表。有线、无线均支持，各入口共用同一页。仅打开或取消菜单不会重建手机会话。
+
+全屏右上角保留一个小设置按钮，UI 硬件图层只覆盖 64x64 区域，底层视频仍为完整 1024x600。此角落处理本地触摸，其余区域映射到手机；无需缩小视频，也无需拔线或串口才能切回融合。新的叠加菜单和触摸仍需实机手动验收。
+
+几何变化异步执行：连接管理器先关闭 USB/iAP2 借用者，再停止旧 Receiver，以新尺寸重建 Receiver、HID、视频接收器和 `/info`，随后在同一有线/无线连接所有者上等待重连。退出期间保持本地仪表，LOCAL 保留已选手机几何；重复同尺寸请求不重连，待处理请求合并。设备/音频工具打开时可暂时拒绝切换。设置保存在 RAM，重启恢复默认。本版本真实 iPhone 重连和原生尺寸输出仍为 NOT_RUN。
+
+**设置 > English / 中文** 可即时切换启动台、设置、仪表和工具标签，默认英文，语言也保存在 RAM。界面缩短说明文字，技术名称、地址、标识和署名保留。中文使用 Noto Sans SC 的 SIL OFL 1.1 开源子集，见[字体来源与再生成](../ui/fonts/README.md)。
 
 对应命令为 `carplay_connection display fullscreen`、`carplay_connection display fusion`、`carplay_connection display local`。`carplay_connection status` 显示选定尺寸和是否等待退出，`carplay_display status` 显示实际锁存的视频/输入尺寸。旧 `carplay_display fullscreen/fusion/local` 命令保留为仅修改合成布局的诊断，不重建会话。
 
@@ -24,11 +30,11 @@ Ultra GUI 专用 defconfig 声明 768x600 Main Display，物理 framebuffer 和 
 
 | 模式 | 显示 | 输入 |
 | --- | --- | --- |
-| `FULLSCREEN` | 视频等比例适配整屏，有视频后将 UI 图层全局 alpha 设为零。 | 按已成功锁存的视频矩形映射手机坐标，排除黑边。 |
+| `FULLSCREEN` | 原生 1024x600 视频，右上角覆盖小设置按钮，UI 硬件裁剪只覆盖该角落。 | 64x64 设置角落归本地，其余按实际锁存的视频矩形映射手机坐标。 |
 | `FUSION` | 左侧 768×600 区域内等比例显示视频，右侧 256×600 显示不透明本地仪表。 | 从按下到抬起保持手机或本地 UI 的触摸归属。 |
 | `LOCAL` | 整屏本地仪表，断连或连接初始化失败时也可运行。已连接的视频可以在不透明 UI 后继续解码。 | 仅本地 UI。 |
 
-默认请求 FUSION，在视频更新和 VSYNC 成功前实际显示 LOCAL。断连或解码器重建回到 LOCAL，后续成功视频帧恢复请求的模式。仪表页提供模式和连接页面按钮，原启动页增加 Vehicle instruments 入口。FULLSCREEN 可通过 FinSH 返回：
+默认请求 FUSION，首帧之前显示启动台。视频更新和 VSYNC 成功前实际仪表呈现为 LOCAL。断连或解码器重建回到 LOCAL，后续成功视频帧恢复请求的模式。仪表页“显示”、启动台设置与全屏角落菜单共用同一显示页；“主页”临时显示启动台，“返回 CarPlay”恢复已选模式。FinSH 仍可用于诊断：
 
 ```text
 carplay_display status

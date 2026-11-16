@@ -10,7 +10,9 @@ static demo_status_t model;
 static unsigned display_requests;
 static carplay_display_mode_t last_display;
 bool carplay_connection_set_display_mode(carplay_display_mode_t mode)
-{ ++display_requests; last_display=mode; return true; }
+{ ++display_requests; last_display=mode; model.display_requested=mode; return true; }
+void carplay_fusion_ui_show_launcher(void) {}
+void carplay_fusion_ui_resume(void) {}
 void carplay_fusion_ui_init(lv_obj_t *screen,uint16_t w,uint16_t h)
 { assert(screen && w==1024 && h==600); }
 bool carplay_fusion_ui_update(const demo_status_t *status) { (void)status; return false; }
@@ -172,17 +174,23 @@ int main(int argc, char **argv)
     lv_obj_send_event(settings_button,LV_EVENT_CLICKED,NULL);
     lv_obj_send_event(find_button(settings_panel,"Display mode"),LV_EVENT_CLICKED,NULL);
     assert(!lv_obj_has_flag(display_panel,LV_OBJ_FLAG_HIDDEN));
-    lv_obj_send_event(find_button(display_panel,"Full screen 1024 x 600"),LV_EVENT_CLICKED,NULL);
-    assert(display_requests==1 && last_display==CARPLAY_FULLSCREEN);
-    assert(strstr(lv_label_get_text(display_note),"1024 x 600"));
+    lv_obj_send_event(find_button(display_panel,"Full screen"),LV_EVENT_CLICKED,NULL);
     screenshot(argv[1],"display-settings"); inside(display_note);
-    lv_obj_send_event(find_button(display_panel,"Video + meters 768 x 600"),LV_EVENT_CLICKED,NULL);
+    carplay_ui_set_chinese(true); screenshot(argv[1],"display-settings-zh");
+    carplay_ui_set_chinese(false);
+    lv_obj_send_event(find_button(display_panel,"Apply"),LV_EVENT_CLICKED,NULL);
+    assert(display_requests==1 && last_display==CARPLAY_FULLSCREEN);
+    carplay_launcher_open_display_settings();
+    lv_obj_send_event(find_button(display_panel,"Fusion"),LV_EVENT_CLICKED,NULL);
+    lv_obj_send_event(find_button(display_panel,"Apply"),LV_EVENT_CLICKED,NULL);
     assert(display_requests==2 && last_display==CARPLAY_FUSION);
+    carplay_launcher_open_display_settings();
     lv_obj_send_event(find_button(display_panel,"Local instruments"),LV_EVENT_CLICKED,NULL);
+    lv_obj_send_event(find_button(display_panel,"Apply"),LV_EVENT_CLICKED,NULL);
     assert(display_requests==3 && last_display==CARPLAY_LOCAL);
-    lv_obj_send_event(find_button(display_panel,"Back to settings"),LV_EVENT_CLICKED,NULL);
     assert(lv_obj_has_flag(display_panel,LV_OBJ_FLAG_HIDDEN));
     model.stage=DEMO_WAIT; preview_video_active=false; update_page(NULL);
+    show_modal(settings_panel);
 #endif
     inside(wireless_setting); inside(microphone_setting);
     inside(ota_check_button); inside(ota_install_button); inside(ota_state_label);
@@ -238,6 +246,9 @@ int main(int argc, char **argv)
     show_modal(network_panel);model.stage=DEMO_LIVE;preview_video_active=true;
     update_page(NULL);assert(lv_obj_has_flag(network_panel,LV_OBJ_FLAG_HIDDEN));
     assert(lv_obj_has_flag(modal_scrim,LV_OBJ_FLAG_HIDDEN));
+    model.stage=DEMO_WAIT; model.pairing.kind=0; preview_video_active=false;
+    carplay_ui_set_chinese(true); screenshot(argv[1],"home-zh");
+    show_modal(settings_panel); screenshot(argv[1],"settings-zh");
     puts("Actual LVGL 9: 1024x600 previews including OTA consent and failure states, visible bounds and network/settings/device/audio/pairing request routing passed; modeled connection values only");
     return 0;
 }

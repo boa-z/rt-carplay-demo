@@ -120,7 +120,7 @@ int main(void)
     assert(carplay_launcher_fusion_apply(&s) == RTCP_OK && !ui_layer.buf.crop_en && !ui_layer.pos.x);
     assert(ui_layer.buf.phy_addr[0] == 200 && ui_alpha.mode == AICFB_GLOBAL_ALPHA_MODE && ui_alpha.value == 255);
     (void)carplay_fusion_set_mode(CARPLAY_FULLSCREEN); s=snapshot();
-    assert(carplay_launcher_fusion_apply(&s) == RTCP_OK && ui_alpha.mode == AICFB_GLOBAL_ALPHA_MODE && ui_alpha.value == 0);
+    assert(carplay_launcher_fusion_apply(&s) == RTCP_OK && ui_alpha.mode == AICFB_PIXEL_ALPHA_MODE && ui_alpha.value == 255);
     (void)carplay_fusion_set_mode(CARPLAY_FUSION); latch(); s=snapshot();
     assert(carplay_launcher_fusion_apply(&s) == RTCP_OK && ui_alpha.mode == AICFB_PIXEL_ALPHA_MODE && ui_alpha.value == 255);
     carplay_launcher_video_event(false,NULL); s=snapshot();

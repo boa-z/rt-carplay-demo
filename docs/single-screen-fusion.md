@@ -6,7 +6,13 @@ The Ultra GUI development profile enables `RTCARPLAY_SINGLE_SCREEN_FUSION` on th
 
 ## Native full-screen and fusion settings
 
-Open **Connections > Settings > Display mode**, then select **Full screen 1024 x 600**, **Video + meters 768 x 600** or **Local instruments**. The instrument dashboard full-screen button now uses the same native-resolution request. Geometry changes are asynchronous: the connection owner closes USB/iAP2 borrowers before stopping the old Receiver, recreates the Receiver/HID/sink and `/info` at the selected size, then allows reconnection on the same wired/wireless owner. Local instruments remain selected during retirement; LOCAL retains the chosen phone geometry. Repeated same-size requests do not restart the session, and pending requests coalesce. Device/audio tools can temporarily refuse a change. Settings are kept in RAM and reset at reboot. Real-iPhone reconnection and native output remain NOT_RUN for this revision.
+Open **Settings > Display mode**, or **Display** on the instrument dashboard. Select **Full screen**, **Fusion** or **Local instruments**, then press **Apply**. The highlighted card is the pending selection; Cancel keeps the current mode. Full screen requests native 1024x600 video; Fusion requests 768x600 video beside the 256-pixel instrument strip. Both wired and wireless connections support these modes. All UI entry points open the same selection page. Opening or cancelling the page does not recreate the phone session.
+
+Full screen keeps a small settings button in the top-right 64x64 corner, using the UI hardware layer over the full 1024x600 video. That corner handles local touch; the remaining video region handles phone touch. Video is not reduced to make room for the menu. The button opens the shared display page, so switching back no longer requires unplugging the phone or a serial console. This new overlay and input behavior still require manual board acceptance.
+
+Geometry changes are asynchronous: the connection owner closes USB/iAP2 borrowers before stopping the old Receiver, recreates the Receiver/HID/sink and `/info` at the selected size, then allows reconnection on the same wired/wireless owner. Local instruments remain visible during retirement; LOCAL retains the chosen phone geometry. Repeated same-size requests do not restart the session, and pending requests coalesce. Device/audio tools can temporarily refuse a change. Settings are kept in RAM and reset at reboot. Real-iPhone reconnection and native output remain NOT_RUN for this revision.
+
+**Settings > English / 中文** changes launcher, settings, instrument and tool labels immediately. English is the boot default. Language is also kept in RAM. User-facing instructions are shortened; technical names, addresses, identifiers and attribution remain intact. The bundled CarPlay UI CJK subset derives from Noto Sans SC under SIL OFL 1.1; see [font provenance and regeneration](../ui/fonts/README.md).
 
 The equivalent owner requests are `carplay_connection display fullscreen`, `carplay_connection display fusion` and `carplay_connection display local`. `carplay_connection status` shows the selected size and whether retirement is pending. `carplay_display status` reports the actual latched video/input geometry. The older `carplay_display fullscreen/fusion/local` commands remain composition-only diagnostics; they do not rebuild the session.
 
@@ -24,11 +30,11 @@ Changing build-time dimensions requires a new image/session. Runtime Settings no
 
 | Mode | Presentation | Input |
 | --- | --- | --- |
-| `FULLSCREEN` | Aspect-fit video over the full panel; the UI layer has global alpha zero after video is available. | Phone coordinates map from the successfully latched video rectangle; letterbox bars are excluded. |
+| `FULLSCREEN` | Native 1024x600 video with a small top-right settings overlay; the hardware UI crop covers only that corner. | The 64x64 settings corner is local; elsewhere phone coordinates map from the successfully latched video rectangle. |
 | `FUSION` | Aspect-fit video in the left 768×600 viewport; opaque local instruments occupy the right 256×600 strip. | Gestures belong to either the phone or local UI from press until release. |
 | `LOCAL` | Full-panel local instruments, including while disconnected or connection setup fails. Connected video can continue decoding behind the opaque UI. | Local UI only. |
 
-The default requested mode is FUSION. Until a video update and VSYNC succeed, the effective mode is LOCAL. Disconnection or decoder reset returns presentation to LOCAL; a later frame restores the requested mode. The dashboard offers mode and connection-page buttons. The existing launcher has a Vehicle instruments button. Use FinSH to return from FULLSCREEN:
+The default requested mode is FUSION. Before video starts the launcher is visible. Until a video update and VSYNC succeed, effective instrument presentation is LOCAL. Disconnection or decoder reset returns presentation to LOCAL; a later frame restores the requested mode. Dashboard Display, launcher Settings and the full-screen corner menu share one display page. Home temporarily shows the launcher; Resume CarPlay restores the selected mode. FinSH commands remain available for diagnosis:
 
 ```text
 carplay_display status
