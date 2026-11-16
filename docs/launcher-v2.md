@@ -2,6 +2,8 @@
 
 # Launcher V2
 
+> The current product UI is the [Mobility Cockpit V4](mobility-cockpit-v4.md) native UI, which replaced this page set in place. This page documents the V2 scope and remains the reference for the connection-manager behavior it introduced; the Audio, Diagnostics, Devices and Vehicle network rows below describe the retired pages and no longer exist in the UI.
+
 ## Application scope
 
 Launcher V2 follows the [V2.1 software verification baseline](refactoring-v21-verification.md). It implements a 1024×600 LVGL 9 dashboard over the application [automatic connection manager](connection-manager.md). No new SDK, GUI dependency in the SDK, protocol framework, driver copy or development branch is introduced. USB/wireless policy and device ownership remain in the host application. Audio negotiation and processing stay frozen.
@@ -13,10 +15,10 @@ Launcher V2 follows the [V2.1 software verification baseline](refactoring-v21-ve
 | Home | Automatic USB/wireless discovery, connection steps, actual discovery status, PIN/SSID, uptime and retry |
 | Vehicle network | Home Ethernet shortcut, adapter/cable status, IPv4/mask/gateway/DNS, asynchronous Check now, HTTP 204 evidence age and separate Internet-sharing status |
 | Bluetooth pairing | Current numeric comparison, consent or displayed passkey; matching-request confirmation and cancellation |
-| Devices | Saved wired phone identifiers and CarPlay trust group, refresh, confirmed deletion and explicit all-Bluetooth-phones reset |
-| Settings | Idle-only wireless discovery on/off with USB always enabled, actual microphone mute when built, installed firmware version, commit hash and A/B slot, preview commit check, target-bound confirmation, verified download, inactive-slot writing and failure status |
-| Audio | Existing tone/silence/AAC, rate/channel, gain/mute, start/stop, microphone level/loopback and input meters; controls run on the owner |
-| Diagnostics | Independent transport/authentication/session/media/input states, network, radio/MFi, trust/storage errors, decoded counts, display handoff, recovery and retry wait |
+| Devices | *(retired; see V4)* Saved wired phone identifiers and CarPlay trust group, refresh, confirmed deletion and explicit all-Bluetooth-phones reset |
+| Settings | *(retired; see V4)* Idle-only wireless discovery on/off with USB always enabled, actual microphone mute when built, installed firmware version, commit hash and A/B slot, preview commit check, target-bound confirmation, verified download, inactive-slot writing and failure status |
+| Audio | *(retired)* Existing tone/silence/AAC, rate/channel, gain/mute, start/stop, microphone level/loopback and input meters; controls run on the owner |
+| Diagnostics | *(retired)* Independent transport/authentication/session/media/input states, network, radio/MFi, trust/storage errors, decoded counts, display handoff, recovery and retry wait |
 
 The home page removes manual USB/wireless mode selection. Dark panels, consistent spacing, 32-pixel heading typography, high-contrast text, restrained accent colors and separate diagnostic pages replace the previous dense debug-first page. Panels use a touch-blocking dimmed backdrop. Device names are derived from validated stored identifiers; no user-friendly iPhone name is invented. CarPlay permissions and Bluetooth reset are group operations, explicitly confirmed. Identity material is protected. Settings are immediate, RAM-only and reset at reboot; unsupported microphone controls are disabled.
 

@@ -112,7 +112,9 @@ Host 测试在 ASan/UBSan 下运行实际源码，调度和设备边界使用模
 | [Ethernet 互联网共享](docs/zh-CN/internet-sharing.md) | 可选 IPv4 网关、协议证据、恢复和必需的 iPhone 验收 |
 | [V2 验证](docs/zh-CN/v2-verification.md) | 已验证版本、CI、IMG 校验值和剩余实机验收 |
 | [连接管理器](docs/zh-CN/connection-manager.md) | 仲裁、重试、设置、所有权和 Headless 行为 |
-| [Launcher V2](docs/zh-CN/launcher-v2.md) | 页面、真实 LVGL 预览和硬件清单 |
+| [Launcher V2](docs/zh-CN/launcher-v2.md) | 历史 V2 页面集与连接管理器行为；产品界面现为 V4 |
+| [Mobility Cockpit V4](docs/zh-CN/mobility-cockpit-v4.md) | 四个原生页面、主题/语言、真实音量/亮度、投影模式和 OTA 绑定 |
+| [V4 主机证据](docs/evidence/d213-mobility-cockpit-v4-20261116.zh-CN.md) | 当前源码/镜像状态、主机结果和剩余板端检查 |
 | [V2.1 验证](docs/zh-CN/refactoring-v21-verification.md) | 架构、迁移、生命周期、双语审计和 SDK 仓库清理 |
 | [会话快照](docs/zh-CN/session-snapshots.md) | 并发、保留所有权、回调有效期和实际源码回归 |
 | [CI](docs/zh-CN/ci.md) | 上游、工具链、构建打包和证据 |

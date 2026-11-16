@@ -112,7 +112,9 @@ The host suite runs actual sources with ASan/UBSan and modeled scheduling/device
 | [Ethernet Internet sharing](docs/internet-sharing.md) | Optional IPv4 gateway, protocol evidence, recovery and required iPhone acceptance |
 | [V2 verification](docs/v2-verification.md) | Verified revisions, CI, IMG checksums and remaining board acceptance |
 | [Connection manager](docs/connection-manager.md) | Arbitration, retry, settings, ownership and Headless behavior |
-| [Launcher V2](docs/launcher-v2.md) | Pages, real LVGL preview and hardware checklist |
+| [Launcher V2](docs/launcher-v2.md) | Historical V2 page set and connection-manager behavior; the product UI is now V4 |
+| [Mobility Cockpit V4](docs/mobility-cockpit-v4.md) | Four native pages, theme/language, real volume/brightness, projection modes and OTA binding |
+| [V4 Host evidence](docs/evidence/d213-mobility-cockpit-v4-20261116.md) | Current source/image state, host results and remaining board checks |
 | [V2.1 verification](docs/refactoring-v21-verification.md) | Architecture, migration, lifecycle, bilingual audit and SDK repository cleanup |
 | [Session snapshots](docs/session-snapshots.md) | Concurrency, retained ownership, callback lifetime and actual-source regressions |
 | [CI](docs/ci.md) | Upstream, toolchain, build/package and evidence |
