@@ -23,7 +23,7 @@ LV_FONT_DECLARE(carplay_cjk_24);
 
 static lv_obj_t *dashboard, *launcher_screen, *background;
 static lv_obj_t *title, *source_label, *speed, *gear, *battery, *connection, *metrics;
-static lv_obj_t *view_button, *connections_button, *menu_button;
+static lv_obj_t *view_button, *connections_button;
 static bool showing_launcher;
 static int arranged_mode = -1;
 static uint32_t stats_ms;
@@ -109,10 +109,6 @@ static void arrange(const carplay_fusion_snapshot_t *s)
             lv_obj_remove_flag(instruments[i], LV_OBJ_FLAG_HIDDEN);
     }
     if (fullscreen)
-        lv_obj_remove_flag(menu_button, LV_OBJ_FLAG_HIDDEN);
-    else
-        lv_obj_add_flag(menu_button, LV_OBJ_FLAG_HIDDEN);
-    if (fullscreen)
         return;
     int x = fusion ? s->width - s->local_width + 16 : 40;
     int w = fusion ? s->local_width - 32 : s->width - 80;
@@ -167,9 +163,6 @@ void carplay_fusion_ui_init(lv_obj_t *launcher, uint16_t width, uint16_t height)
     metrics = make_label(dashboard, 0x8FA8B9, false);
     view_button = make_button(dashboard, "Display", open_display);
     connections_button = make_button(dashboard, "Home", show_connections);
-    menu_button = make_button(dashboard, LV_SYMBOL_SETTINGS, open_display);
-    lv_obj_set_pos(menu_button, width - 56, 8);
-    lv_obj_set_size(menu_button, 48, 48);
     showing_launcher = true;
 }
 

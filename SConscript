@@ -30,6 +30,7 @@ if GetDepend('RTCARPLAY_VEHICLE_PROTOCOL_DEMO'):
     src += Glob('app/vehicle_protocol_demo.c')
 if GetDepend('RTCARPLAY_AUTO_CONNECT'):
     src += Glob('app/connection_manager.c')
+    src += Glob('app/launcher_preferences.c')
 if GetDepend('RTCARPLAY_INTERNET_SHARE'):
     src += Glob('platform/internet_share_lubanlite.c')
 if GetDepend('RTCARPLAY_OTA'):

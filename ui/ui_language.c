@@ -13,6 +13,8 @@ static const struct
     const char *en, *zh;
 } words[] = {
     { "Settings", "设置" },
+    { "Settings saved.", "设置已保存" },
+    { "Settings not saved.", "设置保存失败" },
     { "SETTINGS", "设置" },
     { "Display", "显示" },
     { "Display mode", "显示模式" },

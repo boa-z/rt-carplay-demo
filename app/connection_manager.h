@@ -64,13 +64,14 @@ bool carplay_connection_status(demo_status_t *out);
 /* Legacy manual diagnostic override; Launcher V2 uses automatic discovery. */
 void carplay_connection_select_mode(bool wireless);
 /* Idle-only setting. USB remains armed; false pauses wireless discovery.
- * Settings are in RAM and reset to automatic/both at reboot. */
+ * Accepted changes persist in the application preferences when DFS is enabled. */
 bool carplay_connection_set_wireless_enabled(bool enabled);
 void carplay_connection_pairing_reply(uint32_t request, bool accept);
 void carplay_connection_retry(void);
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
 /* Asynchronous: geometry changes close/recreate the session on its owner.
- * LOCAL keeps the selected phone geometry; settings reset at reboot. */
+ * LOCAL keeps the selected phone geometry until reboot. The selected mode is
+ * persisted; LOCAL boots with the default fusion phone geometry. */
 bool carplay_connection_set_display_mode(carplay_display_mode_t mode);
 #endif
 bool carplay_connection_files_open(void);

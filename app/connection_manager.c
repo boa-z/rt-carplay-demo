@@ -10,6 +10,10 @@
 #include "video_sink_lubanlite.h"
 #include "iap2_link_lubanlite.h"
 #include "rtcp/rtcp.h"
+#include "launcher_preferences.h"
+#if defined(RTCARPLAY_MICROPHONE)
+#include "audio_input_lubanlite.h"
+#endif
 
 static rt_mutex_t status_lock;
 static bool worker_started;
@@ -797,6 +801,18 @@ int carplay_connection_manager_start(void)
         status_lock = rt_mutex_create("cpconn", RT_IPC_FLAG_PRIO);
         if (status_lock == NULL)
             return RTCP_ENOMEM;
+        (void)carplay_preferences_init();
+        wireless_enabled = DEMO_HAS_WIRELESS && carplay_preferences_get(CARPLAY_PREF_WIRELESS, DEMO_HAS_WIRELESS);
+        if (automatic)
+            requested_wireless = wireless_enabled;
+#if defined(RTCARPLAY_MICROPHONE)
+        carplay_audio_input_mute(carplay_preferences_get(CARPLAY_PREF_MIC_MUTED, 0) != 0);
+#endif
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+        requested_display = (carplay_display_mode_t)carplay_preferences_get(CARPLAY_PREF_DISPLAY, CARPLAY_FUSION);
+        requested_width = applied_width = requested_display == CARPLAY_FULLSCREEN ? 1024 : 768;
+        (void)carplay_fusion_set_mode(requested_display);
+#endif
     }
     status.automatic = automatic;
     status.wireless_enabled = wireless_enabled;
@@ -865,6 +881,8 @@ bool carplay_connection_set_display_mode(carplay_display_mode_t mode)
         (void)carplay_fusion_set_mode(display_pending ? CARPLAY_LOCAL : mode);
     }
     (void)rt_mutex_release(status_lock);
+    if (allowed)
+        (void)carplay_preferences_set(CARPLAY_PREF_DISPLAY, (unsigned)mode);
     return allowed;
 }
 #endif
@@ -899,6 +917,8 @@ bool carplay_connection_set_wireless_enabled(bool enabled)
         retry_requested = true;
     }
     (void)rt_mutex_release(status_lock);
+    if (idle)
+        (void)carplay_preferences_set(CARPLAY_PREF_WIRELESS, enabled ? 1U : 0U);
     return idle;
 }
 

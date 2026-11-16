@@ -85,18 +85,11 @@ int carplay_launcher_fusion_apply(const carplay_fusion_snapshot_t *s)
     }
     else if (s->effective == CARPLAY_FULLSCREEN)
     {
-        /* Full 1024x600 video stays underneath a small, always reachable menu.
-         * Crop the UI hardware layer to this corner; no video copy or resize. */
-        next.pos.x = s->width - CARPLAY_FULLSCREEN_MENU_SIZE;
-        next.pos.y = 0;
-        next.buf.crop_en = 1;
-        next.buf.crop.x = next.pos.x;
-        next.buf.crop.y = 0;
-        next.buf.crop.width = CARPLAY_FULLSCREEN_MENU_SIZE;
-        next.buf.crop.height = CARPLAY_FULLSCREEN_MENU_SIZE;
+        /* Native full screen belongs entirely to the phone, including touch.
+         * Restore UI geometry but make its hardware layer transparent. */
         next_alpha.enable = 1;
-        next_alpha.mode = AICFB_PIXEL_ALPHA_MODE;
-        next_alpha.value = 255;
+        next_alpha.mode = AICFB_GLOBAL_ALPHA_MODE;
+        next_alpha.value = 0;
     }
     if (rt_device_control(fusion_fb, AICFB_UPDATE_LAYER_CONFIG, &next) < 0)
         return RTCP_EIO;

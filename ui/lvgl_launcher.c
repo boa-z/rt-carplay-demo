@@ -14,6 +14,7 @@
 #include "rtcp/rtcp.h"
 #include "rtcp/input.h"
 #include "ui_language.h"
+#include "launcher_preferences.h"
 #define lv_label_set_text     carplay_ui_set_text
 #define lv_label_set_text_fmt carplay_ui_set_text_fmt
 #define TR                    carplay_ui_translate
@@ -370,6 +371,11 @@ static void apply_display(lv_event_t *event)
         lv_label_set_text(display_note, "Close device/audio tools first.");
         return;
     }
+    if (carplay_preferences_error())
+    {
+        lv_label_set_text(display_note, "Settings not saved.");
+        return;
+    }
     resume_display(event);
 }
 #endif
@@ -377,6 +383,8 @@ static void select_language(lv_event_t *event)
 {
     bool chinese = (uintptr_t)lv_event_get_user_data(event) != 0;
     carplay_ui_set_chinese(chinese);
+    int result = carplay_preferences_set(CARPLAY_PREF_LANGUAGE, chinese ? 1U : 0U);
+    lv_label_set_text(settings_note, result ? "Settings not saved." : "Settings saved.");
     for (unsigned i = 0; i < 2; ++i)
         lv_obj_set_style_bg_color(language_buttons[i], lv_color_hex(i == (unsigned)chinese ? 0x236859 : 0x20344B), 0);
     update_page(NULL);
@@ -388,7 +396,7 @@ static void toggle_wireless(lv_event_t *event)
     demo_status_t state;
     if (carplay_connection_status(&state) &&
         carplay_connection_set_wireless_enabled(!state.wireless_enabled))
-        lv_label_set_text(settings_note, "Connection setting applied. Settings reset at reboot.");
+        lv_label_set_text(settings_note, carplay_preferences_error() ? "Settings not saved." : "Settings saved.");
     else
         lv_label_set_text(settings_note, "Wait until the connection is idle, then try again.");
 }
@@ -397,7 +405,8 @@ static void toggle_microphone(lv_event_t *event)
     (void)event;
 #if defined(RTCARPLAY_MICROPHONE)
     carplay_audio_input_mute(!carplay_audio_input_is_muted());
-    lv_label_set_text(settings_note, "Microphone mute setting applied.");
+    int result = carplay_preferences_set(CARPLAY_PREF_MIC_MUTED, carplay_audio_input_is_muted() ? 1U : 0U);
+    lv_label_set_text(settings_note, result ? "Settings not saved." : "Settings saved.");
 #endif
 }
 /* Names are presentation only; deletion still uses the validated exact key. */
@@ -629,6 +638,38 @@ static void update_page(lv_timer_t *timer)
     }
     demo_status_t s = { 0 };
     bool have_status = carplay_connection_status(&s);
+    /* Connection success is an edge, not a permanent page lock: a later
+     * deliberate visit to the launcher can still edit settings. */
+    static bool was_live;
+    bool live = have_status && s.stage == DEMO_LIVE;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    live = live && !s.display_reconfiguring;
+#else
+    live = live && carplay_launcher_video_is_active();
+#endif
+    if (live && !was_live)
+    {
+        lv_obj_t *pages[] = {
+            settings_panel,
+            diagnostics_panel,
+            network_panel,
+            bt_panel,
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+            display_panel,
+#endif
+#if defined(RTCARPLAY_OTA)
+            ota_confirm_panel,
+#endif
+        };
+        for (unsigned i = 0; i < sizeof(pages) / sizeof(pages[0]); ++i)
+            lv_obj_add_flag(pages[i], LV_OBJ_FLAG_HIDDEN);
+        update_scrim();
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+        carplay_fusion_ui_resume();
+#endif
+    }
+    if (have_status)
+        was_live = live;
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
     dispatch_fusion_touch(carplay_fusion_cancel_touch());
     if (carplay_fusion_ui_update(&s))
@@ -636,24 +677,8 @@ static void update_page(lv_timer_t *timer)
 #endif
     if (!have_status)
         return;
-    /* Close read-only pages once when the first visible frame takes over. */
-    static bool was_live;
-    if (s.stage == DEMO_LIVE && carplay_launcher_video_is_active())
-    {
-        if (!was_live)
-        {
-            lv_obj_add_flag(settings_panel, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_add_flag(diagnostics_panel, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_add_flag(network_panel, LV_OBJ_FLAG_HIDDEN);
-#if defined(RTCARPLAY_OTA)
-            lv_obj_add_flag(ota_confirm_panel, LV_OBJ_FLAG_HIDDEN);
-#endif
-            update_scrim();
-        }
-        was_live = true;
+    if (live && carplay_launcher_video_is_active())
         return; /* No further invalidation/animation on the hidden launcher. */
-    }
-    was_live = false;
     network_update();
     update_files();
 #if defined(RTCARPLAY_OTA)
@@ -836,6 +861,7 @@ void carplay_demo_launcher_init(void)
         rt_kprintf("[carplay-demo] no status mutex\n");
         return;
     }
+    (void)carplay_preferences_init();
     if (carplay_video_sink_set_display_observer(carplay_launcher_video_event,
                                                 NULL) != RTCP_OK)
         rt_kprintf("[carplay-demo] video observer registration failed\n");
@@ -908,7 +934,7 @@ void carplay_demo_launcher_init(void)
     lv_obj_add_event_cb(language_buttons[1], select_language, LV_EVENT_CLICKED, (void *)1);
     lv_obj_set_style_bg_color(language_buttons[0], lv_color_hex(0x236859), 0);
     settings_note = label(settings_panel,
-                          "Settings reset at reboot.",
+                          "",
                           10, 52, width - 140, 0x8FA5BF, false);
     wireless_setting = button(settings_panel, "Wireless discovery: ON", 10, 178, 330, toggle_wireless);
     microphone_setting = button(settings_panel, "Microphone not enabled", 360, 178, 330, toggle_microphone);
@@ -1076,6 +1102,7 @@ void carplay_demo_launcher_init(void)
     lv_obj_add_flag(uptime_label, LV_OBJ_FLAG_HIDDEN);
     carplay_fusion_ui_init(screen, (uint16_t)width, (uint16_t)height);
 #endif
+    carplay_ui_set_chinese(carplay_preferences_get(CARPLAY_PREF_LANGUAGE, 0) != 0);
     lv_timer_create(update_page, 250, NULL);
     int touch = carplay_touch_panel_start((uint16_t)width, (uint16_t)height,
                                           launcher_panel_touch, NULL);

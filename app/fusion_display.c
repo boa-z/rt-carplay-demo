@@ -223,15 +223,13 @@ carplay_fusion_touch_t carplay_fusion_touch(uint8_t phase, uint16_t id, uint16_t
         goto done;
     }
     uint16_t px = x, py = y;
-    bool menu = effective() == CARPLAY_FULLSCREEN && x >= state.width - CARPLAY_FULLSCREEN_MENU_SIZE &&
-                y < CARPLAY_FULLSCREEN_MENU_SIZE;
     bool phone = state.video_active && state.video_generation == state.generation &&
-                 !menu && effective() != CARPLAY_LOCAL && rtcp_display_map_point(&state.video_rect, state.logical_width, state.logical_height, x, y, &px, &py);
+                 effective() != CARPLAY_LOCAL && rtcp_display_map_point(&state.video_rect, state.logical_width, state.logical_height, x, y, &px, &py);
     if (!touching && phase == RTCP_TOUCH_DOWN)
     {
-        carplay_touch_owner_t owner = phone ? CARPLAY_TOUCH_PHONE : menu                                                                                                  ? CARPLAY_TOUCH_LOCAL
-                                                                : effective() == CARPLAY_LOCAL || (effective() == CARPLAY_FUSION && x >= state.width - state.local_width) ? CARPLAY_TOUCH_LOCAL
-                                                                                                                                                                          : CARPLAY_TOUCH_NONE;
+        carplay_touch_owner_t owner = phone                                                                                                     ? CARPLAY_TOUCH_PHONE
+                                      : effective() == CARPLAY_LOCAL || (effective() == CARPLAY_FUSION && x >= state.width - state.local_width) ? CARPLAY_TOUCH_LOCAL
+                                                                                                                                                : CARPLAY_TOUCH_NONE;
         if (owner == CARPLAY_TOUCH_NONE)
             goto done;
         held = (carplay_fusion_touch_t){ .owner = owner, .id = id };

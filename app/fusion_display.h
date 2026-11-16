@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #ifndef CARPLAY_FUSION_DISPLAY_H
 #define CARPLAY_FUSION_DISPLAY_H
-#define CARPLAY_FULLSCREEN_MENU_SIZE 64U
 #include <stdbool.h>
 #include <stdint.h>
 #include "rtcp/display.h"
