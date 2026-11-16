@@ -6,39 +6,47 @@ set(LV_CONF_BUILD_DISABLE_EXAMPLES ON CACHE BOOL "" FORCE)
 set(LV_CONF_BUILD_DISABLE_DEMOS ON CACHE BOOL "" FORCE)
 set(LV_CONF_BUILD_DISABLE_THORVG_INTERNAL ON CACHE BOOL "" FORCE)
 add_subdirectory("${SDK_ROOT}/packages/artinchip/lvgl-ui/lvgl_v9/lvgl" lvgl)
-set(UI_LANGUAGE ../../ui/ui_language.c ../../ui/fonts/carplay_cjk_16.c ../../ui/fonts/carplay_cjk_24.c)
+
+set(UI_SOURCES
+    ../../ui/ui_language.c
+    ../../ui/carplay_ui_theme.c
+    ../../ui/fonts/carplay_display_220.c
+    ../../ui/fonts/carplay_display_110.c
+    ../../ui/fonts/carplay_display_115.c
+    ../../ui/fonts/carplay_display_58.c
+    ../../ui/fonts/carplay_ui_34.c
+    ../../ui/fonts/carplay_ui_21.c
+    ../../ui/fonts/carplay_ui_18.c
+    ../../ui/fonts/carplay_ui_17.c
+    ../../ui/fonts/carplay_ui_15.c
+    ../../ui/fonts/carplay_ui_14.c
+    ../../ui/fonts/carplay_cjk_16.c
+    ../../ui/fonts/carplay_cjk_18.c
+    ../../ui/fonts/carplay_cjk_24.c
+    ../../ui/fonts/carplay_cjk_30.c)
+
+# Actual V4 pages with modeled connection, audio, backlight and OTA owners.
 add_executable(launcher_preview main.c)
-target_sources(launcher_preview PRIVATE ${UI_LANGUAGE})
-target_include_directories(launcher_preview PRIVATE ../../ui)
+target_sources(launcher_preview PRIVATE ${UI_SOURCES})
 target_include_directories(launcher_preview PRIVATE
-    ../support/lubanlite_demo ../../app ../../platform
+    ../../ui ../support/lubanlite_demo ../../app ../../platform
     "${SDK_ROOT}/packages/third-party/rt-carplay/include"
     "${SDK_ROOT}/packages/third-party/rt-carplay/core/airplay/include")
-target_compile_definitions(launcher_preview PRIVATE RTCARPLAY_INTERNET_SHARE RTCARPLAY_AUDIO RTCARPLAY_MICROPHONE
-    RTCARPLAY_IAP2 LPKG_RT_CARPLAY_LUBANLITE_WIFI RTCP_AUDIO_CODECS RTCARPLAY_OTA)
+target_compile_definitions(launcher_preview PRIVATE
+    RTCARPLAY_INTERNET_SHARE RTCARPLAY_MICROPHONE RTCARPLAY_IAP2
+    LPKG_RT_CARPLAY_LUBANLITE_WIFI RTCARPLAY_OTA
+    CARPLAY_PREFERENCES_EXTERNAL_PROVIDER)
 target_compile_options(launcher_preview PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(launcher_preview PRIVATE lvgl m)
 
-# Render the actual fusion dashboard without a panel, decoder or phone.
+# The FUSION instrument strip rendered with the real fusion owner.
 add_executable(fusion_preview fusion_main.c ../../app/fusion_display.c
     "${SDK_ROOT}/packages/third-party/rt-carplay/core/media/display.c")
-target_sources(fusion_preview PRIVATE ${UI_LANGUAGE})
-target_include_directories(fusion_preview PRIVATE ../../ui)
-target_include_directories(fusion_preview PRIVATE ../support/lubanlite_video ../../app ../../platform
+target_sources(fusion_preview PRIVATE ${UI_SOURCES})
+target_include_directories(fusion_preview PRIVATE ../../ui
+    ../support/lubanlite_video ../../app ../../platform
     "${SDK_ROOT}/packages/third-party/rt-carplay/include")
-target_compile_definitions(fusion_preview PRIVATE RTCARPLAY_SINGLE_SCREEN_FUSION)
+target_compile_definitions(fusion_preview PRIVATE RTCARPLAY_SINGLE_SCREEN_FUSION
+    CARPLAY_PREFERENCES_EXTERNAL_PROVIDER)
 target_compile_options(fusion_preview PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(fusion_preview PRIVATE lvgl m)
-
-# Actual Settings widgets with modeled owner requests; Classic preview retained.
-add_executable(launcher_fusion_settings_preview main.c)
-target_sources(launcher_fusion_settings_preview PRIVATE ${UI_LANGUAGE})
-target_include_directories(launcher_fusion_settings_preview PRIVATE ../../ui)
-target_include_directories(launcher_fusion_settings_preview PRIVATE
-    ../support/lubanlite_demo ../../app ../../platform
-    "${SDK_ROOT}/packages/third-party/rt-carplay/include"
-    "${SDK_ROOT}/packages/third-party/rt-carplay/core/airplay/include")
-target_compile_definitions(launcher_fusion_settings_preview PRIVATE RTCARPLAY_INTERNET_SHARE RTCARPLAY_AUDIO RTCARPLAY_MICROPHONE
-    RTCARPLAY_IAP2 LPKG_RT_CARPLAY_LUBANLITE_WIFI RTCP_AUDIO_CODECS RTCARPLAY_OTA RTCARPLAY_SINGLE_SCREEN_FUSION)
-target_compile_options(launcher_fusion_settings_preview PRIVATE -Wall -Wextra -Werror)
-target_link_libraries(launcher_fusion_settings_preview PRIVATE lvgl m)

@@ -1,100 +1,32 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-/* Actual LVGL 9 rendering and UI events. Connection/media values are modeled
- * only for layout and request-routing tests, never hardware acceptance. */
+/* Actual LVGL 9 rendering of the V4 pages. Connection, audio, backlight and
+ * OTA values are modeled for layout and routing tests; they are never hardware
+ * acceptance evidence. */
 #include <assert.h>
 #include <stdlib.h>
+#include <string.h>
 #include "../../ui/lvgl_launcher.c"
 
-static demo_status_t model;
-#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
-static unsigned display_requests;
-static carplay_display_mode_t last_display;
-bool carplay_connection_set_display_mode(carplay_display_mode_t mode)
-{
-    ++display_requests;
-    last_display = mode;
-    model.display_requested = mode;
-    return true;
-}
-void carplay_fusion_ui_show_launcher(void)
-{
-}
-void carplay_fusion_ui_resume(void)
-{
-}
-void carplay_fusion_ui_init(lv_obj_t *screen, uint16_t w, uint16_t h)
-{
-    assert(screen && w == 1024 && h == 600);
-}
-bool carplay_fusion_ui_update(const demo_status_t *status)
-{
-    (void)status;
-    return false;
-}
-carplay_fusion_touch_t carplay_fusion_cancel_touch(void)
-{
-    return (carplay_fusion_touch_t){ 0 };
-}
-carplay_fusion_touch_t carplay_fusion_touch(uint8_t phase, uint16_t id, uint16_t x, uint16_t y)
-{
-    (void)phase;
-    (void)id;
-    (void)x;
-    (void)y;
-    return (carplay_fusion_touch_t){ 0 };
-}
-static lv_obj_t *find_button(lv_obj_t *parent, const char *caption)
-{
-    for (uint32_t i = 0; i < lv_obj_get_child_count(parent); ++i)
-    {
-        lv_obj_t *obj = lv_obj_get_child(parent, (int32_t)i);
-        if (lv_obj_check_type(obj, &lv_button_class) && lv_obj_get_child_count(obj) &&
-            !strcmp(lv_label_get_text(lv_obj_get_child(obj, 0)), caption))
-            return obj;
-    }
-    assert(!"button missing");
-    return NULL;
-}
-#endif
 static uint8_t pixels[1024 * 600 * 4];
-static bool files_opened, audio_opened, microphone_muted;
-static unsigned file_version, replies, audio_selection;
+static demo_status_t model;
+static unsigned preview_ms = 183000;
+
+/* ---- modeled hosts ---- */
+static bool volume_supported = true;
+static unsigned model_volume = 60;
+static unsigned volume_writes, volume_requests;
+static bool backlight_supported = true;
+static unsigned model_backlight = 72;
+static unsigned backlight_writes;
+static bool files_opened, microphone_muted;
+static unsigned file_version, replies;
 static carplay_internet_status_t network_model;
-static unsigned network_requests;
-static bool preview_video_active;
 static carplay_ota_status_t ota_model;
 static unsigned ota_checks, ota_installs;
-void carplay_ota_status(carplay_ota_status_t *out)
-{
-    *out = ota_model;
-}
-int carplay_ota_check(void)
-{
-    ++ota_checks;
-    ota_model.state = CARPLAY_OTA_CHECKING;
-    ota_model.busy = true;
-    return 0;
-}
-int carplay_ota_install(const char *commit)
-{
-    if (strcmp(commit, ota_model.remote_commit))
-        return -1;
-    ++ota_installs;
-    ota_model.state = CARPLAY_OTA_DOWNLOADING;
-    ota_model.busy = true;
-    return 0;
-}
-void carplay_internet_status(carplay_internet_status_t *out)
-{
-    *out = network_model;
-}
-bool carplay_internet_check(void)
-{
-    ++network_requests;
-    network_model.checking = true;
-    return true;
-}
-static unsigned preview_ms = 183000, manager_calls;
+static unsigned manager_calls;
+static unsigned stored_preferences[CARPLAY_PREF_COUNT];
+static bool preferences_error;
+
 uint32_t rt_tick_get_millisecond(void)
 {
     return preview_ms;
@@ -121,6 +53,101 @@ int rt_kprintf(const char *f, ...)
     (void)f;
     return 0;
 }
+
+int carplay_preferences_init(void)
+{
+    return 0;
+}
+unsigned carplay_preferences_get(carplay_preference_t key, unsigned fallback)
+{
+    return stored_preferences[key] ? stored_preferences[key] : fallback;
+}
+int carplay_preferences_set(carplay_preference_t key, unsigned value)
+{
+    stored_preferences[key] = value;
+    return 0;
+}
+int carplay_preferences_error(void)
+{
+    return preferences_error;
+}
+
+bool carplay_volume_available(void)
+{
+    return volume_supported;
+}
+bool carplay_volume_get(unsigned *percent)
+{
+    if (!volume_supported || !percent)
+        return false;
+    ++volume_requests;
+    *percent = model_volume;
+    return true;
+}
+bool carplay_volume_set(unsigned percent)
+{
+    if (!volume_supported || percent > 100)
+        return false;
+    ++volume_writes;
+    model_volume = percent;
+    return true;
+}
+
+bool carplay_backlight_available(void)
+{
+    return backlight_supported;
+}
+bool carplay_backlight_get(unsigned *percent)
+{
+    if (!backlight_supported || !percent)
+        return false;
+    *percent = model_backlight;
+    return true;
+}
+bool carplay_backlight_set(unsigned percent)
+{
+    if (!backlight_supported || percent < CARPLAY_BRIGHTNESS_MIN || percent > 100)
+        return false;
+    ++backlight_writes;
+    model_backlight = percent;
+    return true;
+}
+void carplay_backlight_restore(unsigned percent)
+{
+    if (backlight_supported)
+        model_backlight = percent;
+}
+
+void carplay_ota_status(carplay_ota_status_t *out)
+{
+    *out = ota_model;
+}
+int carplay_ota_check(void)
+{
+    ++ota_checks;
+    ota_model.state = CARPLAY_OTA_CHECKING;
+    ota_model.busy = true;
+    return 0;
+}
+int carplay_ota_install(const char *commit)
+{
+    if (strcmp(commit, ota_model.remote_commit))
+        return -1;
+    ++ota_installs;
+    ota_model.state = CARPLAY_OTA_DOWNLOADING;
+    ota_model.busy = true;
+    return 0;
+}
+
+void carplay_internet_status(carplay_internet_status_t *out)
+{
+    *out = network_model;
+}
+bool carplay_internet_check(void)
+{
+    return true;
+}
+
 bool carplay_connection_status(demo_status_t *s)
 {
     *s = model;
@@ -138,7 +165,7 @@ int carplay_touch_panel_start(uint16_t w, uint16_t h, carplay_touch_panel_cb_t c
 }
 bool carplay_launcher_video_is_active(void)
 {
-    return preview_video_active;
+    return false;
 }
 void carplay_launcher_video_event(bool a, void *p)
 {
@@ -186,7 +213,8 @@ void carplay_connection_retry(void)
 }
 void carplay_connection_pairing_reply(uint32_t r, bool a)
 {
-    assert(r == 42 && a);
+    (void)r;
+    (void)a;
     ++replies;
 }
 bool carplay_connection_files_open(void)
@@ -205,43 +233,24 @@ void carplay_connection_files_refresh(void)
 }
 void carplay_connection_files_forget(const char *n)
 {
-    assert(!strcmp(n, "rt-carplay-pairings.bin"));
+    (void)n;
     ++file_version;
 }
 bool carplay_connection_files_snapshot(unsigned *rev,
-                                       carplay_pair_file_t f[CARPLAY_PAIR_FILES_MAX], unsigned *count, bool *more, int *result)
+                                       carplay_pair_file_t f[CARPLAY_PAIR_FILES_MAX], unsigned *count,
+                                       bool *more, int *result)
 {
+    (void)f;
     if (!files_opened || *rev == file_version)
         return false;
     *rev = file_version;
-    *count = 2;
+    *count = 0;
     *more = false;
     *result = RTCP_OK;
-    snprintf(f[0].name, sizeof(f[0].name), "rt-carplay-pairings.bin");
-    snprintf(f[1].name, sizeof(f[1].name), "rt-carplay-usb-00008101001234567890.bin");
-    f[0].bytes = 200;
-    f[1].bytes = 2000;
     return true;
 }
-bool carplay_connection_audio_open(void)
-{
-    audio_opened = true;
-    return true;
-}
-void carplay_connection_audio_select(unsigned id)
-{
-    audio_selection = id;
-}
-void carplay_connection_audio_snapshot(bool *open, bool *ready, bool *exiting,
-                                       audio_test_config_t *config, int *result, audio_test_status_t *status)
-{
-    *open = audio_opened;
-    *ready = true;
-    *exiting = false;
-    *config = (audio_test_config_t){ AUDIO_TEST_TONE, 48000, 0 };
-    *result = RTCP_OK;
-    *status = (audio_test_status_t){ .volume = 20 };
-}
+
+/* ---- helpers ---- */
 static void flush(lv_display_t *d, const lv_area_t *area, uint8_t *data)
 {
     (void)area;
@@ -252,7 +261,6 @@ static void screenshot(const char *directory, const char *name)
 {
     char path[512];
     snprintf(path, sizeof(path), "%s/%s.ppm", directory, name);
-    update_page(NULL);
     lv_refr_now(NULL);
     FILE *f = fopen(path, "wb");
     assert(f);
@@ -270,6 +278,58 @@ static void inside(lv_obj_t *object)
     lv_obj_get_coords(object, &a);
     assert(a.x1 >= 0 && a.y1 >= 0 && a.x2 < 1024 && a.y2 < 600);
 }
+
+static lv_obj_t *find_caption(lv_obj_t *parent, const char *caption)
+{
+    for (uint32_t i = 0; i < lv_obj_get_child_count(parent); ++i)
+    {
+        lv_obj_t *obj = lv_obj_get_child(parent, (int32_t)i);
+        if (lv_obj_check_type(obj, &lv_label_class) &&
+            !strcmp(lv_label_get_text(obj), caption))
+            return obj;
+        lv_obj_t *nested = find_caption(obj, caption);
+        if (nested)
+            return nested;
+    }
+    return NULL;
+}
+
+/* Walks up from a label to the clickable card that owns it. */
+static lv_obj_t *owning_card(lv_obj_t *label)
+{
+    lv_obj_t *obj = lv_obj_get_parent(label);
+    while (obj)
+    {
+        if (lv_obj_has_flag(obj, LV_OBJ_FLAG_CLICKABLE))
+            return obj;
+        obj = lv_obj_get_parent(obj);
+    }
+    assert(!"no clickable card");
+    return NULL;
+}
+
+static void click_caption(lv_obj_t *page, const char *caption)
+{
+    lv_obj_t *label = find_caption(page, caption);
+    assert(label);
+    lv_obj_send_event(owning_card(label), LV_EVENT_CLICKED, NULL);
+}
+
+/* The back control is the first clickable child the header creates. */
+static void click_back(lv_obj_t *page)
+{
+    for (uint32_t i = 0; i < lv_obj_get_child_count(page); ++i)
+    {
+        lv_obj_t *child = lv_obj_get_child(page, (int32_t)i);
+        if (lv_obj_has_flag(child, LV_OBJ_FLAG_CLICKABLE))
+        {
+            lv_obj_send_event(child, LV_EVENT_CLICKED, NULL);
+            return;
+        }
+    }
+    assert(!"no back control");
+}
+
 int main(int argc, char **argv)
 {
     assert(argc == 2);
@@ -279,11 +339,12 @@ int main(int argc, char **argv)
     lv_display_set_color_format(d, LV_COLOR_FORMAT_XRGB8888);
     lv_display_set_buffers(d, pixels, NULL, sizeof(pixels), LV_DISPLAY_RENDER_MODE_DIRECT);
     lv_display_set_flush_cb(d, flush);
+
     model.stage = DEMO_WAIT;
     model.automatic = model.wireless = true;
     model.usb_ready = model.wireless_enabled = model.bt_ready = true;
-    snprintf(model.ssid, sizeof(model.ssid), "ArtInChip CarPlay");
     snprintf(model.pin, sizeof(model.pin), "3939");
+
     carplay_demo_launcher_init();
     assert(manager_calls == 1);
     update_page(NULL);
@@ -293,176 +354,191 @@ int main(int argc, char **argv)
     assert(manager_calls == 3);
     update_page(NULL);
     assert(manager_calls == 3); /* One retry per second. */
-    screenshot(argv[1], "home");
-    inside(heading);
-    inside(pin_label);
-    inside(path_labels[1]);
-    inside(retry_button);
-    assert(!lv_obj_has_state(manage_button, LV_STATE_DISABLED));
-    lv_obj_send_event(network_button, LV_EVENT_CLICKED, NULL);
-    assert(!lv_obj_has_flag(network_panel, LV_OBJ_FLAG_HIDDEN));
-    screenshot(argv[1], "network-unavailable");
-    assert(lv_obj_has_state(network_check, LV_STATE_DISABLED));
-    network_model.available = network_model.device = true;
-    screenshot(argv[1], "network-unplugged");
-    assert(strstr(lv_label_get_text(network_summary), "Cable disconnected"));
-    network_model.link = network_model.addressed = network_model.route_ready = true;
-    strcpy(network_model.probe_url, "http://connectivitycheck.gstatic.com/generate_204");
-    strcpy(network_model.address, "192.168.10.123");
-    strcpy(network_model.mask, "255.255.255.0");
-    strcpy(network_model.gateway, "192.168.10.1");
-    strcpy(network_model.dns, "8.8.8.8");
-    network_model.route_ready = false;
+
+    /* Dashboard: reference sample, explicit demo label, four visible actions. */
+    screenshot(argv[1], "01-dashboard_dark_en");
+    assert(!strcmp(lv_label_get_text(dash_speed), "26"));
+    assert(!strcmp(lv_label_get_text(dash_soc), "78"));
+    assert(!lv_obj_has_flag(dash_note, LV_OBJ_FLAG_HIDDEN));
+    inside(dash_speed);
+    inside(dash_soc);
+    inside(dash_bar);
+    assert(lv_bar_get_value(dash_bar) == 78);
+
+    /* Connectivity: idle -> action is enabled, Android Auto row is inert. */
+    click_caption(pages[PAGE_DASHBOARD], "Connectivity");
+    assert(!lv_obj_has_flag(pages[PAGE_CONNECTIVITY], LV_OBJ_FLAG_HIDDEN));
+    assert(lv_obj_has_flag(pages[PAGE_DASHBOARD], LV_OBJ_FLAG_HIDDEN));
+    screenshot(argv[1], "02-connectivity_dark_en");
+    assert(!strcmp(lv_label_get_text(conn_state), "Waiting for phone"));
+    assert(!lv_obj_has_state(conn_action, LV_STATE_DISABLED));
+    inside(conn_state);
+    inside(conn_action);
+    unsigned retries = model.reconnects;
+    lv_obj_send_event(conn_action, LV_EVENT_CLICKED, NULL);
+    assert(model.reconnects == retries + 1);
+
+    /* Settings: both sliders reach the real backends and persist on release. */
+    click_back(pages[PAGE_CONNECTIVITY]);
+    assert(!lv_obj_has_flag(pages[PAGE_DASHBOARD], LV_OBJ_FLAG_HIDDEN));
+    click_caption(pages[PAGE_DASHBOARD], "Settings");
+    assert(!lv_obj_has_flag(pages[PAGE_SETTINGS], LV_OBJ_FLAG_HIDDEN));
     update_page(NULL);
-    assert(lv_obj_has_state(network_check, LV_STATE_DISABLED));
-    assert(strstr(lv_label_get_text(network_summary), "No gateway"));
-    network_model.route_ready = true;
+    screenshot(argv[1], "03-settings_dark_en");
+    assert(!strcmp(lv_label_get_text(volume_value), "Volume 60%"));
+    assert(!strcmp(lv_label_get_text(brightness_value), "Brightness 72%"));
+
+    lv_slider_set_value(volume_slider, 25, LV_ANIM_OFF);
+    lv_obj_send_event(volume_slider, LV_EVENT_VALUE_CHANGED, NULL);
+    assert(volume_writes && model_volume == 25);
+    lv_obj_send_event(volume_slider, LV_EVENT_RELEASED, NULL);
+    assert(stored_preferences[CARPLAY_PREF_VOLUME] == 25);
+    lv_slider_set_value(volume_slider, 0, LV_ANIM_OFF);
+    lv_obj_send_event(volume_slider, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_send_event(volume_slider, LV_EVENT_RELEASED, NULL);
+    assert(model_volume == 0 && stored_preferences[CARPLAY_PREF_VOLUME] == 0);
+    lv_slider_set_value(volume_slider, 100, LV_ANIM_OFF);
+    lv_obj_send_event(volume_slider, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_send_event(volume_slider, LV_EVENT_RELEASED, NULL);
+    assert(model_volume == 100 && stored_preferences[CARPLAY_PREF_VOLUME] == 100);
+
+    lv_slider_set_value(brightness_slider, CARPLAY_BRIGHTNESS_MIN, LV_ANIM_OFF);
+    lv_obj_send_event(brightness_slider, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_send_event(brightness_slider, LV_EVENT_RELEASED, NULL);
+    assert(model_backlight == CARPLAY_BRIGHTNESS_MIN);
+    assert(stored_preferences[CARPLAY_PREF_BRIGHTNESS] == CARPLAY_BRIGHTNESS_MIN);
+    lv_slider_set_value(brightness_slider, 75, LV_ANIM_OFF);
+    lv_obj_send_event(brightness_slider, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_send_event(brightness_slider, LV_EVENT_RELEASED, NULL);
+    assert(model_backlight == 75 && stored_preferences[CARPLAY_PREF_BRIGHTNESS] == 75);
+    assert(carplay_ui_dark());
+
+    /* Theme and language switch immediately and persist. */
+    lv_obj_send_event(theme_buttons[0], LV_EVENT_CLICKED, NULL);
+    assert(!carplay_ui_dark() && stored_preferences[CARPLAY_PREF_THEME] == 0);
+    screenshot(argv[1], "03-settings_light_en");
+    lv_obj_send_event(theme_buttons[1], LV_EVENT_CLICKED, NULL);
+    assert(carplay_ui_dark());
+    lv_obj_send_event(language_buttons[0], LV_EVENT_CLICKED, NULL);
+    assert(carplay_ui_is_chinese() && stored_preferences[CARPLAY_PREF_LANGUAGE] == 1);
+    screenshot(argv[1], "03-settings_dark_zh");
+    assert(find_caption(pages[PAGE_SETTINGS], "媒体音量"));
+    assert(find_caption(pages[PAGE_SETTINGS], "屏幕亮度"));
+    assert(find_caption(pages[PAGE_SETTINGS], "外观"));
+    assert(find_caption(pages[PAGE_SETTINGS], "语言"));
+    assert(find_caption(pages[PAGE_SETTINGS], "CarPlay 显示"));
+    assert(find_caption(pages[PAGE_SETTINGS], "系统更新"));
+    lv_obj_send_event(language_buttons[1], LV_EVENT_CLICKED, NULL);
+    assert(!carplay_ui_is_chinese());
+
+    /* Display mode without the compositor is refused, not faked. */
+    lv_obj_send_event(display_buttons[0], LV_EVENT_CLICKED, NULL);
+    assert(strstr(lv_label_get_text(settings_hint), "Not supported"));
+    screenshot(argv[1], "03-settings_dark_en");
+
+    /* OTA page: real state strings, no progress without a real percentage. */
+    click_caption(pages[PAGE_SETTINGS], "System update");
+    assert(!lv_obj_has_flag(pages[PAGE_OTA], LV_OBJ_FLAG_HIDDEN));
+    screenshot(argv[1], "04-ota_dark_en");
+    assert(!strcmp(lv_label_get_text(ota_state), "Not checked"));
+    assert(lv_obj_has_state(ota_check_button, LV_STATE_DISABLED));
+    assert(lv_obj_has_flag(ota_progress, LV_OBJ_FLAG_HIDDEN));
+    assert(lv_obj_has_flag(ota_install_button, LV_OBJ_FLAG_HIDDEN));
+
+    network_model.available = network_model.route_ready = true;
     update_page(NULL);
-    assert(!lv_obj_has_state(network_check, LV_STATE_DISABLED));
-    lv_obj_send_event(network_check, LV_EVENT_CLICKED, NULL);
-    screenshot(argv[1], "network-checking");
-    assert(network_requests == 1 && lv_obj_has_state(network_check, LV_STATE_DISABLED));
-    network_model.checking = false;
-    network_model.checked = network_model.reachable = true;
-    screenshot(argv[1], "network-online");
-    inside(network_detail);
-    inside(network_check);
-    assert(strstr(lv_label_get_text(network_detail), "sharing: Inactive"));
-    assert(strstr(lv_label_get_text(network_summary), "Internet verified"));
-    network_model.reachable = false;
-    screenshot(argv[1], "network-failed");
-    assert(strstr(lv_label_get_text(network_summary), "Check failed"));
-    network_model.age_ms = 46000;
-    update_page(NULL);
-    assert(strstr(lv_label_get_text(network_summary), "Check expired"));
-    lv_obj_send_event(lv_obj_get_child(network_panel, 4), LV_EVENT_CLICKED, NULL);
-    assert(lv_obj_has_flag(network_panel, LV_OBJ_FLAG_HIDDEN));
-    lv_obj_send_event(settings_button, LV_EVENT_CLICKED, NULL);
-    assert(!lv_obj_has_flag(settings_panel, LV_OBJ_FLAG_HIDDEN));
-    lv_obj_send_event(wireless_setting, LV_EVENT_CLICKED, NULL);
-    lv_obj_send_event(microphone_setting, LV_EVENT_CLICKED, NULL);
-    assert(!model.wireless_enabled && microphone_muted);
-    screenshot(argv[1], "settings");
-#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
-    model.stage = DEMO_LIVE;
-    preview_video_active = true;
-    update_page(NULL);
-    assert(!lv_obj_has_state(settings_button, LV_STATE_DISABLED));
-    lv_obj_send_event(settings_button, LV_EVENT_CLICKED, NULL);
-    lv_obj_send_event(find_button(settings_panel, "Display mode"), LV_EVENT_CLICKED, NULL);
-    assert(!lv_obj_has_flag(display_panel, LV_OBJ_FLAG_HIDDEN));
-    lv_obj_send_event(find_button(display_panel, "Full screen"), LV_EVENT_CLICKED, NULL);
-    screenshot(argv[1], "display-settings");
-    inside(display_note);
-    carplay_ui_set_chinese(true);
-    screenshot(argv[1], "display-settings-zh");
-    carplay_ui_set_chinese(false);
-    lv_obj_send_event(find_button(display_panel, "Apply"), LV_EVENT_CLICKED, NULL);
-    assert(display_requests == 1 && last_display == CARPLAY_FULLSCREEN);
-    carplay_launcher_open_display_settings();
-    lv_obj_send_event(find_button(display_panel, "Fusion"), LV_EVENT_CLICKED, NULL);
-    lv_obj_send_event(find_button(display_panel, "Apply"), LV_EVENT_CLICKED, NULL);
-    assert(display_requests == 2 && last_display == CARPLAY_FUSION);
-    carplay_launcher_open_display_settings();
-    lv_obj_send_event(find_button(display_panel, "Local instruments"), LV_EVENT_CLICKED, NULL);
-    lv_obj_send_event(find_button(display_panel, "Apply"), LV_EVENT_CLICKED, NULL);
-    assert(display_requests == 3 && last_display == CARPLAY_LOCAL);
-    assert(lv_obj_has_flag(display_panel, LV_OBJ_FLAG_HIDDEN));
-    model.stage = DEMO_WAIT;
-    preview_video_active = false;
-    update_page(NULL);
-    show_modal(settings_panel);
-#endif
-    inside(wireless_setting);
-    inside(microphone_setting);
-    inside(ota_check_button);
-    inside(ota_install_button);
-    inside(ota_state_label);
-    snprintf(ota_model.current, sizeof(ota_model.current), "1.0.0");
-    snprintf(ota_model.current_commit, sizeof(ota_model.current_commit), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-    snprintf(ota_model.slot, sizeof(ota_model.slot), "A");
+    assert(!lv_obj_has_state(ota_check_button, LV_STATE_DISABLED));
     lv_obj_send_event(ota_check_button, LV_EVENT_CLICKED, NULL);
+    assert(ota_checks == 1);
     update_page(NULL);
-    assert(ota_checks == 1 && lv_obj_has_state(ota_check_button, LV_STATE_DISABLED));
+    assert(!strcmp(lv_label_get_text(ota_state), "Checking the update service..."));
+
+    snprintf(ota_model.current, sizeof(ota_model.current), "1.0.0");
+    snprintf(ota_model.current_commit, sizeof(ota_model.current_commit),
+             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    snprintf(ota_model.slot, sizeof(ota_model.slot), "A");
     ota_model.state = CARPLAY_OTA_AVAILABLE;
     ota_model.busy = false;
-    strcpy(ota_model.remote, "1.0.0");
-    strcpy(ota_model.remote_commit, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
-    strcpy(ota_model.message, "Preview build bbbbbbbb is available. Disconnect CarPlay before installing.");
-    screenshot(argv[1], "ota-available");
-    inside(ota_version_label);
+    snprintf(ota_model.remote, sizeof(ota_model.remote), "1.0.1");
+    snprintf(ota_model.remote_commit, sizeof(ota_model.remote_commit),
+             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    update_page(NULL);
+    assert(!strcmp(lv_label_get_text(ota_state), "Update available"));
+    assert(!lv_obj_has_flag(ota_install_button, LV_OBJ_FLAG_HIDDEN));
+    screenshot(argv[1], "04-ota-available_dark_en");
+
     lv_obj_send_event(ota_install_button, LV_EVENT_CLICKED, NULL);
     assert(!ota_installs && !lv_obj_has_flag(ota_confirm_panel, LV_OBJ_FLAG_HIDDEN));
-    screenshot(argv[1], "ota-confirm");
-    inside(ota_confirm_text);
-    inside(lv_obj_get_child(ota_confirm_panel, 1));
-    inside(lv_obj_get_child(ota_confirm_panel, 2));
+    screenshot(argv[1], "04-ota-confirm_dark_en");
     ota_confirm_cancel(NULL);
     assert(!ota_installs);
-    ota_install_now(NULL);
-    strcpy(ota_model.remote_commit, "cccccccccccccccccccccccccccccccccccccccc");
-    ota_confirm_install(NULL);
-    assert(!ota_installs && ota_notice);
-    ota_install_now(NULL);
+    lv_obj_send_event(ota_install_button, LV_EVENT_CLICKED, NULL);
     ota_confirm_install(NULL);
     assert(ota_installs == 1);
+
     ota_model.state = CARPLAY_OTA_APPLYING;
     ota_model.progress = 60;
-    strcpy(ota_model.message, "Package verified. Writing inactive slot; keep power connected.");
-    screenshot(argv[1], "ota-applying");
-    assert(lv_obj_has_state(ota_check_button, LV_STATE_DISABLED) && lv_obj_has_state(ota_install_button, LV_STATE_DISABLED));
+    ota_model.busy = true;
+    update_page(NULL);
+    assert(!lv_obj_has_flag(ota_progress, LV_OBJ_FLAG_HIDDEN));
+    assert(strstr(lv_label_get_text(ota_state), "progress 60%"));
+    screenshot(argv[1], "04-ota-applying_dark_en");
     ota_model.state = CARPLAY_OTA_FAILED;
     ota_model.busy = false;
-    strcpy(ota_model.message, "Download, storage or SHA256 check failed. Check for updates again.");
-    screenshot(argv[1], "ota-failed");
-    inside(ota_state_label);
-    lv_obj_add_flag(settings_panel, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_remove_flag(diagnostics_panel, LV_OBJ_FLAG_HIDDEN);
-    screenshot(argv[1], "diagnostics");
-    inside(debug_label);
-    lv_obj_add_flag(diagnostics_panel, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_send_event(manage_button, LV_EVENT_CLICKED, NULL);
-    screenshot(argv[1], "devices");
-    lv_obj_send_event(lv_obj_get_child(file_list, 0), LV_EVENT_CLICKED, NULL);
-    assert(!lv_obj_has_flag(confirm_panel, LV_OBJ_FLAG_HIDDEN));
-    screenshot(argv[1], "forget");
-    inside(confirm_text);
-    lv_obj_add_flag(file_panel, LV_OBJ_FLAG_HIDDEN);
-    files_opened = false;
-    lv_obj_send_event(audio_button, LV_EVENT_CLICKED, NULL);
-    assert(audio_opened);
-    screenshot(argv[1], "audio");
-    inside(audio_note);
-    inside(audio_play);
-    lv_obj_send_event(audio_play, LV_EVENT_CLICKED, NULL);
-    assert(audio_selection == 40);
-    lv_obj_add_flag(audio_panel, LV_OBJ_FLAG_HIDDEN);
-    audio_opened = false;
+    ota_model.progress = -1;
+    update_page(NULL);
+    assert(!strcmp(lv_label_get_text(ota_state), "Update failed"));
+    assert(lv_obj_has_flag(ota_progress, LV_OBJ_FLAG_HIDDEN));
+
+    /* Chinese covers every page, not only Settings. */
+    carplay_ui_set_chinese(true);
+    screenshot(argv[1], "04-ota_dark_zh");
+    click_back(pages[PAGE_OTA]);
+    screenshot(argv[1], "01-dashboard_dark_zh");
+    assert(find_caption(pages[PAGE_DASHBOARD], "仪表"));
+    assert(find_caption(pages[PAGE_DASHBOARD], "当前速度"));
+    assert(find_caption(pages[PAGE_DASHBOARD], "剩余电量"));
+    assert(find_caption(pages[PAGE_DASHBOARD], "车机互联"));
+    assert(find_caption(pages[PAGE_DASHBOARD], "系统设置"));
+    click_caption(pages[PAGE_DASHBOARD], "车机互联");
+    screenshot(argv[1], "02-connectivity_dark_zh");
+    assert(find_caption(pages[PAGE_CONNECTIVITY], "等待连接"));
+    carplay_ui_set_chinese(false);
+    lv_obj_send_event(theme_buttons[0], LV_EVENT_CLICKED, NULL);
+    screenshot(argv[1], "02-connectivity_light_en");
+
+    /* A live session locks the local UI behind the phone video. */
+    model.stage = DEMO_LIVE;
+    update_page(NULL);
+    assert(!strcmp(lv_label_get_text(dash_status), "Connected"));
+    assert(!strcmp(lv_label_get_text(conn_state), "Connected"));
+    model.stage = DEMO_WAIT;
+    update_page(NULL);
+
+    /* Pairing consent still routes to the connection owner. */
     model.stage = DEMO_PAIR;
-    model.wireless_enabled = true;
+    model.wireless = true;
     model.pairing.kind = RTCP_BT_PAIR_COMPARE;
     model.pairing.request = 42;
     model.pairing.passkey = 121314;
-    screenshot(argv[1], "pairing");
-    assert(!lv_obj_has_flag(bt_panel, LV_OBJ_FLAG_HIDDEN));
-    inside(bt_text);
-    lv_obj_send_event(bt_accept, LV_EVENT_CLICKED, NULL);
-    assert(replies == 1);
-    assert(lv_obj_has_flag(bt_panel, LV_OBJ_FLAG_HIDDEN));
-    assert(lv_obj_has_state(manage_button, LV_STATE_DISABLED));
-    show_modal(network_panel);
-    model.stage = DEMO_LIVE;
-    preview_video_active = true;
     update_page(NULL);
-    assert(lv_obj_has_flag(network_panel, LV_OBJ_FLAG_HIDDEN));
-    assert(lv_obj_has_flag(modal_scrim, LV_OBJ_FLAG_HIDDEN));
+    assert(!lv_obj_has_flag(bt_panel, LV_OBJ_FLAG_HIDDEN));
+    screenshot(argv[1], "05-pairing_dark_en");
+    lv_obj_send_event(bt_accept, LV_EVENT_CLICKED, NULL);
+    assert(replies == 1 && lv_obj_has_flag(bt_panel, LV_OBJ_FLAG_HIDDEN));
+
+    /* Missing audio backend: the control is disabled rather than faked. */
+    volume_supported = false;
     model.stage = DEMO_WAIT;
-    model.pairing.kind = 0;
-    preview_video_active = false;
-    carplay_ui_set_chinese(true);
-    screenshot(argv[1], "home-zh");
-    show_modal(settings_panel);
-    screenshot(argv[1], "settings-zh");
-    puts("Actual LVGL 9: 1024x600 previews including OTA consent and failure states, visible bounds and network/settings/device/audio/pairing request routing passed; modeled connection values only");
+    update_page(NULL);
+    lv_obj_send_event(pages[PAGE_DASHBOARD], LV_EVENT_CLICKED, NULL);
+    carplay_launcher_open_display_settings();
+    update_page(NULL);
+    assert(lv_obj_has_state(volume_slider, LV_STATE_DISABLED));
+    assert(!strcmp(lv_label_get_text(volume_value), "Not supported on this device"));
+    screenshot(argv[1], "03-settings-no-audio_dark_en");
+
+    puts("V4 LVGL pages: dashboard, connectivity, settings, OTA, pairing and "
+         "unsupported-backend states rendered at 1024x600; modeled values only");
     return 0;
 }

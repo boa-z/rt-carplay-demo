@@ -1,14 +1,16 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-/* Actual LVGL software rendering. A modeled video latch is layout input,
- * never an assertion about DE, iPhone negotiation or official Ultra. */
+/* Actual LVGL software rendering of the V4 fusion strip. A modeled video latch
+ * is layout input, never an assertion about DE, iPhone negotiation or Ultra. */
 #include <assert.h>
 #include <stdlib.h>
 #include "../../ui/fusion_dashboard.c"
 
 static uint8_t pixels[1024 * 600 * 4];
-static uint32_t now = 123000;
+/* t = (now / 1000) % 80 = 13 -> the simulated triangle reports 26 km/h. */
+static uint32_t now = 13000;
 static carplay_display_mode_t selected = CARPLAY_FUSION;
 static unsigned irq_depth;
+
 rt_base_t rt_hw_interrupt_disable(void)
 {
     return irq_depth++;
@@ -43,14 +45,6 @@ bool carplay_connection_status(demo_status_t *status)
     status->display_requested = selected;
     return true;
 }
-void carplay_launcher_open_display_settings(void)
-{
-    carplay_fusion_ui_show_launcher();
-}
-void carplay_video_sink_perf(carplay_video_perf_t *p)
-{
-    memset(p, 0, sizeof(*p));
-}
 static void flush(lv_display_t *d, const lv_area_t *area, uint8_t *data)
 {
     (void)area;
@@ -58,19 +52,86 @@ static void flush(lv_display_t *d, const lv_area_t *area, uint8_t *data)
     lv_display_flush_ready(d);
 }
 
-static void inside(lv_obj_t *object, int min_x)
+static void inside(lv_obj_t *object)
 {
     lv_area_t a;
     lv_obj_get_coords(object, &a);
-    assert(a.x1 >= min_x && a.y1 >= 0 && a.x2 < 1024 && a.y2 < 600);
+    assert(a.x1 >= 768 && a.y1 >= 0 && a.x2 < 1024 && a.y2 < 600);
 }
-static void screenshot(const char *directory, const char *name, demo_status_t *status, int min_x)
+
+/* Every pixel left of x = 768 must still hold the video sink's frame: LVGL is
+ * never allowed to paint there while the strip owns presentation. */
+static uint8_t video_side[1024 * 600 * 4];
+static bool projection_armed;
+
+static void arm_projection(void)
 {
-    assert(carplay_fusion_ui_update(status));
+    for (unsigned i = 0; i < 1024 * 600; ++i)
+    {
+        pixels[i * 4 + 0] = 0x1A;
+        pixels[i * 4 + 1] = 0x16;
+        pixels[i * 4 + 2] = 0x12;
+        pixels[i * 4 + 3] = 0;
+    }
+    memcpy(video_side, pixels, sizeof(video_side));
+    projection_armed = true;
+}
+
+static void projection_side_clean(void)
+{
+    assert(projection_armed);
+    for (unsigned y = 0; y < 600; ++y)
+        for (unsigned x = 0; x < 768; ++x)
+        {
+            unsigned i = (y * 1024 + x) * 4;
+            if (pixels[i] != video_side[i] || pixels[i + 1] != video_side[i + 1] ||
+                pixels[i + 2] != video_side[i + 2])
+            {
+                fprintf(stderr, "LVGL painted the projection at (%u,%u): %02x%02x%02x\n",
+                        x, y, pixels[i], pixels[i + 1], pixels[i + 2]);
+                assert(!"LVGL painted the projection side");
+            }
+        }
+}
+
+/* No LVGL object may be laid out on the projection side. The device keeps the
+ * compositor crop in video_layer_policy; this proves the widget tree itself
+ * never places anything there. */
+static void only_strip_widgets(lv_obj_t *parent)
+{
+    lv_area_t a;
+    for (uint32_t i = 0; i < lv_obj_get_child_count(parent); ++i)
+    {
+        lv_obj_t *child = lv_obj_get_child(parent, (int32_t)i);
+        lv_obj_get_coords(child, &a);
+        assert(a.x1 >= 768 && a.x2 < 1024);
+        only_strip_widgets(child);
+    }
+}
+
+static void screenshot(const char *directory, const char *name, demo_status_t *status,
+                       bool expect_visible)
+{
+    bool owns = carplay_fusion_ui_update(status);
+    assert(owns == expect_visible);
     lv_refr_now(NULL);
-    lv_obj_t *objects[] = { title, source_label, speed, gear, battery, connection, metrics,
-                            view_button, connections_button };
-    for (unsigned i = 0; i < sizeof(objects) / sizeof(objects[0]); ++i) inside(objects[i], min_x);
+    if (expect_visible)
+    {
+        projection_side_clean();
+        only_strip_widgets(lv_screen_active());
+    }
+    else
+        projection_armed = false;
+    if (expect_visible && !lv_obj_has_flag(strip, LV_OBJ_FLAG_HIDDEN))
+    {
+        inside(speed_caption);
+        inside(speed_label);
+        inside(unit_label);
+        inside(soc_caption);
+        inside(soc_label);
+        inside(soc_bar);
+        inside(home_button);
+    }
     char path[512];
     snprintf(path, sizeof(path), "%s/%s.ppm", directory, name);
     FILE *f = fopen(path, "wb");
@@ -83,6 +144,7 @@ static void screenshot(const char *directory, const char *name, demo_status_t *s
     }
     assert(fclose(f) == 0);
 }
+
 int main(int argc, char **argv)
 {
     assert(argc == 2);
@@ -92,43 +154,62 @@ int main(int argc, char **argv)
     lv_display_set_color_format(d, LV_COLOR_FORMAT_XRGB8888);
     lv_display_set_buffers(d, pixels, NULL, sizeof(pixels), LV_DISPLAY_RENDER_MODE_DIRECT);
     lv_display_set_flush_cb(d, flush);
+
     lv_obj_t *launcher = lv_obj_create(NULL);
     demo_status_t status = { .stage = DEMO_WAIT };
     carplay_fusion_ui_init(launcher, 1024, 600);
     carplay_fusion_ui_resume();
-    screenshot(argv[1], "fusion-local-simulated", &status, 0);
-    assert(!strcmp(lv_label_get_text(source_label), "SIMULATED DATA"));
-    assert(strstr(lv_label_get_text(metrics), "CPU n/a"));
-    rtcp_display_rect_t rect = { .x = 0, .y = 75, .width = 768, .height = 450 };
+
+    /* LOCAL keeps the launcher pages, so the strip stays hidden. */
+    screenshot(argv[1], "05-fusion-local", &status, false);
+
+    /* From here the video sink owns x = 0..767; seed those pixels and require
+     * LVGL to leave every one of them untouched. */
+    arm_projection();
+
+    /* FUSION only after a real video latch. */
+    rtcp_display_rect_t rect = { .x = 0, .y = 0, .width = 768, .height = 600 };
     carplay_fusion_snapshot_t s;
     carplay_fusion_snapshot(now, &s);
-    carplay_fusion_video_latched(&rect, 1024, 600, s.generation, now);
+    carplay_fusion_video_latched(&rect, 768, 600, s.generation, now);
     status.stage = DEMO_LIVE;
-    screenshot(argv[1], "fusion-connected-simulated", &status, 768);
+    screenshot(argv[1], "05-fusion_dark_en", &status, true);
+    assert(!strcmp(lv_label_get_text(speed_label), "26"));
+    assert(!strcmp(lv_label_get_text(soc_label), "82%"));
+
     carplay_vehicle_sample_t provider = { .available = true, .speed_kph = 42, .battery_percent = 77, .gear = "R" };
     assert(carplay_fusion_set_vehicle(&provider) == RTCP_OK);
-    screenshot(argv[1], "fusion-provider", &status, 768);
-    assert(!strcmp(lv_label_get_text(speed), "42 km/h"));
+    screenshot(argv[1], "05-fusion-provider", &status, true);
+    assert(!strcmp(lv_label_get_text(speed_label), "42"));
+    assert(!strcmp(lv_label_get_text(soc_label), "77%"));
+
     provider.available = false;
     assert(carplay_fusion_set_vehicle(&provider) == RTCP_OK);
-    screenshot(argv[1], "fusion-provider-unavailable", &status, 768);
-    assert(!strcmp(lv_label_get_text(speed), "-- km/h"));
-    lv_obj_send_event(connections_button, LV_EVENT_CLICKED, NULL);
-    assert(!carplay_fusion_ui_update(&status) && lv_screen_active() == launcher);
-    show_dashboard(NULL);
-    assert(carplay_fusion_ui_update(&status));
-    (void)carplay_connection_set_display_mode(CARPLAY_FULLSCREEN);
-    assert(carplay_fusion_ui_update(&status));
-    carplay_fusion_snapshot(now, &s);
-    assert(s.effective == CARPLAY_FULLSCREEN);
+    screenshot(argv[1], "05-fusion-unavailable", &status, true);
+    assert(!strcmp(lv_label_get_text(speed_label), "--"));
+
+    carplay_ui_set_dark(false);
+    screenshot(argv[1], "05-fusion_light_en", &status, true);
+    carplay_ui_set_chinese(true);
+    screenshot(argv[1], "05-fusion_light_zh", &status, true);
+    carplay_ui_set_dark(true);
+    carplay_ui_set_chinese(false);
+    carplay_fusion_use_simulated();
+
+    /* Back to the dashboard resumes the projection request. */
+    lv_obj_send_event(home_button, LV_EVENT_CLICKED, NULL);
+    assert(selected == CARPLAY_FUSION);
+
+    /* FULLSCREEN hides the strip and reports ownership to the launcher. */
+    assert(carplay_connection_set_display_mode(CARPLAY_FULLSCREEN));
+    screenshot(argv[1], "06-fullscreen-dark", &status, true);
+    assert(lv_obj_has_flag(strip, LV_OBJ_FLAG_HIDDEN));
+
     carplay_fusion_video_stopped();
     status.stage = DEMO_FAILED;
-    now += 3000;
-    carplay_fusion_use_simulated();
-    screenshot(argv[1], "fusion-disconnected", &status, 0);
-    assert(strstr(lv_label_get_text(connection), "CONNECTION ERROR"));
-    carplay_ui_set_chinese(true);
-    screenshot(argv[1], "fusion-local-zh", &status, 0);
-    puts("Actual LVGL fusion layout, provider data, mode buttons and disconnect rendering passed (Host only)");
+    screenshot(argv[1], "05-fusion-disconnected", &status, false);
+
+    puts("V4 fusion strip: FUSION, provider, unavailable, light/zh, FULLSCREEN "
+         "hidden and disconnect rendered; x<768 verified untouched (Host only)");
     return 0;
 }

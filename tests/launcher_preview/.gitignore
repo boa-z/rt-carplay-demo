@@ -1,0 +1,4 @@
+# Host preview CMake/Ninja trees and the raw PPM frames. The PNG renders next
+# to them are checked in as the V4 screenshot evidence.
+build*/
+shots-*/*.ppm

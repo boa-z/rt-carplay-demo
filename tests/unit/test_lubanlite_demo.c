@@ -276,6 +276,25 @@ bool carplay_launcher_video_is_active(void)
 {
     return pictures >= 2 && !failed_handoff;
 }
+void carplay_launcher_video_event(bool active, void *context)
+{
+    (void)active;
+    (void)context;
+}
+int carplay_video_sink_set_display_observer(carplay_video_display_cb_t callback, void *context)
+{
+    assert(callback);
+    (void)context;
+    return RTCP_OK;
+}
+int carplay_touch_panel_start(uint16_t width, uint16_t height,
+                              carplay_touch_panel_cb_t callback, void *context)
+{
+    (void)callback;
+    (void)context;
+    assert(width == 1024 && height == 600);
+    return RTCP_OK;
+}
 int carplay_app_touch(uint8_t phase, uint16_t id, uint16_t x, uint16_t y)
 {
     (void)phase;
@@ -285,28 +304,6 @@ int carplay_app_touch(uint8_t phase, uint16_t id, uint16_t x, uint16_t y)
     assert(receiver_running && (status.stage == DEMO_LIVE || status.stage == DEMO_CONNECT));
     ++reports;
     return RTCP_OK;
-}
-static unsigned test_starts, test_stops;
-static int test_stop_error;
-int carplay_audio_test_start(const audio_test_config_t *c)
-{
-    assert(c && !receiver_running && !session_live);
-    ++test_starts;
-    return 0;
-}
-int carplay_audio_test_stop(void)
-{
-    ++test_stops;
-    return test_stop_error;
-}
-void carplay_audio_test_gain(unsigned v, bool m)
-{
-    (void)v;
-    (void)m;
-}
-void carplay_audio_test_status(audio_test_status_t *s)
-{
-    memset(s, 0, sizeof(*s));
 }
 int main(void)
 {
@@ -409,38 +406,34 @@ int main(void)
         if (radio_mode == 3)
             assert(!receiver_running && !manager_open);
     }
-    /* Audio page reserves connection ownership, stops receiver before sound0,
-     * and cannot resume the receiver while a test fails to stop. */
+    /* The retired audio-test page no longer reserves connection ownership: an
+     * open manager excludes the public UI requests and clears once idle. */
     mode = 4;
     status.wireless = requested_wireless = false;
     status.stage = DEMO_WAIT;
     receiver_running = true;
     session_live = false;
-    audio_open = manager_open = true;
-    audio_ready = false;
-    audio_exit = false;
-    audio_action = 1;
+    manager_open = true;
     assert(!claim_connection());
+    assert(!carplay_connection_files_open());
+    manager_open = false;
+    /* A bare idle pass has no queued work; a retry request is what the worker
+     * consumes without restarting the receiver. */
     assert(!idle_actions());
-    assert(!receiver_running && audio_ready && test_starts == 1);
-    audio_exit = true;
-    test_stop_error = RTCP_ETIMEDOUT;
-    assert(!idle_actions());
-    assert(audio_open && manager_open && !receiver_running);
-    test_stop_error = 0;
+    assert(receiver_running);
+    carplay_connection_retry();
     assert(idle_actions());
-    assert(!audio_open && !manager_open && receiver_running);
-    assert(status.stage == DEMO_WAIT && test_stops >= 3);
+    assert(!manager_open && receiver_running);
+    assert(status.stage == DEMO_WAIT);
     /* Public UI request/snapshot API reserves ownership under the manager
      * lock. Snapshots remain unchanged after later worker publications. */
     status.stage = DEMO_LIVE;
     carplay_connection_select_mode(true);
     assert(!requested_wireless);
-    assert(!carplay_connection_files_open() && !carplay_connection_audio_open());
+    assert(!carplay_connection_files_open());
     status.stage = DEMO_WAIT;
     assert(carplay_connection_status(&snapshot));
     assert(carplay_connection_files_open());
-    assert(!carplay_connection_audio_open());
     file_action = FILE_NONE;
     carplay_connection_files_forget("rt-carplay-pairings.bin");
     assert(file_action == FILE_DELETE && !strcmp(delete_name, "rt-carplay-pairings.bin"));
@@ -456,13 +449,10 @@ int main(void)
     assert(count == 1 && !strcmp(files[0].name, "test-pair"));
     assert(!carplay_connection_files_snapshot(&revision, files, &count, &more, &result));
     carplay_connection_files_close();
-    assert(carplay_connection_audio_open());
-    assert(!carplay_connection_files_open());
-    audio_ready = true;
-    carplay_connection_audio_select(40);
-    assert(audio_action == 1);
-    carplay_connection_audio_select(42);
-    assert(audio_exit && audio_action == 2);
+    /* With the audio page retired nothing re-reserves the manager after a
+     * close, so the next open has to succeed from idle. */
+    assert(carplay_connection_files_open());
+    carplay_connection_files_close();
     status.stage = DEMO_FAILED;
     assert(snapshot.stage == DEMO_WAIT);
     puts("Actual demo worker: pairing/storage failure, replug, network/first-frame wait, quiescent close, pointer routing/overflow and manager exclusion passed");
