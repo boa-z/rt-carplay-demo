@@ -116,10 +116,15 @@ int carplay_preferences_set(carplay_preference_t key, unsigned value)
                 bool backed_up = backup_loaded;
                 if (backup_loaded)
                     (void)remove(PREFERENCES_FILE);
-                else if (access(PREFERENCES_FILE, F_OK) == 0)
+                else
                 {
-                    (void)remove(PREFERENCES_BAK);
-                    backed_up = rename(PREFERENCES_FILE, PREFERENCES_BAK) == 0;
+                    int previous = open(PREFERENCES_FILE, O_RDONLY);
+                    if (previous >= 0)
+                    {
+                        (void)close(previous);
+                        (void)remove(PREFERENCES_BAK);
+                        backed_up = rename(PREFERENCES_FILE, PREFERENCES_BAK) == 0;
+                    }
                 }
                 if (rename(PREFERENCES_TMP, PREFERENCES_FILE) == 0)
                     result = 0;
