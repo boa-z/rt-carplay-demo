@@ -34,6 +34,13 @@ int carplay_launcher_fusion_apply(const carplay_fusion_snapshot_t *s)
     assert(s->initialized && !irq_depth);
     return RTCP_OK;
 }
+/* The strip's Dashboard control asks the launcher page owner to select its
+ * dashboard before the panel is handed back. */
+static bool launcher_selected;
+void carplay_launcher_show_dashboard(void)
+{
+    launcher_selected = true;
+}
 bool carplay_connection_set_display_mode(carplay_display_mode_t mode)
 {
     selected = mode;
@@ -196,9 +203,16 @@ int main(int argc, char **argv)
     carplay_ui_set_chinese(false);
     carplay_fusion_use_simulated();
 
-    /* Back to the dashboard resumes the projection request. */
+    /* "Dashboard" selects the dashboard page and hands the panel to it; the
+     * projection request itself is unchanged, so Resume CarPlay can restore it. */
     lv_obj_send_event(home_button, LV_EVENT_CLICKED, NULL);
+    assert(launcher_selected);
     assert(selected == CARPLAY_FUSION);
+    assert(carplay_fusion_ui_update(&status) == false); /* launcher owns it now */
+
+    /* Resume CarPlay (Connectivity action) restores the strip. */
+    carplay_fusion_ui_resume();
+    assert(carplay_fusion_ui_update(&status) == true);
 
     /* FULLSCREEN hides the strip and reports ownership to the launcher. */
     assert(carplay_connection_set_display_mode(CARPLAY_FULLSCREEN));

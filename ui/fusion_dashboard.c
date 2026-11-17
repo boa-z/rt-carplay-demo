@@ -74,10 +74,14 @@ static lv_obj_t *label(lv_obj_t *parent, int x, int top, int w, const lv_font_t 
     return obj;
 }
 
+/* "Home": hand the panel back to the launcher pages. The owner's selected mode
+ * is left untouched, so the Connectivity action ("Resume CarPlay") can restore
+ * it. Resuming here would be a no-op: the requested mode is already FUSION. */
 static void show_dashboard(lv_event_t *event)
 {
     (void)event;
-    carplay_fusion_ui_resume();
+    carplay_launcher_show_dashboard();
+    carplay_fusion_ui_show_launcher();
 }
 
 void carplay_fusion_ui_show_launcher(void)

@@ -1141,13 +1141,15 @@ static void update_connectivity(const demo_status_t *status, bool have_status)
             lv_obj_remove_state(conn_action, LV_STATE_DISABLED);
     }
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    /* The strip's "Dashboard" control hands the panel back to the local pages
+     * while the session stays live; this action returns to the projection. */
     bool resume = have_status && connected && !status->display_reconfiguring &&
                   !carplay_launcher_video_is_active();
     static bool shown_resume, resume_known;
     if (!resume_known || resume != shown_resume)
     {
         set_text_if_changed(lv_obj_get_child(conn_action, 0),
-                            resume ? "Disconnect" : "Connect phone");
+                            resume ? "Resume CarPlay" : "Connect phone");
         shown_resume = resume;
         resume_known = true;
     }

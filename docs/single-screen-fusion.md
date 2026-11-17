@@ -36,7 +36,7 @@ Changing build-time dimensions requires a new image/session. Runtime Settings no
 | `FUSION` | Aspect-fit video in the left 768×600 viewport; opaque local instruments occupy the right 256×600 strip. | Gestures belong to either the phone or local UI from press until release. |
 | `LOCAL` | Full-panel local instruments, including while disconnected or connection setup fails. Connected video can continue decoding behind the opaque UI. | Local UI only. |
 
-The first-boot requested mode is FUSION; later boots restore the saved mode. Before video starts the launcher is visible. Until a video update and VSYNC succeed, effective instrument presentation is LOCAL. Disconnection or decoder reset returns presentation to LOCAL; a later frame restores the requested mode. Dashboard Display and launcher Settings share one display page. Home temporarily shows the launcher; Resume CarPlay restores the selected mode. FinSH commands remain available for diagnosis:
+The first-boot requested mode is FUSION; later boots restore the saved mode. Before video starts the launcher is visible. Until a video update and VSYNC succeed, effective instrument presentation is LOCAL. Disconnection or decoder reset returns presentation to LOCAL; a later frame restores the requested mode. Dashboard Display and launcher Settings share one display page. The strip's "Dashboard" control (left arrow, bottom of the strip) selects the launcher dashboard and hands the panel back to the local pages while the session stays live; Connectivity's action then reads "Resume CarPlay" and restores the projection. FinSH commands remain available for diagnosis:
 
 ```text
 carplay_display status

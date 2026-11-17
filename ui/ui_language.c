@@ -28,7 +28,6 @@ static const struct
     { "Wired / wireless", "有线 / 无线" },
     { "Connect phone", "连接手机" },
     { "Resume CarPlay", "重新显示 CarPlay" },
-    { "Disconnect", "断开连接" },
     { "Connecting", "正在连接" },
     { "Other protocols", "其他协议" },
     { "Android Auto  /  CarLife+", "Android Auto  /  CarLife+" },
