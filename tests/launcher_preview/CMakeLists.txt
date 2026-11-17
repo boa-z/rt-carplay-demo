@@ -10,6 +10,7 @@ add_subdirectory("${SDK_ROOT}/packages/artinchip/lvgl-ui/lvgl_v9/lvgl" lvgl)
 set(UI_SOURCES
     ../../ui/ui_language.c
     ../../ui/carplay_ui_theme.c
+    ../../ui/icons/carplay_icons.c
     ../../ui/fonts/carplay_display_220.c
     ../../ui/fonts/carplay_display_110.c
     ../../ui/fonts/carplay_display_115.c

@@ -1,3 +1,4 @@
 # Generated assets and generated/adapted upstream source are not hand-formatted.
 ui/fonts/**
+ui/icons/carplay_icons.c
 generated/**

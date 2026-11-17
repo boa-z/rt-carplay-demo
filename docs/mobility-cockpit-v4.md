@@ -15,6 +15,16 @@ The V4 design package (`Mobility_Cockpit_UI/mobility_cockpit_v4`) replaces the L
 
 Removed with the previous demo UI: the standalone vehicle-data page, the vehicle-signal-anomaly page, the audio test page and its worker, the diagnostics page, the saved-device/file manager page, the vehicle-network page and the earlier three-mode display page. Their state machine, ownership locks and tests were deleted from `app/connection_manager.c`, `platform/audio_test_lubanlite.c` and `tests/unit/test_audio_diagnostics.c` rather than hidden behind a menu. FinSH diagnostic commands remain available to developers.
 
+## Icons
+
+Every icon is an official [Lucide](https://lucide.dev) glyph, not a hand-drawn vector. `tools/generate_icon_assets.py` rasterises the Lucide font (ISC) into 14 single-colour A8 masks at the design sizes and emits `ui/icons/carplay_icons.c` / `.h`; the page code draws them with `lv_image_set_src()` and recolours them live through the `CARPLAY_STYLE_ICON_*` theme roles, which set `image_recolor` rather than a bitmap per colour. Regenerate with:
+
+```sh
+python -I tools/generate_icon_assets.py <path>/lucide.ttf
+```
+
+The generated file is excluded from clang-format (`.clang-format-ignore`), like the font subsets.
+
 ## Theme and language
 
 `ui/carplay_ui_theme.c` holds the V4 palette as role tokens and applies a whole role to an object (background, border, text colour, radius-independent fill opacity) so a theme change restyles the widget tree without re-running layout. `carplay_ui_set_dark()` switches immediately; every page, the modals and the fusion strip are registered, and the choice is written to the settings record. Auto is present but disabled: the board has no ambient-light sensor, and the page states that rather than faking a schedule.
@@ -25,7 +35,7 @@ Both preferences persist through `app/launcher_preferences.c` in `/data/carplay-
 
 ## Volume and brightness
 
-Both controls are bound to real backends and are disabled, with "Not supported on this device", when the backend is absent. Neither slider simulates a value.
+Both controls are bound to real backends and are disabled when the backend is absent: the value slot reads "Not supported", the hint row reads "Not supported on this device". Neither slider simulates a value. The slider value is the bare percentage used by the reference design (the card title names the quantity), so no language can overflow that slot; the OTA state line uses shortened copy for the same reason.
 
 | Control | Backend | Contract |
 | --- | --- | --- |

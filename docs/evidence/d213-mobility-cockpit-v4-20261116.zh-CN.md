@@ -15,6 +15,8 @@
 | 新建应用或 defconfig | 无。就地修改现有 `rtcarplay` 应用及其 defconfig |
 
 > 后续更新（同日）：D213 硬件不足以实现完整 Ultra，原 `_ultra_gui` 和 `_ultra_headless` 配置已删除，通用能力（含 `RTCARPLAY_SINGLE_SCREEN_FUSION`）并入 `d21x_demo128-nand_rt-thread_rtcarplay_defconfig`。下文记录的镜像散列标识统一前的构建。
+>
+> 后续更新 2（同日，板端反馈之后）：自绘矢量图标在面板上显示异常，因此所有图标改为官方 Lucide 字形，由 `tools/generate_icon_assets.py` 转换为 A8 蒙版（`ui/icons/carplay_icons.c`，14 个蒙版，按主题角色着色）。仪表页时钟与状态重叠问题通过实测两个标签宽度修复：仅当实时时钟墨迹需要时才将状态点+标签整体左移。过长多语言文本已缩短（`"Not supported"`、`"Checking for updates..."`、`"Update changed. Retry."`），OTA 状态行在文案未来超长时滚动显示；滑块数值沿用参考设计的裸百分比，任何语言都不会溢出。本版本构建出的镜像为 5,315,072 字节，通过 `.ci/verify-image.py`（9 个组件、边界与 CRC32）与 `.ci/check-wired-profile.py`。镜像内嵌构建提交号，因此 SHA256 只对特定源码状态可复现；CI 会为最终提交发布对应产物。
 
 ## 构建
 

@@ -385,8 +385,8 @@ int main(int argc, char **argv)
     assert(!lv_obj_has_flag(pages[PAGE_SETTINGS], LV_OBJ_FLAG_HIDDEN));
     update_page(NULL);
     screenshot(argv[1], "03-settings_dark_en");
-    assert(!strcmp(lv_label_get_text(volume_value), "Volume 60%"));
-    assert(!strcmp(lv_label_get_text(brightness_value), "Brightness 72%"));
+    assert(!strcmp(lv_label_get_text(volume_value), "60%"));
+    assert(!strcmp(lv_label_get_text(brightness_value), "72%"));
 
     lv_slider_set_value(volume_slider, 25, LV_ANIM_OFF);
     lv_obj_send_event(volume_slider, LV_EVENT_VALUE_CHANGED, NULL);
@@ -451,7 +451,7 @@ int main(int argc, char **argv)
     lv_obj_send_event(ota_check_button, LV_EVENT_CLICKED, NULL);
     assert(ota_checks == 1);
     update_page(NULL);
-    assert(!strcmp(lv_label_get_text(ota_state), "Checking the update service..."));
+    assert(!strcmp(lv_label_get_text(ota_state), "Checking for updates..."));
 
     snprintf(ota_model.current, sizeof(ota_model.current), "1.0.0");
     snprintf(ota_model.current_commit, sizeof(ota_model.current_commit),
@@ -535,7 +535,7 @@ int main(int argc, char **argv)
     carplay_launcher_open_display_settings();
     update_page(NULL);
     assert(lv_obj_has_state(volume_slider, LV_STATE_DISABLED));
-    assert(!strcmp(lv_label_get_text(volume_value), "Not supported on this device"));
+    assert(!strcmp(lv_label_get_text(volume_value), "Not supported"));
     screenshot(argv[1], "03-settings-no-audio_dark_en");
 
     puts("V4 LVGL pages: dashboard, connectivity, settings, OTA, pairing and "

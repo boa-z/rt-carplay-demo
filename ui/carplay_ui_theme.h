@@ -54,12 +54,12 @@ typedef enum
     CARPLAY_STYLE_LINE_BORDER, /* 1 px divider fill */
     CARPLAY_STYLE_DOT_OFF,
     CARPLAY_STYLE_DOT_ON,
-    CARPLAY_STYLE_OUTLINE_ACCENT, /* transparent fill, 2 px accent stroke */
-    CARPLAY_STYLE_OUTLINE_FAINT,  /* transparent fill, 1 px faint stroke */
-    CARPLAY_STYLE_GRAPHIC,        /* icon fill/stroke in the accent colour */
-    CARPLAY_STYLE_GRAPHIC_TEXT,   /* icon fill/stroke in the primary text colour */
-    CARPLAY_STYLE_STRIP,          /* fusion instrument panel background */
-    CARPLAY_STYLE_STRIP_BUTTON    /* fusion back button surface */
+    CARPLAY_STYLE_ICON_ACCENT, /* A8 icon mask recoloured to the accent colour */
+    CARPLAY_STYLE_ICON_TEXT,   /* A8 icon mask recoloured to the primary text colour */
+    CARPLAY_STYLE_ICON_MUTED,  /* A8 icon mask recoloured to the muted colour */
+    CARPLAY_STYLE_ICON_FAINT,  /* A8 icon mask recoloured to the faint colour */
+    CARPLAY_STYLE_STRIP,       /* fusion instrument panel background */
+    CARPLAY_STYLE_STRIP_BUTTON /* fusion back button surface */
 } carplay_style_role_t;
 
 bool carplay_ui_dark(void);

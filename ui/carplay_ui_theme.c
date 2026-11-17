@@ -140,30 +140,24 @@ static void apply_style(const styled_t *s)
         lv_obj_set_style_bg_color(obj, lv_color_hex(carplay_ui_color(CARPLAY_UI_ACCENT)), sel);
         lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, sel);
         break;
-    case CARPLAY_STYLE_OUTLINE_ACCENT:
-        lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, sel);
-        lv_obj_set_style_border_width(obj, 2, sel);
-        lv_obj_set_style_border_color(obj, lv_color_hex(carplay_ui_color(CARPLAY_UI_ACCENT)), sel);
-        break;
-    case CARPLAY_STYLE_OUTLINE_FAINT:
-        lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, sel);
-        lv_obj_set_style_border_width(obj, 1, sel);
-        lv_obj_set_style_border_color(obj, lv_color_hex(carplay_ui_color(CARPLAY_UI_FAINT)), sel);
-        break;
-    case CARPLAY_STYLE_GRAPHIC:
-    case CARPLAY_STYLE_GRAPHIC_TEXT:
+    case CARPLAY_STYLE_ICON_ACCENT:
+    case CARPLAY_STYLE_ICON_TEXT:
+    case CARPLAY_STYLE_ICON_MUTED:
+    case CARPLAY_STYLE_ICON_FAINT:
     {
-        /* Icons are drawn with line, arc and small rect primitives, so a
-         * single role must cover every paint property they use. */
-        uint32_t color = carplay_ui_color(s->role == CARPLAY_STYLE_GRAPHIC
-                                              ? CARPLAY_UI_ACCENT
-                                              : CARPLAY_UI_TEXT);
-        lv_obj_set_style_bg_color(obj, lv_color_hex(color), sel);
-        lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, sel);
-        lv_obj_set_style_border_color(obj, lv_color_hex(color), sel);
-        lv_obj_set_style_line_color(obj, lv_color_hex(color), sel);
-        lv_obj_set_style_arc_color(obj, lv_color_hex(color), sel);
-        lv_obj_set_style_arc_opa(obj, LV_OPA_COVER, sel);
+        /* Icons are single-colour A8 masks (official Lucide assets), so the
+         * theme only recolours them; nothing else about the object is themed. */
+        carplay_ui_role_t ink = s->role == CARPLAY_STYLE_ICON_ACCENT
+                                    ? CARPLAY_UI_ACCENT
+                                : s->role == CARPLAY_STYLE_ICON_TEXT
+                                    ? CARPLAY_UI_TEXT
+                                : s->role == CARPLAY_STYLE_ICON_MUTED
+                                    ? CARPLAY_UI_MUTED
+                                    : CARPLAY_UI_FAINT;
+        lv_obj_set_style_image_recolor(obj, lv_color_hex(carplay_ui_color(ink)), sel);
+        lv_obj_set_style_image_recolor_opa(obj, LV_OPA_COVER, sel);
+        lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, sel);
+        lv_obj_set_style_border_width(obj, 0, sel);
         break;
     }
     case CARPLAY_STYLE_STRIP:

@@ -16,6 +16,8 @@ The user asked to rebuild the demo UI in place against the locked V4 design pack
 | New application or defconfig | None. The existing `rtcarplay` app and its defconfig were edited in place |
 
 > Later update (same day): the D213 hardware cannot implement complete Ultra, so the `_ultra_gui` and `_ultra_headless` defconfigs were removed and their common capabilities (including `RTCARPLAY_SINGLE_SCREEN_FUSION`) merged into `d21x_demo128-nand_rt-thread_rtcarplay_defconfig`. The image hash below identifies the pre-unification build.
+>
+> Later update 2 (same day, after board feedback): the hand-drawn vector icons rendered wrong on the panel, so every icon is now an official Lucide glyph converted to an A8 mask by `tools/generate_icon_assets.py` (`ui/icons/carplay_icons.c`, 14 masks, recoloured per theme role). The dashboard clock/status overlap was fixed by measuring both labels and sliding the dot+label cluster left only when the live clock ink requires it. Long multilingual strings were shortened (`"Not supported"`, `"Checking for updates..."`, `"Update changed. Retry."`) and the OTA state line scrolls if future copy exceeds its slot; the slider value is the reference design's bare percentage, which cannot overflow in any locale. This revision builds to a 5,315,072-byte image and passes `.ci/verify-image.py` (9 components, bounds and CRC32) and `.ci/check-wired-profile.py`. The image embeds the build commit, so its SHA256 is reproducible only for a given tree state; CI publishes the artifact for the final commit.
 
 ## Build
 

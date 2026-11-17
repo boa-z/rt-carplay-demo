@@ -15,6 +15,16 @@ V4 设计包（`Mobility_Cockpit_UI/mobility_cockpit_v4`）在 1024×600 上用�
 
 随旧 demo 一并删除：独立车辆数据页、车辆信号异常页、音频测试页及其 worker、诊断页、已保存设备/文件管理页、车机网络页和旧的三模式显示页。其状态机、所有权锁和测试从 `app/connection_manager.c`、`platform/audio_test_lubanlite.c` 和 `tests/unit/test_audio_diagnostics.c` 中删除，而不是藏在菜单后面。FinSH 诊断命令仍保留给开发者。
 
+## 图标
+
+所有图标均为官方 [Lucide](https://lucide.dev) 字形，而非自绘矢量。`tools/generate_icon_assets.py` 将 Lucide 字体（ISC 许可）按设计尺寸栅格化为 14 个单色 A8 蒙版，生成 `ui/icons/carplay_icons.c` / `.h`；页面用 `lv_image_set_src()` 绘制，并通过 `CARPLAY_STYLE_ICON_*` 主题角色（设置 `image_recolor`，而非每种颜色一张位图）实时着色。重新生成：
+
+```sh
+python -I tools/generate_icon_assets.py <path>/lucide.ttf
+```
+
+生成文件与字体子集一样被 `.clang-format-ignore` 排除在 clang-format 之外。
+
 ## 主题与语言
 
 `ui/carplay_ui_theme.c` 把 V4 调色板定义为角色令牌，并整体作用于对象（背景、边框、文字颜色、与圆角无关的填充不透明度），因此切换主题不需要重跑布局。`carplay_ui_set_dark()` 立即生效；四个页面、模态框和融合条都会重新着色，选择写入设置记录。"自动"存在但禁用：本板没有环境光传感器，页面如实说明而不伪造时间表。
@@ -25,7 +35,7 @@ V4 设计包（`Mobility_Cockpit_UI/mobility_cockpit_v4`）在 1024×600 上用�
 
 ## 音量与亮度
 
-两个控件都绑定真实后端；后端缺失时控件被禁用并显示"此设备不支持"，不会模拟数值。
+两个控件都绑定真实后端；后端缺失时控件被禁用，数值位显示"不支持"，提示行显示"此设备不支持"，不会模拟数值。数值位沿用参考设计的裸百分比（卡片标题已说明是什么量），因此任何语言都不会溢出；OTA 状态行同样采用缩短的文案。
 
 | 控件 | 后端 | 约定 |
 | --- | --- | --- |

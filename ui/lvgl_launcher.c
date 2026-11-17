@@ -19,6 +19,7 @@
 #include "ui_language.h"
 #include "launcher_preferences.h"
 #include "carplay_ui_theme.h"
+#include "icons/carplay_icons.h"
 #include "audio_volume_lubanlite.h"
 #include "backlight_lubanlite.h"
 #define lv_label_set_text     carplay_ui_set_text
@@ -90,10 +91,6 @@ static bool network_ready;
 static lv_obj_t *bt_panel, *bt_text, *bt_accept;
 static uint32_t visible_pairing_request;
 
-/* lv_line keeps this array by reference for the life of the object. */
-static lv_point_precise_t line_points[32][4];
-static unsigned line_used;
-
 static void update_page(lv_timer_t *timer);
 
 /* ---------------- primitives ---------------- */
@@ -132,41 +129,19 @@ static lv_obj_t *text(lv_obj_t *parent, const char *value, int x, int top, int w
     return obj;
 }
 
-/* An lv_line's box spans every point, so an icon fill role would paint a
- * rectangle; translate it to the matching stroke-only role. */
-static carplay_style_role_t line_role(carplay_style_role_t role)
+/* Icons are official Lucide glyphs converted to A8 masks by
+ * tools/generate_icon_assets.py (docs/FONT_ICON_GUIDE.md asks for ready-made
+ * single-colour icons, not hand-drawn vectors). An lv_image draws the mask
+ * through IMAGE_RECOLOR, so the theme role recolours it live. */
+static lv_obj_t *icon_mask(lv_obj_t *parent, const lv_image_dsc_t *mask, int x, int y,
+                           carplay_style_role_t role)
 {
-    if (role == CARPLAY_STYLE_GRAPHIC)
-        return CARPLAY_STYLE_LINE_ACCENT;
-    if (role == CARPLAY_STYLE_GRAPHIC_TEXT)
-        return CARPLAY_STYLE_LINE_TEXT;
-    return role;
-}
-
-static lv_obj_t *polyline(lv_obj_t *parent, int width, carplay_style_role_t role,
-                          unsigned count, const int xy[][2])
-{
-    if (count < 2 || count > 4 || line_used >= sizeof(line_points) / sizeof(line_points[0]))
-        return NULL;
-    lv_point_precise_t *points = line_points[line_used++];
-    for (unsigned i = 0; i < count; ++i)
-    {
-        points[i].x = xy[i][0];
-        points[i].y = xy[i][1];
-    }
-    lv_obj_t *obj = lv_line_create(parent);
-    lv_obj_remove_flag(obj, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_pos(obj, 0, 0);
-    lv_obj_set_style_line_width(obj, width, 0);
-    lv_obj_set_style_line_rounded(obj, true, 0);
-    carplay_ui_style(obj, line_role(role));
-    lv_line_set_points(obj, points, count);
+    lv_obj_t *obj = lv_image_create(parent);
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_image_set_src(obj, mask);
+    lv_obj_set_pos(obj, x, y);
+    carplay_ui_style(obj, role);
     return obj;
-}
-
-static lv_obj_t *divider(lv_obj_t *parent, int x, int y, int w, int h)
-{
-    return panel(parent, x, y, w, h, 0, CARPLAY_STYLE_LINE_BORDER);
 }
 
 static lv_obj_t *stroke(lv_obj_t *parent, int x, int y, int w, int h, int radius,
@@ -175,98 +150,9 @@ static lv_obj_t *stroke(lv_obj_t *parent, int x, int y, int w, int h, int radius
     return panel(parent, x, y, w, h, radius, role);
 }
 
-static void icon_phone(lv_obj_t *parent, int x, int y, int w, int h)
+static lv_obj_t *divider(lv_obj_t *parent, int x, int y, int w, int h)
 {
-    stroke(parent, x, y, w, h, (w * 2) / 9, CARPLAY_STYLE_OUTLINE_ACCENT);
-    stroke(parent, x + (w - w / 2) / 2, y + h - 4, w / 2, 2, 1, CARPLAY_STYLE_BAR_FILL);
-}
-
-static void icon_mixer(lv_obj_t *parent, int x, int y, int w, int h,
-                       carplay_style_role_t role)
-{
-    for (unsigned i = 0; i < 3; ++i)
-    {
-        int row = y + (int)i * (h / 2) / 2 + h / 8;
-        stroke(parent, x, row, w, 2, 1, role);
-    }
-    stroke(parent, x + w / 5, y + h / 8 - 2, 6, 6, LV_RADIUS_CIRCLE, role);
-    stroke(parent, x + (w * 3) / 5, y + h / 2 - 2, 6, 6, LV_RADIUS_CIRCLE, role);
-    stroke(parent, x + w / 2, y + (h * 7) / 8 - 2, 6, 6, LV_RADIUS_CIRCLE, role);
-}
-
-static void icon_speaker(lv_obj_t *parent, int x, int y, int w, int h,
-                         carplay_style_role_t role)
-{
-    lv_obj_t *body = stroke(parent, x, y + h / 3, w / 3, h / 3, 1, CARPLAY_STYLE_OUTLINE_ACCENT);
-    (void)body;
-    const int cone[][2] = { { x + w / 3, y + h / 3 }, { x + w - 3, y + 1 }, { x + w - 3, y + h - 1 } };
-    (void)polyline(parent, 2, role, 3, cone);
-    const int wave[][2] = { { x + w - 6, y + h / 3 }, { x + w - 1, y + h / 2 }, { x + w - 6, y + (h * 2) / 3 } };
-    (void)polyline(parent, 2, role, 3, wave);
-}
-
-static void icon_sun(lv_obj_t *parent, int x, int y, int w, int h,
-                     carplay_style_role_t role)
-{
-    (void)stroke(parent, x + w / 3, y + h / 3, w / 3, h / 3, LV_RADIUS_CIRCLE,
-                 CARPLAY_STYLE_OUTLINE_ACCENT);
-    int cx = x + w / 2, cy = y + h / 2;
-    const int seg[][4] = {
-        { cx, y + 1, cx, y + 5 },
-        { cx, y + h - 5, cx, y + h - 1 },
-        { x + 1, cy, x + 5, cy },
-        { x + w - 5, cy, x + w - 1, cy },
-    };
-    for (unsigned i = 0; i < 4; ++i)
-    {
-        const int ray[][2] = { { seg[i][0], seg[i][1] }, { seg[i][2], seg[i][3] } };
-        (void)polyline(parent, 2, role, 2, ray);
-    }
-}
-
-static void icon_download(lv_obj_t *parent, int x, int y, int w, int h,
-                          carplay_style_role_t role)
-{
-    int cx = x + w / 2;
-    const int arrow[][2] = { { cx, y + 2 }, { cx, y + h - 8 } };
-    (void)polyline(parent, 2, role, 2, arrow);
-    const int head[][2] = { { cx - 6, y + h - 14 }, { cx, y + h - 7 }, { cx + 6, y + h - 14 } };
-    (void)polyline(parent, 2, role, 3, head);
-    const int tray[][2] = { { x + 3, y + h - 2 }, { x + w - 3, y + h - 2 } };
-    (void)polyline(parent, 2, role, 2, tray);
-}
-
-#if defined(RTCARPLAY_OTA)
-/* Only the OTA check button draws this glyph. */
-static void icon_refresh(lv_obj_t *parent, int x, int y, int w, int h,
-                         carplay_style_role_t role)
-{
-    lv_obj_t *arc = lv_arc_create(parent);
-    lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_set_style_border_width(arc, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(arc, 0, LV_PART_MAIN);
-    lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_pos(arc, x, y);
-    lv_obj_set_size(arc, w, h);
-    lv_arc_set_rotation(arc, 40);
-    lv_arc_set_bg_angles(arc, 0, 360);
-    lv_arc_set_angles(arc, 30, 300);
-    lv_obj_set_style_arc_opa(arc, LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_set_style_arc_width(arc, 2, LV_PART_INDICATOR);
-    carplay_ui_style_part(arc, role, LV_PART_INDICATOR);
-    const int tip[][2] = { { x + w - 8, y + 1 }, { x + w - 1, y + 3 }, { x + w - 3, y + 9 } };
-    (void)polyline(parent, 2, role, 3, tip);
-}
-#endif
-
-static void chevron(lv_obj_t *parent, int x, int y, int w, int h, bool left,
-                    carplay_style_role_t role)
-{
-    int cx = x + w / 2;
-    int cy = y + h / 2;
-    int dx = left ? -1 : 1;
-    const int pts[][2] = { { cx - 3 * dx, cy - 5 }, { cx + 3 * dx, cy }, { cx - 3 * dx, cy + 5 } };
-    (void)polyline(parent, 2, role, 3, pts);
+    return panel(parent, x, y, w, h, 0, CARPLAY_STYLE_LINE_BORDER);
 }
 
 static lv_obj_t *button_text(lv_obj_t *parent, const char *caption, int x, int y,
@@ -486,13 +372,61 @@ static void clock_text(char *out, size_t size)
 #endif
 }
 
+/* Dashboard header geometry, from svg/01-dashboard_*.svg: the clock's right
+ * edge is the anchor at x = 964 and the state dot and label sit at x = 824/847.
+ * The reference's own 14 px English label is wider than the space left of the
+ * time (the reference PNG shows them overlapping), so the cluster keeps the
+ * design anchors whenever the measured label fits and otherwise slides left
+ * only as far as the current clock ink requires. */
+#define DASH_CLOCK_RIGHT  964
+#define DASH_STATUS_X     847
+#define DASH_STATUS_GAP   16 /* minimum clear space before the clock ink */
+#define DASH_STATUS_MIN_X 560
+#define DASH_DOT_SIZE     11
+#define DASH_DOT_GAP      12
+
+static int32_t label_width(lv_obj_t *label)
+{
+    const lv_font_t *font = lv_obj_get_style_text_font(label, 0);
+    const char *value = lv_label_get_text(label);
+    return lv_text_get_width(value, strlen(value), font, 0);
+}
+
+/* Places the dot and the status label from their rendered widths. Called on
+ * every content or language change; writes only when the geometry moved. */
+static void layout_dashboard_status(void)
+{
+    if (!dash_status || !dash_clock || !dash_dot)
+        return;
+    int32_t width = label_width(dash_status) + 2; /* rounding slack, no clipping */
+    int32_t limit = DASH_CLOCK_RIGHT - label_width(dash_clock) - DASH_STATUS_GAP;
+    int32_t left = DASH_STATUS_X;
+    if (left + width > limit)
+        left = limit - width;
+    if (left < DASH_STATUS_MIN_X)
+        left = DASH_STATUS_MIN_X;
+    int32_t dot_x = left - DASH_DOT_GAP - DASH_DOT_SIZE;
+    if (lv_obj_get_x(dash_status) != left || lv_obj_get_width(dash_status) != width)
+    {
+        lv_obj_set_pos(dash_status, left, 64);
+        lv_obj_set_width(dash_status, width);
+    }
+    if (lv_obj_get_x(dash_dot) != dot_x)
+        lv_obj_set_pos(dash_dot, dot_x, 63);
+}
+
 static void build_dashboard(lv_obj_t *parent)
 {
     text(parent, "Dashboard", 64, 54, 520, &carplay_ui_34, CARPLAY_STYLE_TEXT);
     dash_dot = stroke(parent, 824, 63, 11, 11, LV_RADIUS_CIRCLE, CARPLAY_STYLE_DOT_OFF);
-    dash_status = text(parent, "Not connected", 847, 64, 210, &carplay_ui_14, CARPLAY_STYLE_MUTED);
-    dash_clock = text(parent, "--:--", 760, 62, 204, &carplay_ui_17, CARPLAY_STYLE_MUTED);
+    /* The clock is right-aligned against the reference anchor x = 964; it owns
+     * that slot and the state dot plus label are placed to its left. */
+    dash_clock = text(parent, "--:--", DASH_CLOCK_RIGHT - 84, 62, 84,
+                      &carplay_ui_17, CARPLAY_STYLE_MUTED);
     lv_obj_set_style_text_align(dash_clock, LV_TEXT_ALIGN_RIGHT, 0);
+    dash_status = text(parent, "Not connected", DASH_STATUS_X, 64, 210, &carplay_ui_14,
+                       CARPLAY_STYLE_MUTED);
+    layout_dashboard_status();
     dash_note = text(parent, "Demo values", 64, 92, 300, &carplay_ui_14, CARPLAY_STYLE_FAINT);
 
     text(parent, "Speed", 70, 160, 300, &carplay_ui_21, CARPLAY_STYLE_MUTED);
@@ -518,7 +452,7 @@ static void build_dashboard(lv_obj_t *parent)
     lv_obj_t *connectivity = panel(parent, 64, 505, 437, 67, 14, CARPLAY_STYLE_ACCENT_CARD);
     lv_obj_add_flag(connectivity, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(connectivity, open_connectivity, LV_EVENT_CLICKED, NULL);
-    icon_phone(connectivity, 19, 23, 18, 22);
+    icon_mask(connectivity, &carplay_icon_smartphone_24, 19, 22, CARPLAY_STYLE_ICON_ACCENT);
     lv_obj_t *connectivity_text = text(connectivity, "Connectivity", 0, 0, 0,
                                        &carplay_ui_18, CARPLAY_STYLE_ACCENT_TEXT);
     lv_obj_center(connectivity_text);
@@ -526,7 +460,7 @@ static void build_dashboard(lv_obj_t *parent)
     lv_obj_t *settings = panel(parent, 523, 505, 437, 67, 14, CARPLAY_STYLE_CARD);
     lv_obj_add_flag(settings, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(settings, open_settings, LV_EVENT_CLICKED, NULL);
-    icon_mixer(settings, 19, 22, 22, 24, CARPLAY_STYLE_GRAPHIC_TEXT);
+    icon_mask(settings, &carplay_icon_settings_24, 19, 21, CARPLAY_STYLE_ICON_TEXT);
     lv_obj_t *settings_text = text(settings, "Settings", 0, 0, 0, &carplay_ui_18,
                                    CARPLAY_STYLE_TEXT);
     lv_obj_center(settings_text);
@@ -538,7 +472,7 @@ static void build_header(lv_obj_t *parent, const char *title)
     lv_obj_t *back = panel(parent, 54, 42, 44, 44, 13, CARPLAY_STYLE_CARD_ALT);
     lv_obj_add_flag(back, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(back, open_dashboard, LV_EVENT_CLICKED, NULL);
-    chevron(parent, 64, 53, 24, 22, true, CARPLAY_STYLE_LINE_TEXT);
+    icon_mask(parent, &carplay_icon_arrow_left_22, 65, 53, CARPLAY_STYLE_ICON_TEXT);
     text(parent, title, 64, 88, 700, &carplay_ui_34, CARPLAY_STYLE_TEXT);
 }
 
@@ -566,7 +500,7 @@ static void build_connectivity(lv_obj_t *parent)
 
     panel(parent, 64, 153, 896, 310, 24, CARPLAY_STYLE_CARD);
     panel(parent, 96, 183, 84, 84, 20, CARPLAY_STYLE_TILE);
-    icon_phone(parent, 127, 210, 22, 30);
+    icon_mask(parent, &carplay_icon_smartphone_42, 117, 204, CARPLAY_STYLE_ICON_ACCENT);
     text(parent, "Apple CarPlay", 207, 198, 500, &carplay_ui_34, CARPLAY_STYLE_TEXT);
     text(parent, "Wired / wireless", 208, 245, 500, &carplay_ui_18, CARPLAY_STYLE_MUTED);
     divider(parent, 96, 306, 830, 1);
@@ -577,9 +511,10 @@ static void build_connectivity(lv_obj_t *parent)
     conn_action = button_text(parent, "Connect phone", 674, 371, 252, 61, 14,
                               CARPLAY_STYLE_ACCENT_CARD, CARPLAY_STYLE_ACCENT_TEXT,
                               &carplay_ui_18, connect_action, NULL);
+    icon_mask(parent, &carplay_icon_link_24, 693, 389, CARPLAY_STYLE_ICON_ACCENT);
 
     panel(parent, 64, 481, 896, 91, 17, CARPLAY_STYLE_CARD_ALT);
-    stroke(parent, 88, 509, 26, 6, 3, CARPLAY_STYLE_DOT_OFF);
+    icon_mask(parent, &carplay_icon_ellipsis_25, 88, 510, CARPLAY_STYLE_ICON_FAINT);
     text(parent, "Other protocols", 133, 502, 400, &carplay_ui_17, CARPLAY_STYLE_MUTED);
     text(parent, "Android Auto  /  CarLife+", 133, 531, 560, &carplay_ui_17,
          CARPLAY_STYLE_TEXT);
@@ -612,9 +547,7 @@ static void volume_event(lv_event_t *event)
         volume_dragging = false;
     if (code != LV_EVENT_VALUE_CHANGED && code != LV_EVENT_RELEASED)
         return;
-    char buffer[48];
-    snprintf(buffer, sizeof(buffer), TR("Volume %u%%"), value);
-    lv_label_set_text(volume_value, buffer);
+    lv_label_set_text_fmt(volume_value, "%u%%", value);
     if (!carplay_volume_set(value))
     {
         settings_status("Not supported on this device", true);
@@ -640,9 +573,7 @@ static void brightness_event(lv_event_t *event)
         brightness_dragging = false;
     if (code != LV_EVENT_VALUE_CHANGED && code != LV_EVENT_RELEASED)
         return;
-    char buffer[48];
-    snprintf(buffer, sizeof(buffer), TR("Brightness %u%%"), value);
-    lv_label_set_text(brightness_value, buffer);
+    lv_label_set_text_fmt(brightness_value, "%u%%", value);
     if (!carplay_backlight_set(value))
     {
         settings_status("Not supported on this device", true);
@@ -724,16 +655,19 @@ static void select_display(lv_event_t *event)
 #endif
 }
 
-typedef void (*icon_fn)(lv_obj_t *, int, int, int, int, carplay_style_role_t);
+typedef const lv_image_dsc_t *icon_asset_t;
 
-static void build_slider_card(lv_obj_t *parent, int y, const char *title, icon_fn icon,
+static void build_slider_card(lv_obj_t *parent, int y, const char *title, icon_asset_t icon,
                               lv_obj_t **value_out, lv_obj_t **slider_out,
                               unsigned minimum, unsigned maximum,
                               lv_event_cb_t callback, const char *hint)
 {
     panel(parent, 64, y, 438, 177, 21, CARPLAY_STYLE_CARD);
-    icon(parent, 87, y + 23, 24, 24, CARPLAY_STYLE_GRAPHIC);
+    icon_mask(parent, icon, 87, y + 23, CARPLAY_STYLE_ICON_ACCENT);
     text(parent, title, 132, y + 30, 300, &carplay_ui_21, CARPLAY_STYLE_TEXT);
+    /* The reference prints the bare percentage right-anchored at x = 466
+     * (text-anchor="end"); the card title names the quantity. Keeping the
+     * value to numerals + "%" means no locale can overflow this slot. */
     *value_out = text(parent, "", 330, y + 33, 136, &carplay_ui_18, CARPLAY_STYLE_TEXT);
     lv_obj_set_style_text_align(*value_out, LV_TEXT_ALIGN_RIGHT, 0);
 
@@ -764,11 +698,11 @@ static void build_settings(lv_obj_t *parent)
 {
     build_header(parent, "Settings");
 
-    build_slider_card(parent, 149, "Media volume", icon_speaker, &volume_value,
+    build_slider_card(parent, 149, "Media volume", &carplay_icon_volume_29, &volume_value,
                       &volume_slider, 0, CARPLAY_PREF_VOLUME_MAX, volume_event,
                       "Adjust local audio output");
-    build_slider_card(parent, 345, "Display brightness", icon_sun, &brightness_value,
-                      &brightness_slider, CARPLAY_PREF_BRIGHTNESS_MIN,
+    build_slider_card(parent, 345, "Display brightness", &carplay_icon_sun_29,
+                      &brightness_value, &brightness_slider, CARPLAY_PREF_BRIGHTNESS_MIN,
                       CARPLAY_PREF_BRIGHTNESS_MAX, brightness_event,
                       "Adjust panel backlight");
 
@@ -808,9 +742,9 @@ static void build_settings(lv_obj_t *parent)
     lv_obj_t *ota_row = panel(parent, 520, 461, 440, 61, 15, CARPLAY_STYLE_ACCENT_CARD);
     lv_obj_add_flag(ota_row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(ota_row, open_ota, LV_EVENT_CLICKED, NULL);
-    icon_download(ota_row, 18, 17, 22, 24, CARPLAY_STYLE_GRAPHIC);
+    icon_mask(ota_row, &carplay_icon_download_26, 18, 17, CARPLAY_STYLE_ICON_ACCENT);
     text(ota_row, "System update", 60, 25, 300, &carplay_ui_18, CARPLAY_STYLE_TEXT);
-    chevron(ota_row, 394, 19, 18, 22, false, CARPLAY_STYLE_LINE_TEXT);
+    icon_mask(ota_row, &carplay_icon_chevron_right_23, 394, 19, CARPLAY_STYLE_ICON_TEXT);
 
     settings_hint = text(parent, "Changes apply immediately and survive reboot", 64, 545,
                          720, &carplay_ui_14, CARPLAY_STYLE_FAINT);
@@ -836,9 +770,8 @@ static void ota_install_now(lv_event_t *event)
     char body[192];
     snprintf(body, sizeof(body), TR("Version %s"), ota.remote[0] ? ota.remote : ota.remote_commit);
     lv_label_set_text_fmt(
-        ota_confirm_text, "%s\n\n%s\n\n%s", body,
-        TR("Disconnect CarPlay and keep power connected before installing."),
-        TR("Install this update and restart?"));
+        ota_confirm_text, "%s\n\n%s", body,
+        TR("Disconnect CarPlay and keep power connected before installing."));
     show_modal(ota_confirm_panel);
 }
 
@@ -848,7 +781,7 @@ static void ota_confirm_install(lv_event_t *event)
     lv_obj_add_flag(ota_confirm_panel, LV_OBJ_FLAG_HIDDEN);
     update_scrim();
     if (carplay_ota_install(ota_confirm_commit) != RT_EOK)
-        lv_label_set_text(ota_state, "Update changed or busy. Check again.");
+        lv_label_set_text(ota_state, "Update changed. Retry.");
 }
 
 static void ota_confirm_cancel(lv_event_t *event)
@@ -863,7 +796,7 @@ static const char *ota_state_text(const carplay_ota_status_t *ota, char *buffer,
     switch (ota->state)
     {
     case CARPLAY_OTA_CHECKING:
-        return TR("Checking the update service...");
+        return TR("Checking for updates...");
     case CARPLAY_OTA_UP_TO_DATE:
         return TR("Up to date");
     case CARPLAY_OTA_AVAILABLE:
@@ -950,14 +883,17 @@ static void build_ota(lv_obj_t *parent)
 
     panel(parent, 64, 153, 896, 282, 22, CARPLAY_STYLE_CARD);
     panel(parent, 93, 181, 76, 76, 19, CARPLAY_STYLE_TILE);
-    icon_download(parent, 118, 205, 26, 28, CARPLAY_STYLE_GRAPHIC);
+    icon_mask(parent, &carplay_icon_download_39, 111, 200, CARPLAY_STYLE_ICON_ACCENT);
     text(parent, "Installed version", 194, 199, 400, &carplay_ui_17, CARPLAY_STYLE_MUTED);
     ota_version = text(parent, "unknown", 193, 231, 420, &carplay_ui_34, CARPLAY_STYLE_TEXT);
     ota_detail = text(parent, "", 193, 281, 700, &carplay_ui_14, CARPLAY_STYLE_FAINT);
     divider(parent, 97, 323, 830, 1);
 
+    /* Measured with the compiled subsets, the longest current state string is
+     * 279 px in a 290 px slot; scroll is the safety net for future copy. */
     ota_state = text(parent, "Not checked", 97, 354, 290, &carplay_ui_21,
                      CARPLAY_STYLE_MUTED);
+    lv_label_set_long_mode(ota_state, LV_LABEL_LONG_SCROLL_CIRCULAR);
 
     ota_progress = lv_bar_create(parent);
     lv_obj_remove_flag(ota_progress, LV_OBJ_FLAG_CLICKABLE);
@@ -978,7 +914,7 @@ static void build_ota(lv_obj_t *parent)
     ota_check_button = button_text(parent, "Check for updates", 667, 351, 258, 59, 14,
                                    CARPLAY_STYLE_ACCENT_CARD, CARPLAY_STYLE_ACCENT_TEXT,
                                    &carplay_ui_18, ota_check_now, NULL);
-    icon_refresh(parent, 686, 369, 22, 22, CARPLAY_STYLE_GRAPHIC);
+    icon_mask(parent, &carplay_icon_refresh_24, 686, 368, CARPLAY_STYLE_ICON_ACCENT);
 #else
     ota_install_button = panel(parent, 403, 351, 250, 59, 14, CARPLAY_STYLE_ACCENT_CARD);
     lv_obj_add_flag(ota_install_button, LV_OBJ_FLAG_HIDDEN);
@@ -989,9 +925,7 @@ static void build_ota(lv_obj_t *parent)
     lv_obj_add_state(ota_check_button, LV_STATE_DISABLED);
 
     panel(parent, 64, 457, 896, 88, 17, CARPLAY_STYLE_CARD_ALT);
-    panel(parent, 90, 480, 22, 22, LV_RADIUS_CIRCLE, CARPLAY_STYLE_OUTLINE_FAINT);
-    stroke(parent, 98, 486, 5, 5, LV_RADIUS_CIRCLE, CARPLAY_STYLE_DOT_OFF);
-    stroke(parent, 98, 494, 5, 9, 2, CARPLAY_STYLE_DOT_OFF);
+    icon_mask(parent, &carplay_icon_info_26, 90, 482, CARPLAY_STYLE_ICON_FAINT);
     text(parent, "Use the existing firmware updater", 134, 479, 700, &carplay_ui_17,
          CARPLAY_STYLE_TEXT);
     ota_backend = text(parent, "Update backend available", 134, 511, 700, &carplay_ui_14,
@@ -1085,15 +1019,15 @@ static void runtime_controls(void)
                 lv_slider_set_value(volume_slider, (int32_t)actual, LV_ANIM_OFF);
                 last_volume = actual;
                 lv_obj_remove_state(volume_slider, LV_STATE_DISABLED);
-                char buffer[48];
-                snprintf(buffer, sizeof(buffer), TR("Volume %u%%"), actual);
-                lv_label_set_text(volume_value, buffer);
+                lv_label_set_text_fmt(volume_value, "%u%%", actual);
             }
         }
         else if (!lv_obj_has_state(volume_slider, LV_STATE_DISABLED))
         {
             lv_obj_add_state(volume_slider, LV_STATE_DISABLED);
-            lv_label_set_text(volume_value, "Not supported on this device");
+            /* Short form: at 117 px it is the widest unsupported state that
+             * fits the 136 px value slot in both languages (zh 54 px). */
+            lv_label_set_text(volume_value, "Not supported");
         }
     }
     if (brightness_slider && !brightness_dragging)
@@ -1106,15 +1040,13 @@ static void runtime_controls(void)
                 lv_slider_set_value(brightness_slider, (int32_t)actual, LV_ANIM_OFF);
                 last_brightness = actual;
                 lv_obj_remove_state(brightness_slider, LV_STATE_DISABLED);
-                char buffer[48];
-                snprintf(buffer, sizeof(buffer), TR("Brightness %u%%"), actual);
-                lv_label_set_text(brightness_value, buffer);
+                lv_label_set_text_fmt(brightness_value, "%u%%", actual);
             }
         }
         else if (!lv_obj_has_state(brightness_slider, LV_STATE_DISABLED))
         {
             lv_obj_add_state(brightness_slider, LV_STATE_DISABLED);
-            lv_label_set_text(brightness_value, "Not supported on this device");
+            lv_label_set_text(brightness_value, "Not supported");
         }
     }
 }
@@ -1170,6 +1102,7 @@ static void update_dashboard(const demo_status_t *status, bool have_status)
     {
         carplay_ui_style(dash_dot, connected ? CARPLAY_STYLE_DOT_ON : CARPLAY_STYLE_DOT_OFF);
         lv_label_set_text(dash_status, connected ? "Connected" : "Not connected");
+        layout_dashboard_status();
         shown_connected = connected;
         connected_known = true;
     }
@@ -1177,6 +1110,10 @@ static void update_dashboard(const demo_status_t *status, bool have_status)
     char clock[16];
     clock_text(clock, sizeof(clock));
     set_text_if_changed(dash_clock, clock);
+    /* Language switches relabel the status without going through the
+     * connected/not-connected branch above, so re-check the row every tick;
+     * the helper only writes when the measured geometry changed. */
+    layout_dashboard_status();
 }
 
 static void update_connectivity(const demo_status_t *status, bool have_status)

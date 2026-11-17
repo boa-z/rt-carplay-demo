@@ -14,6 +14,7 @@
 #include <string.h>
 #include "ui_language.h"
 #include "carplay_ui_theme.h"
+#include "icons/carplay_icons.h"
 #define lv_label_set_text carplay_ui_set_text
 #define TR                carplay_ui_translate
 
@@ -45,9 +46,6 @@ typedef enum
     STRIP_MODE_FULLSCREEN
 } strip_mode_t;
 static strip_mode_t strip_mode = STRIP_HIDDEN;
-
-/* lv_line owns a reference to these points for the object's lifetime. */
-static lv_point_precise_t back_arrow[3];
 
 static lv_obj_t *line(lv_obj_t *parent, int x, int y, int w, int h, carplay_style_role_t role)
 {
@@ -154,19 +152,12 @@ static void build_strip(lv_obj_t *parent)
     lv_obj_add_flag(home_button, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(home_button, show_dashboard, LV_EVENT_CLICKED, NULL);
 
-    /* Chevron drawn from primitives: the compiled symbol font has no glyphs. */
-    back_arrow[0] = (lv_point_precise_t){ 30, 18 };
-    back_arrow[1] = (lv_point_precise_t){ 22, 26 };
-    back_arrow[2] = (lv_point_precise_t){ 30, 34 };
-    lv_obj_t *arrow = lv_line_create(home_button);
-    lv_obj_set_style_bg_opa(arrow, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(arrow, 0, 0);
-    lv_obj_set_style_pad_all(arrow, 0, 0);
-    lv_obj_remove_flag(arrow, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_line_width(arrow, 2, 0);
-    lv_obj_set_style_line_rounded(arrow, true, 0);
-    carplay_ui_style(arrow, CARPLAY_STYLE_LINE_ACCENT);
-    lv_line_set_points(arrow, back_arrow, 3);
+    /* Official Lucide arrow-left mask; the local pages use the same asset. */
+    lv_obj_t *arrow = lv_image_create(home_button);
+    lv_obj_remove_flag(arrow, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_image_set_src(arrow, &carplay_icon_arrow_left_20);
+    lv_obj_set_pos(arrow, 22, 17);
+    carplay_ui_style(arrow, CARPLAY_STYLE_ICON_ACCENT);
 
     lv_obj_t *caption = label(home_button, 44, 16, 170, &carplay_ui_15, CARPLAY_STYLE_TEXT);
     lv_label_set_text(caption, "Dashboard");
