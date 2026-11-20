@@ -2,7 +2,7 @@
 
 # 仓库、固件 CI 与上游
 
-SDK 集成的维护仓库为 [boa-z/luban-lite-carplay](https://github.com/boa-z/luban-lite-carplay)，这是独立仓库，开发分支和默认分支均为 `carplay-oss`。仓库以 `boa-z/luban-lite` 提交 `4060f85bd27a1eb555952921139b77cc41bdeb4e` 为基线，将既有公开 CarPlay 集成记录为独立提交，不引入 `jiachenin/luban-lite-jc` 的其他开发历史。
+SDK 集成在独立仓库 [boa-z/luban-lite-carplay](https://github.com/boa-z/luban-lite-carplay) 中维护，默认分支为 `carplay-oss`。`codex/androidauto-integration` 在 `carplay-oss` 上继续集成 Android Auto。两个分支共用 `boa-z/luban-lite` 的 SDK 快照镜像作为上游。
 
 ```sh
 git clone --branch carplay-oss --recurse-submodules https://github.com/boa-z/luban-lite-carplay.git
@@ -11,7 +11,48 @@ git remote add upstream https://github.com/boa-z/luban-lite.git
 git fetch upstream master
 ```
 
-上游默认分支是 `master`。获取上游更新不会自动修改集成分支或固定的子模块版本。合入 SDK 更新前应审查差异并构建固件。仓库不会自动创建 PR。
+## SDK 基线与变基
+
+2026 年 11 月 20 日，本次变基将 SDK 基线从 `4060f85bd27a1eb555952921139b77cc41bdeb4e` 更新为 `90a740fe9c1b663ea52ec3f7e1af35acde200aea`。两个快照均标记为 Luban-Lite v1.3.3，新快照对应匠芯创 Gitee 提交 `4bd5a1300f4793a2188529eebde96f012c2188bb`。构建记录和评审说明使用完整的镜像及 Gitee 提交号标识 SDK 版本。
+
+镜像的 `master` 可能被更新为无共同祖先的新根提交。建议在镜像仓库为每个评审过的 SDK 快照保留以 Gitee 提交号标识的固定标签，便于在 `master` 更新后继续获取。获取更新前，记录 CarPlay 分支的 SDK 根提交和两个产品分支的当前提交。用备份引用或标签保留原分支提交，直到完成验证和发布。在区分大小写的文件系统上使用临时检出目录，例如 WSL 的 Linux 文件系统，便于同时检出上游的两个 README 文件，也能避免构建生成的配置和 Bootloader 写入日常工作区。
+
+```sh
+old_carplay=$(git rev-parse carplay-oss)
+old_projection=$(git rev-parse codex/androidauto-integration)
+old_sdk=$(git rev-list --max-parents=0 "$old_carplay")
+git merge-base --is-ancestor "$old_carplay" "$old_projection"
+git fetch upstream master
+new_sdk=$(git rev-parse upstream/master)
+git log -1 --format='%H %s' "$new_sdk"
+git diff --stat "$old_sdk" "$new_sdk"
+```
+
+确认 `old_sdk` 只有一个提交、祖先关系检查通过，且 `new_sdk` 是预期的上游快照。找到 `old_sdk` 之后的独立 README 兼容提交并核对其变更。如果新快照仍同时包含 `README.md` 和 `ReadMe.md`，在临时检出目录准备新基线：
+
+```sh
+git switch --detach "$new_sdk"
+git mv ReadMe.md README.zh-CN.md
+git commit -m 'chore: rename ReadMe.md to README.zh-CN.md to fix case conflict'
+new_base=$(git rev-parse HEAD)
+```
+
+将 `old_base` 和 `new_base` 分别设置为旧、新 README 兼容提交。在某个快照无需兼容提交时，使用该 SDK 快照提交作为边界。记录两个边界后，在临时检出目录按依赖顺序重放产品提交：
+
+```sh
+git switch --detach "$old_carplay"
+git rebase --no-update-refs --onto "$new_base" "$old_base"
+new_carplay=$(git rev-parse HEAD)
+git switch --detach "$old_projection"
+git rebase --no-update-refs --onto "$new_carplay" "$old_carplay"
+new_projection=$(git rev-parse HEAD)
+git range-diff "$old_base..$old_carplay" "$new_base..$new_carplay"
+git range-diff "$old_carplay..$old_projection" "$new_carplay..$new_projection"
+```
+
+核对新 SDK 是 `new_carplay` 的祖先，`new_carplay` 是 `new_projection` 的祖先。检查 `range-diff` 中有变化或被跳过的补丁，确认两个分支都包含 `README.md` 和 `README.zh-CN.md`，并逐一核对变基前后的子模块 gitlink。构建前初始化锁定版本的子模块并取回 Git LFS 文件。需要升级子模块时，使用独立的产品提交。
+
+运行 CarPlay 的 Host 回归和 LVGL 预览，构建 D213 Bootloader 与 CarPlay 镜像。变基 Android Auto 分支时，同时构建 `rtprojection` 和 `rtprojection_wireless`。记录 SDK、产品和子模块提交号、defconfig、构建结果及板端验证结果。重写已发布分支前先与协作者协调，确认预期的远端提交后再用带租约保护的强制推送。推送 `carplay-oss` 可能更新滚动 `preview` 发布。
 
 ## 固件构建
 

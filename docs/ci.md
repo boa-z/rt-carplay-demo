@@ -2,7 +2,7 @@
 
 # Repository, firmware CI and upstream
 
-The maintained SDK integration is [boa-z/luban-lite-carplay](https://github.com/boa-z/luban-lite-carplay), an independent repository with `carplay-oss` as its development and default branch. It starts from `boa-z/luban-lite` commit `4060f85bd27a1eb555952921139b77cc41bdeb4e` and records the existing public CarPlay integration as a separate commit. It does not import the unrelated development history of `jiachenin/luban-lite-jc`.
+The maintained SDK integration is [boa-z/luban-lite-carplay](https://github.com/boa-z/luban-lite-carplay), an independent repository with `carplay-oss` as its default branch. `codex/androidauto-integration` builds on `carplay-oss`. The upstream for both branches is the SDK snapshot mirror at `boa-z/luban-lite`.
 
 ```sh
 git clone --branch carplay-oss --recurse-submodules https://github.com/boa-z/luban-lite-carplay.git
@@ -11,7 +11,48 @@ git remote add upstream https://github.com/boa-z/luban-lite.git
 git fetch upstream master
 ```
 
-The upstream default branch is `master`. Fetching upstream does not automatically change the integration branch or its pinned submodules. Review SDK updates and build the firmware before incorporating them. The repository does not automatically open pull requests.
+## SDK baseline and rebase
+
+The November 20, 2026 rebase moved the SDK baseline from `4060f85bd27a1eb555952921139b77cc41bdeb4e` to `90a740fe9c1b663ea52ec3f7e1af35acde200aea`. Both snapshots report Luban-Lite v1.3.3. The newer snapshot corresponds to ArtInChip's Gitee commit `4bd5a1300f4793a2188529eebde96f012c2188bb`. Use the full mirror and Gitee commit IDs to identify the SDK version in build records and review notes.
+
+The mirror can replace `master` with an unrelated root commit. Keep each reviewed SDK snapshot under an immutable mirror tag keyed by its Gitee commit so collaborators can fetch it after `master` moves. Before fetching, record the SDK root of the current CarPlay branch and both product tips. Keep the old tips under backup refs or tags until verification and publication are complete. Use a disposable checkout on a case-sensitive filesystem, such as the Linux filesystem in WSL. This keeps build-generated configuration and bootloader files out of the active checkout and allows both upstream README paths to be checked out.
+
+```sh
+old_carplay=$(git rev-parse carplay-oss)
+old_projection=$(git rev-parse codex/androidauto-integration)
+old_sdk=$(git rev-list --max-parents=0 "$old_carplay")
+git merge-base --is-ancestor "$old_carplay" "$old_projection"
+git fetch upstream master
+new_sdk=$(git rev-parse upstream/master)
+git log -1 --format='%H %s' "$new_sdk"
+git diff --stat "$old_sdk" "$new_sdk"
+```
+
+Check that `old_sdk` is a single commit, the ancestor check passes, and `new_sdk` identifies the intended upstream snapshot. Find the existing README compatibility commit immediately after `old_sdk` and verify its diff. If the new snapshot still contains both `README.md` and `ReadMe.md`, prepare the new base in the disposable checkout:
+
+```sh
+git switch --detach "$new_sdk"
+git mv ReadMe.md README.zh-CN.md
+git commit -m 'chore: rename ReadMe.md to README.zh-CN.md to fix case conflict'
+new_base=$(git rev-parse HEAD)
+```
+
+With `old_base` set to the old compatibility commit and `new_base` set to the new one, replay the product commits in order. Use the corresponding SDK commit as the boundary if that snapshot needs no compatibility commit. Run these commands from the disposable checkout after recording both boundaries:
+
+```sh
+git switch --detach "$old_carplay"
+git rebase --no-update-refs --onto "$new_base" "$old_base"
+new_carplay=$(git rev-parse HEAD)
+git switch --detach "$old_projection"
+git rebase --no-update-refs --onto "$new_carplay" "$old_carplay"
+new_projection=$(git rev-parse HEAD)
+git range-diff "$old_base..$old_carplay" "$new_base..$new_carplay"
+git range-diff "$old_carplay..$old_projection" "$new_carplay..$new_projection"
+```
+
+Verify that the new SDK is an ancestor of `new_carplay` and that `new_carplay` is an ancestor of `new_projection`. Review any changed or dropped patches in `range-diff`. Check that both branch tips contain `README.md` and `README.zh-CN.md`, and compare each branch's submodule gitlinks against its previous tip. Initialize the pinned submodules and materialize Git LFS objects before building. Update submodule pins in separate product commits when required.
+
+Run the CarPlay host regressions and LVGL previews, build the D213 bootloader and CarPlay image, and build both `rtprojection` and `rtprojection_wireless` when rebasing the Android Auto branch. Record the SDK commit, product commit, submodule commits, defconfig, and build and board results. Coordinate any rewrite of published branches with collaborators and check the expected remote tips before a lease-protected force push. A push to `carplay-oss` can replace the rolling `preview` release.
 
 ## Firmware builds
 
