@@ -67,6 +67,7 @@ static bool s_handoff_requested, s_handoff_done;
 static unsigned s_handoff_generation;
 static uint64_t s_handoff_at_ms;
 static void iap2_session_advance(void *session, uint64_t at) { assert(session && at==now); }
+static void tunnel_send_gnss(uint64_t at) { assert(at==now); }
 '''
 source += function('platform/rtcp_bt_lubanlite.c', 'unsigned rtcp_bt_lubanlite_bootstrap_generation(void)')
 source += function('platform/rtcp_bt_lubanlite.c', 'int rtcp_bt_lubanlite_handoff(unsigned generation)')

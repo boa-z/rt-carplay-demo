@@ -56,6 +56,15 @@ void carplay_iap2_get_status(carplay_iap2_status_t *status);
 
 #include <stddef.h>
 #include <stdint.h>
+#include "rtcp/media.h"
+#include "rtcp/navigation.h"
+
+typedef struct
+{
+    rtcp_now_playing_cb_t on_now_playing;
+    rtcp_route_guidance_cb_t on_route_guidance;
+    void *context;
+} carplay_iap2_tunnel_callbacks_t;
 /* Invoked exclusively by the RTSP owner; independent from the RFCOMM pump. */
 bool carplay_iap2_tunnel_bytes(const uint8_t *, size_t, void *);
 bool carplay_iap2_tunnel_tick(void *);

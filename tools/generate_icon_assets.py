@@ -10,7 +10,7 @@ Only the generated C/H files are checked in: firmware builds never need the
 font, Pillow or Node.js.
 
 Usage:
-  python3 tools/generate_icon_assets.py <lucide.ttf>
+  python3 tools/generate_icon_assets.py <lucide-static@0.468.0/font/lucide.ttf>
 
 The Lucide font draws its icons in the same 24x24 viewBox as the design SVGs,
 so at size N an icon occupies the N x N box anchored at the placement the
@@ -25,20 +25,22 @@ from PIL import Image, ImageDraw, ImageFont
 
 # (C name, Lucide icon, codepoint, pixel size). One entry per placement.
 ICONS = (
-    ("arrow_left_22", "arrow-left", 0xE048, 22),
-    ("arrow_left_20", "arrow-left", 0xE048, 20),
-    ("smartphone_24", "smartphone", 0xE163, 24),
-    ("smartphone_42", "smartphone", 0xE163, 42),
-    ("settings_24", "settings", 0xE154, 24),
-    ("link_24", "link", 0xE102, 24),
-    ("volume_29", "volume-2", 0xE1AB, 29),
-    ("sun_29", "sun", 0xE178, 29),
-    ("download_26", "download", 0xE0B2, 26),
-    ("download_39", "download", 0xE0B2, 39),
-    ("refresh_24", "refresh-cw", 0xE145, 24),
-    ("chevron_right_23", "chevron-right", 0xE06F, 23),
-    ("ellipsis_25", "ellipsis", 0xE0B6, 25),
-    ("info_26", "info", 0xE0F9, 26),
+    ("arrow_left_22", "arrow-left", 0xE04C, 22),
+    ("arrow_left_20", "arrow-left", 0xE04C, 20),
+    ("smartphone_24", "smartphone", 0xE166, 24),
+    ("smartphone_42", "smartphone", 0xE166, 42),
+    ("settings_24", "settings", 0xE157, 24),
+    ("link_24", "link", 0xE107, 24),
+    ("volume_29", "volume-2", 0xE1AA, 29),
+    ("sun_29", "sun", 0xE17B, 29),
+    ("download_26", "download", 0xE0B6, 26),
+    ("download_39", "download", 0xE0B6, 39),
+    ("refresh_24", "refresh-cw", 0xE148, 24),
+    ("chevron_right_23", "chevron-right", 0xE073, 23),
+    ("ellipsis_25", "ellipsis", 0xE0BA, 25),
+    ("info_26", "info", 0xE0FE, 26),
+    ("languages_24", "languages", 0xE103, 24),
+    ("map_pin_24", "map-pin", 0xE114, 24),
 )
 
 SUPERSAMPLE = 8

@@ -30,3 +30,7 @@ extern const lv_image_dsc_t carplay_icon_chevron_right_23;
 extern const lv_image_dsc_t carplay_icon_ellipsis_25;
 /* Lucide info, 26px */
 extern const lv_image_dsc_t carplay_icon_info_26;
+/* Lucide languages, 24px */
+extern const lv_image_dsc_t carplay_icon_languages_24;
+/* Lucide map-pin, 24px */
+extern const lv_image_dsc_t carplay_icon_map_pin_24;

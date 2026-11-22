@@ -33,6 +33,22 @@ static unsigned ota_checks, ota_installs;
 static unsigned manager_calls;
 static unsigned stored_preferences[CARPLAY_PREF_COUNT];
 static bool preferences_error;
+static rtcp_appearance_setting_t model_phone_appearance;
+static carplay_phone_media_t model_phone_media;
+
+void carplay_app_set_phone_appearance(rtcp_appearance_setting_t appearance)
+{
+    model_phone_appearance = appearance;
+}
+rtcp_appearance_setting_t carplay_app_phone_appearance(void)
+{
+    return model_phone_appearance;
+}
+bool carplay_app_phone_media(carplay_phone_media_t *media)
+{
+    *media = model_phone_media;
+    return true;
+}
 
 uint32_t rt_tick_get_millisecond(void)
 {
@@ -332,6 +348,20 @@ static void assert_settings_page(settings_page_t expected)
     }
 }
 
+static void assert_header_row(lv_obj_t *page, const char *caption)
+{
+    lv_obj_t *heading = find_caption(page, caption);
+    lv_obj_t *back = lv_obj_get_child(page, 0);
+    assert(heading && lv_obj_has_flag(back, LV_OBJ_FLAG_CLICKABLE));
+    lv_obj_update_layout(page);
+    lv_area_t heading_area, back_area;
+    lv_obj_get_coords(heading, &heading_area);
+    lv_obj_get_coords(back, &back_area);
+    assert(heading_area.x1 > back_area.x2);
+    int heading_center = (heading_area.y1 + heading_area.y2) / 2;
+    assert(heading_center >= back_area.y1 && heading_center <= back_area.y2);
+}
+
 /* The back control is the first clickable child the header creates. */
 static void click_back(lv_obj_t *page)
 {
@@ -388,6 +418,7 @@ int main(int argc, char **argv)
     assert(lv_obj_has_flag(pages[PAGE_DASHBOARD], LV_OBJ_FLAG_HIDDEN));
     screenshot(argv[1], "02-connectivity_dark_en");
     assert(!strcmp(lv_label_get_text(conn_state), "Waiting for phone"));
+    assert_header_row(pages[PAGE_CONNECTIVITY], "Connectivity");
     assert(!lv_obj_has_state(conn_action, LV_STATE_DISABLED));
     inside(conn_state);
     inside(conn_action);
@@ -441,6 +472,7 @@ int main(int argc, char **argv)
     lv_obj_send_event(theme_buttons[0], LV_EVENT_CLICKED, NULL);
     assert(!carplay_ui_dark() && stored_preferences[CARPLAY_PREF_THEME] == 0);
     screenshot(argv[1], "03-settings_light_en");
+    assert_header_row(pages[PAGE_SETTINGS], "Settings");
     lv_obj_send_event(theme_buttons[1], LV_EVENT_CLICKED, NULL);
     assert(carplay_ui_dark());
     click_caption(pages[PAGE_SETTINGS], "Language");
@@ -448,6 +480,8 @@ int main(int argc, char **argv)
     lv_obj_send_event(language_buttons[0], LV_EVENT_CLICKED, NULL);
     assert(carplay_ui_is_chinese() && stored_preferences[CARPLAY_PREF_LANGUAGE] == 1);
     screenshot(argv[1], "03-settings_dark_zh");
+    assert_header_row(pages[PAGE_SETTINGS], "系统设置");
+    assert(lv_obj_get_height(settings_pages[SETTINGS_LANGUAGE]) > 386);
     assert(find_caption(pages[PAGE_SETTINGS], "媒体音量"));
     assert(find_caption(pages[PAGE_SETTINGS], "屏幕亮度"));
     assert(find_caption(pages[PAGE_SETTINGS], "外观"));
@@ -459,6 +493,94 @@ int main(int argc, char **argv)
     assert(find_caption(settings_pages[SETTINGS_ABOUT], "构建哈希"));
     assert(find_caption(settings_pages[SETTINGS_ABOUT], "构建时间 (UTC)"));
     screenshot(argv[1], "03-settings-about_dark_zh");
+    click_caption(pages[PAGE_SETTINGS], "手机控制");
+    assert_settings_page(SETTINGS_PHONE);
+    lv_obj_send_event(phone_appearance_buttons[RTCP_APPEARANCE_LIGHT], LV_EVENT_CLICKED, NULL);
+    assert(model_phone_appearance == RTCP_APPEARANCE_LIGHT && carplay_ui_dark());
+    model_phone_media = (carplay_phone_media_t){ .title = "Test Track", .artist = "Test Artist",
+                                                .has_playing = true, .playing = true,
+                                                .route_destination = "Central Station",
+                                                .route_road = "Main Street", .route_remaining = "2 km" };
+    update_page(NULL);
+    assert(!strcmp(lv_label_get_text(phone_title), "Test Track"));
+    assert(!strcmp(lv_label_get_text(phone_artist), "Test Artist"));
+    assert(!strcmp(lv_label_get_text(phone_playback), "播放中"));
+    assert(!strcmp(lv_label_get_text(phone_destination), "Central Station"));
+    assert(!strcmp(lv_label_get_text(phone_road), "Main Street"));
+    assert(!strcmp(lv_label_get_text(phone_remaining), "2 km"));
+    assert(find_caption(settings_pages[SETTINGS_PHONE], "路线引导"));
+    model_phone_media = (carplay_phone_media_t){ .title = "龘\U00020087 Live", .artist = "麤樂隊",
+                                                .route_destination = "龘龍站" };
+    update_page(NULL);
+    assert(!strcmp(lv_label_get_text(phone_title), "龘\U00020087 Live"));
+    assert(lv_obj_get_style_text_font(phone_title, 0) == &carplay_cjk_full_18);
+    assert(lv_obj_get_style_text_font(phone_destination, 0) == &carplay_cjk_full_18);
+    lv_font_glyph_dsc_t glyph;
+    assert(lv_font_get_glyph_dsc(&carplay_cjk_full_18, &glyph, 0x9f98, 0) && !glyph.is_placeholder);
+    assert(lv_font_get_glyph_dsc(&carplay_cjk_full_18, &glyph, 0x20087, 0) && !glyph.is_placeholder);
+    carplay_ui_set_chinese(false);
+    update_page(NULL);
+    assert(find_caption(settings_pages[SETTINGS_PHONE], "Route guidance"));
+    assert(!strcmp(lv_label_get_text(phone_artist), "麤樂隊"));
+    assert(lv_obj_get_style_text_font(phone_artist, 0) == &carplay_cjk_full_18);
+    carplay_ui_set_chinese(true);
+    update_page(NULL);
+    screenshot(argv[1], "03-settings-phone_dark_zh");
+    memset(&model_phone_media, 0, sizeof(model_phone_media));
+    update_page(NULL);
+    assert(!strcmp(lv_label_get_text(phone_title), "-") && !*lv_label_get_text(phone_playback));
+    assert(!strcmp(lv_label_get_text(phone_destination), "-") && !*lv_label_get_text(phone_road) &&
+           !*lv_label_get_text(phone_remaining));
+    lv_obj_scroll_to_view(settings_tabs[SETTINGS_GNSS], LV_ANIM_OFF);
+    click_caption(pages[PAGE_SETTINGS], "模拟定位");
+    assert_settings_page(SETTINGS_GNSS);
+    update_page(NULL);
+    assert(!strcmp(lv_label_get_text(gnss_state), "模拟定位已关闭"));
+    lv_obj_send_event(gnss_latitude, LV_EVENT_CLICKED, NULL);
+    assert(!lv_obj_has_flag(gnss_keyboard, LV_OBJ_FLAG_HIDDEN));
+    assert(lv_color_eq(lv_obj_get_style_bg_color(gnss_latitude, LV_PART_MAIN),
+                       lv_color_hex(carplay_ui_color(CARPLAY_UI_SURFACE2))));
+    assert(lv_color_eq(lv_obj_get_style_bg_color(gnss_keyboard, LV_PART_ITEMS),
+                       lv_color_hex(carplay_ui_color(CARPLAY_UI_SURFACE2))));
+    lv_color_t dark_input = lv_obj_get_style_bg_color(gnss_latitude, LV_PART_MAIN);
+    carplay_ui_set_dark(false);
+    assert(!lv_color_eq(dark_input, lv_obj_get_style_bg_color(gnss_latitude, LV_PART_MAIN)));
+    assert(lv_color_eq(lv_obj_get_style_bg_color(gnss_keyboard, LV_PART_ITEMS),
+                       lv_color_hex(carplay_ui_color(CARPLAY_UI_SURFACE2))));
+    carplay_ui_set_dark(true);
+    lv_textarea_set_text(gnss_latitude, "-33.450000");
+    lv_textarea_set_text(gnss_longitude, "-70.675000");
+    screenshot(argv[1], "03-settings-gnss-keyboard_dark_zh");
+    inside(gnss_keyboard);
+    lv_obj_send_event(gnss_buttons[1], LV_EVENT_CLICKED, NULL);
+    assert(lv_obj_has_flag(gnss_keyboard, LV_OBJ_FLAG_HIDDEN));
+    carplay_gnss_config_t gnss;
+    assert(carplay_gnss_get_config(&gnss) && gnss.enabled && gnss.latitude == -33450000 &&
+           gnss.longitude == -70675000);
+    lv_textarea_set_text(gnss_latitude, "91");
+    lv_obj_send_event(gnss_buttons[1], LV_EVENT_CLICKED, NULL);
+    assert(!strcmp(lv_label_get_text(settings_hint), "坐标格式或范围有误"));
+    lv_textarea_set_text(gnss_latitude, "-33.450000");
+    lv_obj_send_event(gnss_buttons[0], LV_EVENT_CLICKED, NULL);
+    assert(carplay_gnss_get_config(&gnss) && !gnss.enabled);
+    update_page(NULL);
+    screenshot(argv[1], "03-settings-gnss_dark_zh");
+    lv_obj_send_event(gnss_mode_buttons[1], LV_EVENT_CLICKED, NULL);
+    assert(!lv_obj_has_state(gnss_end_latitude, LV_STATE_DISABLED));
+    lv_textarea_set_text(gnss_end_latitude, "-33.450000");
+    lv_textarea_set_text(gnss_end_longitude, "-70.674000");
+    lv_textarea_set_text(gnss_speed, "0");
+    lv_obj_send_event(gnss_buttons[1], LV_EVENT_CLICKED, NULL);
+    assert(!strcmp(lv_label_get_text(settings_hint), "速度须为 1 至 300 km/h"));
+    lv_textarea_set_text(gnss_speed, "36");
+    lv_obj_send_event(gnss_speed, LV_EVENT_CLICKED, NULL);
+    screenshot(argv[1], "03-settings-gnss-route_dark_zh");
+    inside(gnss_keyboard);
+    lv_obj_send_event(gnss_buttons[1], LV_EVENT_CLICKED, NULL);
+    assert(carplay_gnss_get_config(&gnss) && gnss.enabled && gnss.moving &&
+           gnss.end_latitude == -33450000 && gnss.end_longitude == -70674000 && gnss.speed_kmh == 36);
+    lv_obj_send_event(gnss_apply_button, LV_EVENT_CLICKED, NULL);
+    lv_obj_send_event(gnss_buttons[0], LV_EVENT_CLICKED, NULL);
     click_caption(pages[PAGE_SETTINGS], "语言");
     lv_obj_send_event(language_buttons[1], LV_EVENT_CLICKED, NULL);
     assert(!carplay_ui_is_chinese());
@@ -545,6 +667,7 @@ int main(int argc, char **argv)
     /* Chinese covers every page, not only Settings. */
     carplay_ui_set_chinese(true);
     screenshot(argv[1], "04-ota_dark_zh");
+    assert_header_row(pages[PAGE_OTA], "系统更新");
     click_back(pages[PAGE_OTA]);
     assert(!lv_obj_has_flag(pages[PAGE_SETTINGS], LV_OBJ_FLAG_HIDDEN));
     assert_settings_page(SETTINGS_ABOUT);

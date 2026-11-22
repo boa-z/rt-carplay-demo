@@ -86,6 +86,16 @@ static void apply_style(const styled_t *s)
     case CARPLAY_STYLE_WARN_TEXT:
         lv_obj_set_style_text_color(obj, lv_color_hex(carplay_ui_color(CARPLAY_UI_RED)), sel);
         break;
+    case CARPLAY_STYLE_INPUT:
+        lv_obj_set_style_bg_color(obj, lv_color_hex(carplay_ui_color(CARPLAY_UI_SURFACE2)), sel);
+        lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, sel);
+        lv_obj_set_style_border_width(obj, 1, sel);
+        lv_obj_set_style_border_color(obj, lv_color_hex(carplay_ui_color(CARPLAY_UI_BORDER)), sel);
+        lv_obj_set_style_text_color(obj, lv_color_hex(carplay_ui_color(CARPLAY_UI_TEXT)), sel);
+        break;
+    case CARPLAY_STYLE_INPUT_CURSOR:
+        lv_obj_set_style_border_color(obj, lv_color_hex(carplay_ui_color(CARPLAY_UI_ACCENT)), sel);
+        break;
     case CARPLAY_STYLE_BAR_BG:
         lv_obj_set_style_bg_color(obj, lv_color_hex(carplay_ui_color(CARPLAY_UI_BAR)), sel);
         lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, sel);

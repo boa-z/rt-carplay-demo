@@ -264,6 +264,12 @@ typedef struct
     uint32_t screen_report_ms;
     uint32_t screen_report_frames;
     bool siri_pending;
+    carplay_phone_action_t phone_action_pending;
+    int phone_appearance_sent;
+    carplay_phone_media_t phone_media;
+#if defined(RTCARPLAY_IAP2)
+    carplay_iap2_tunnel_callbacks_t tunnel_callbacks;
+#endif
     bool cipher_pending;
     bool cipher_requested;
     bool cipher_applied;
@@ -300,6 +306,7 @@ static atomic_flag s_lifecycle_call = ATOMIC_FLAG_INIT;
 #define SNAPSHOT_WRITER (UINT_MAX / 2U + 1U)
 static atomic_uint s_snapshot_readers = ATOMIC_VAR_INIT(0);
 static atomic_int s_pairing_storage_result = ATOMIC_VAR_INIT(RTCP_OK);
+static atomic_int s_phone_appearance = ATOMIC_VAR_INIT(RTCP_APPEARANCE_AUTOMATIC);
 
 static bool snapshot_enter(void)
 {
@@ -601,12 +608,66 @@ static void on_audio_stop(unsigned slot, uint16_t type, void *context)
     carplay_audio_sink_slot_stop(slot);
 }
 
+static void publish_phone_volume(app_state_t *app)
+{
+    int percent = carplay_audio_sink_volume_percent();
+    if (percent >= 0)
+    {
+        float volume_db = percent == 0 ? -144.0f : -45.0f + (float)percent * 0.45f;
+        (void)rtcp_receiver_set_volume_db(app->receiver, volume_db);
+    }
+}
+
 static void on_volume(float volume_db, void *context)
 {
     app_state_t *app = context;
     if (!app->audio_started || s_receiver_shutting_down)
         return;
     carplay_audio_sink_set_volume_db(volume_db);
+    publish_phone_volume(app);
+}
+#endif
+
+static void on_now_playing(const rtcp_now_playing_t *update, void *context)
+{
+    app_state_t *app = context;
+    if (rt_mutex_take(app->lock, RT_WAITING_FOREVER) != RT_EOK)
+        return;
+    if (update->title)
+        rt_snprintf(app->phone_media.title, sizeof(app->phone_media.title), "%s", update->title);
+    if (update->artist)
+        rt_snprintf(app->phone_media.artist, sizeof(app->phone_media.artist), "%s", update->artist);
+    if (update->has_playing)
+    {
+        app->phone_media.has_playing = true;
+        app->phone_media.playing = update->playing;
+    }
+    (void)rt_mutex_release(app->lock);
+}
+
+#if defined(RTCARPLAY_IAP2)
+static void on_route_guidance(const rtcp_route_guidance_t *update, void *context)
+{
+    app_state_t *app = context;
+    if (rt_mutex_take(app->lock, RT_WAITING_FOREVER) != RT_EOK)
+        return;
+    carplay_phone_media_t *media = &app->phone_media;
+    if (update->has_state && update->state == 0U)
+    {
+        media->route_road[0] = '\0';
+        media->route_destination[0] = '\0';
+        media->route_remaining[0] = '\0';
+    }
+    else
+    {
+        if (update->road)
+            rt_snprintf(media->route_road, sizeof(media->route_road), "%s", update->road);
+        if (update->destination)
+            rt_snprintf(media->route_destination, sizeof(media->route_destination), "%s", update->destination);
+        if (update->distance_remaining)
+            rt_snprintf(media->route_remaining, sizeof(media->route_remaining), "%s", update->distance_remaining);
+    }
+    (void)rt_mutex_release(app->lock);
 }
 #endif
 
@@ -616,6 +677,14 @@ static void on_event_state(bool connected, void *context)
     if (s_receiver_shutting_down)
         return;
     app->airplay_connected = connected;
+    app->phone_appearance_sent = -1;
+    if (!connected && rt_mutex_take(app->lock, RT_WAITING_FOREVER) == RT_EOK)
+    {
+        app->phone_action_pending = 0;
+        app->siri_pending = false;
+        memset(&app->phone_media, 0, sizeof(app->phone_media));
+        (void)rt_mutex_release(app->lock);
+    }
     APP_LOG("event channel %s", connected ? "connected" : "closed");
     if (!connected && app->bridge != NULL)
     {
@@ -1027,6 +1096,7 @@ static void publish_control_status(app_state_t *app, uint32_t now_ms)
 static void drain_receiver_commands(app_state_t *app)
 {
     bool siri = false;
+    carplay_phone_action_t phone_action = 0;
     if (rt_mutex_take(app->lock, RT_WAITING_NO) == RT_EOK)
     {
         if (app->ctrl_enable_pending)
@@ -1041,6 +1111,8 @@ static void drain_receiver_commands(app_state_t *app)
         }
         siri = app->siri_pending;
         app->siri_pending = false;
+        phone_action = app->phone_action_pending;
+        app->phone_action_pending = 0;
         if (app->cipher_pending &&
             rtcp_receiver_set_single_cipher_frame(app->receiver,
                                                   app->cipher_requested) == RTCP_OK)
@@ -1052,6 +1124,35 @@ static void drain_receiver_commands(app_state_t *app)
     }
     if (siri && !rtcp_receiver_request_siri(app->receiver))
         APP_LOG("Siri request unavailable: event channel not ready");
+
+    if (!app->airplay_connected)
+        return;
+    rtcp_appearance_setting_t appearance = carplay_app_phone_appearance();
+    if ((int)appearance != app->phone_appearance_sent)
+    {
+        int result = rtcp_receiver_set_appearance(app->receiver, appearance, false, false);
+        app->phone_appearance_sent = (int)appearance;
+        if (result != RTCP_OK)
+            APP_LOG("phone appearance command failed rc=%d", result);
+    }
+    if (phone_action == CARPLAY_PHONE_BACK || phone_action == CARPLAY_PHONE_HOME)
+    {
+        const rtcp_knob_report_t press = { .home = phone_action == CARPLAY_PHONE_HOME,
+                                          .back = phone_action == CARPLAY_PHONE_BACK };
+        const rtcp_knob_report_t release = { 0 };
+        if (rtcp_receiver_send_knob(app->receiver, &press))
+            (void)rtcp_receiver_send_knob(app->receiver, &release);
+    }
+    else if (phone_action)
+    {
+        rtcp_media_button_t button = RTCP_MEDIA_PLAY_PAUSE;
+        if (phone_action == CARPLAY_PHONE_PREVIOUS)
+            button = RTCP_MEDIA_PREVIOUS;
+        else if (phone_action == CARPLAY_PHONE_NEXT)
+            button = RTCP_MEDIA_NEXT;
+        if (rtcp_receiver_send_media_button(app->receiver, button))
+            (void)rtcp_receiver_send_media_button(app->receiver, RTCP_MEDIA_RELEASE);
+    }
 }
 
 static void poll_thread(void *argument)
@@ -1086,12 +1187,18 @@ static void poll_thread(void *argument)
         /* Snapshot on the owner thread; the shell never dereferences a
          * screen server that the protocol loop may tear down. */
         uint32_t sample_ms = (uint32_t)app->os.now_ms();
+#if defined(RTCARPLAY_AUDIO)
+        if ((uint32_t)(sample_ms - app->screen_sample_ms) >= 100U && app->audio_started)
+            publish_phone_volume(app);
+#endif
         if ((uint32_t)(sample_ms - app->screen_sample_ms) >= 100U &&
             rt_mutex_take(app->lock, RT_WAITING_NO) == RT_EOK)
         {
             rtcp_receiver_diagnostics_t diagnostics;
             (void)rtcp_receiver_get_diagnostics(app->receiver, &diagnostics);
             (void)rtcp_receiver_get_state(app->receiver, &app->receiver_state);
+            if (!app->receiver_state.transport_connected)
+                memset(&app->phone_media, 0, sizeof(app->phone_media));
             app->screen_stats = diagnostics.screen;
             app->audio_stats = diagnostics.audio;
             app->timing_stats = diagnostics.timing;
@@ -1387,6 +1494,18 @@ static int build_announcement_data(app_state_t *app)
     info.height_physical_mm = (uint16_t)(((uint32_t)RTCARPLAY_PANEL_HEIGHT_MM * app->height + 300U) / 600U);
 #endif
     info.max_fps = 30U;
+    const rtcp_appearance_setting_t appearance = carplay_app_phone_appearance();
+    const rtcp_display_profile_t display = {
+        .struct_size = sizeof(display),
+        .ui_night = appearance == RTCP_APPEARANCE_DARK,
+        .map_night = appearance == RTCP_APPEARANCE_DARK,
+        .appearance_setting = (uint8_t)appearance,
+    };
+    info.main_display_profile = &display;
+#if defined(RTCARPLAY_DEMO_LAUNCHER)
+    info.hid_knob = true;
+    info.hid_media = true;
+#endif
 #if defined(RTCARPLAY_VEHICLE_PROTOCOL_DEMO)
     info.vehicle = app->vehicle_demo.model;
 #endif
@@ -1620,6 +1739,10 @@ static int carplay_app_start_owned(const carplay_app_config_t *config)
 #if defined(RTCARPLAY_IAP2)
     if (!app->wired)
     {
+        app->tunnel_callbacks.on_now_playing = on_now_playing;
+        app->tunnel_callbacks.on_route_guidance = on_route_guidance;
+        app->tunnel_callbacks.context = app;
+        receiver_config.iap2.context = &app->tunnel_callbacks;
         receiver_config.iap2.on_bytes = carplay_iap2_tunnel_bytes;
         receiver_config.iap2.on_tick = carplay_iap2_tunnel_tick;
         receiver_config.iap2.on_stop = carplay_iap2_tunnel_stop;
@@ -1643,6 +1766,12 @@ static int carplay_app_start_owned(const carplay_app_config_t *config)
     }
 #endif
     result = rtcp_receiver_create(&receiver_config, &app->receiver);
+    if (result == RTCP_OK)
+        (void)rtcp_receiver_set_now_playing_callback(app->receiver, on_now_playing, app);
+#if defined(RTCARPLAY_AUDIO)
+    if (result == RTCP_OK && app->audio_started)
+        publish_phone_volume(app);
+#endif
     if (result == RTCP_OK)
         result = rtcp_receiver_start(app->receiver);
     if (result != RTCP_OK)
@@ -2172,12 +2301,25 @@ static int carplay_status_owned(int argc, char **argv)
                (unsigned)points, reads, events);
 #endif
     unsigned queued = 0, full = 0;
+    bool media_title = false, media_artist = false, media_state = false, playing = false;
+    bool route_road = false, route_destination = false, route_remaining = false;
     if (s_app.lock && rt_mutex_take(s_app.lock, RT_WAITING_FOREVER) == RT_EOK)
     {
         queued = s_app.touch_queued;
         full = s_app.touch_queue_full;
+        media_title = s_app.phone_media.title[0] != '\0';
+        media_artist = s_app.phone_media.artist[0] != '\0';
+        media_state = s_app.phone_media.has_playing;
+        playing = s_app.phone_media.playing;
+        route_road = s_app.phone_media.route_road[0] != '\0';
+        route_destination = s_app.phone_media.route_destination[0] != '\0';
+        route_remaining = s_app.phone_media.route_remaining[0] != '\0';
         (void)rt_mutex_release(s_app.lock);
     }
+    rt_kprintf("carplay now_playing: title=%u artist=%u playback=%u playing=%u\n",
+               media_title ? 1U : 0U, media_artist ? 1U : 0U, media_state ? 1U : 0U, playing ? 1U : 0U);
+    rt_kprintf("carplay route_guidance: road=%u destination=%u remaining=%u\n",
+               route_road ? 1U : 0U, route_destination ? 1U : 0U, route_remaining ? 1U : 0U);
     rt_kprintf("carplay touch: queued=%u queue_full=%u HID_sent=%u HID_failed=%u\n",
                queued, full,
                s_app.hid_reports_sent, s_app.hid_reports_failed);
@@ -2653,6 +2795,54 @@ int carplay_app_request_siri(void)
     atomic_flag_clear_explicit(&s_lifecycle_call, memory_order_release);
     return result;
 }
+
+void carplay_app_set_phone_appearance(rtcp_appearance_setting_t appearance)
+{
+    if ((unsigned)appearance <= RTCP_APPEARANCE_DARK)
+        atomic_store(&s_phone_appearance, appearance);
+}
+
+rtcp_appearance_setting_t carplay_app_phone_appearance(void)
+{
+    return (rtcp_appearance_setting_t)atomic_load(&s_phone_appearance);
+}
+
+int carplay_app_phone_action(carplay_phone_action_t action)
+{
+    if (action < CARPLAY_PHONE_BACK || action > CARPLAY_PHONE_NEXT)
+        return RTCP_EINVAL;
+    if (!snapshot_enter())
+        return RTCP_ESTATE;
+    int result = RTCP_ESTATE;
+    if (s_receiver_running && !s_receiver_shutting_down && s_app.lock &&
+        rt_mutex_take(s_app.lock, RT_WAITING_NO) == RT_EOK)
+    {
+        if (s_app.airplay_connected && s_app.phone_action_pending == 0)
+        {
+            s_app.phone_action_pending = action;
+            result = RTCP_OK;
+        }
+        (void)rt_mutex_release(s_app.lock);
+    }
+    snapshot_leave();
+    return result;
+}
+
+bool carplay_app_phone_media(carplay_phone_media_t *media)
+{
+    if (!media || !snapshot_enter())
+        return false;
+    bool available = false;
+    if (s_receiver_running && !s_receiver_shutting_down && s_app.lock &&
+        rt_mutex_take(s_app.lock, RT_WAITING_NO) == RT_EOK)
+    {
+        *media = s_app.phone_media;
+        available = true;
+        (void)rt_mutex_release(s_app.lock);
+    }
+    snapshot_leave();
+    return available;
+}
 static int cmd_carplay_siri(int argc, char **argv)
 {
     (void)argc;
@@ -2662,6 +2852,34 @@ static int cmd_carplay_siri(int argc, char **argv)
     return rc;
 }
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_siri, carplay_siri, Request Siri through the encrypted event channel);
+
+#if defined(RTCARPLAY_DEMO_LAUNCHER)
+static int cmd_carplay_phone_key(int argc, char **argv)
+{
+    static const char *const names[] = {
+        [CARPLAY_PHONE_BACK] = "back",
+        [CARPLAY_PHONE_HOME] = "home",
+        [CARPLAY_PHONE_PLAY_PAUSE] = "play-pause",
+        [CARPLAY_PHONE_PREVIOUS] = "previous",
+        [CARPLAY_PHONE_NEXT] = "next",
+    };
+    if (argc == 2)
+    {
+        for (unsigned action = CARPLAY_PHONE_BACK; action < sizeof(names) / sizeof(names[0]); ++action)
+        {
+            if (strcmp(argv[1], names[action]) == 0)
+            {
+                int result = carplay_app_phone_action((carplay_phone_action_t)action);
+                rt_kprintf("carplay_phone_key: %s rc=%d\n", result == RTCP_OK ? "queued" : "unavailable", result);
+                return result;
+            }
+        }
+    }
+    rt_kprintf("Usage: carplay_phone_key back|home|play-pause|previous|next\n");
+    return RTCP_EINVAL;
+}
+MSH_CMD_EXPORT_ALIAS(cmd_carplay_phone_key, carplay_phone_key, Queue a CarPlay HID button);
+#endif
 
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_start, carplay_start,
                      Start the rt - carplay receiver);

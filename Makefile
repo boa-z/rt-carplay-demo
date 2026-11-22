@@ -187,7 +187,7 @@ check-lubanlite-demo:
 	  -I$(SDK_ROOT)/packages/artinchip/lvgl-ui/lvgl_v9/lvgl \
 	  -DRTCP_CONNECTION_SOURCE='"$(abspath $(SDK_ROOT))/application/rt-thread/rtcarplay/app/connection_manager.c"' \
 	  -DRTCP_LAUNCHER_SOURCE='"$(abspath $(SDK_ROOT))/application/rt-thread/rtcarplay/ui/lvgl_launcher.c"' \
-	  -ffunction-sections -fdata-sections tests/unit/test_lubanlite_demo.c app/pairing_manager.c \
+	  -ffunction-sections -fdata-sections tests/unit/test_lubanlite_demo.c app/pairing_manager.c ui/icons/carplay_icons.c \
 	  -Wl,--gc-sections -o $(BUILD)/test_lubanlite_demo
 	$(BUILD)/test_lubanlite_demo
 

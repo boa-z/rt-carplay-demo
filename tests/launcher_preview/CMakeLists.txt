@@ -28,7 +28,7 @@ set(UI_SOURCES
 
 # Actual V4 pages with modeled connection, audio, backlight and OTA owners.
 add_executable(launcher_preview main.c)
-target_sources(launcher_preview PRIVATE ${UI_SOURCES})
+target_sources(launcher_preview PRIVATE ${UI_SOURCES} ../../ui/fonts/carplay_cjk_full_18.c ../../app/gnss_demo.c)
 target_include_directories(launcher_preview PRIVATE
     ../../ui ../support/lubanlite_demo ../../app ../../platform
     "${SDK_ROOT}/packages/third-party/rt-carplay/include"

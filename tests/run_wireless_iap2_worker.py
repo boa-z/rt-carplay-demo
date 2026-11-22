@@ -28,6 +28,7 @@ owner = text[re.search(r"typedef\s+struct\s*\{", text).start():text.index("/* --
 owner = owner.replace(function("static const struct rtcp_mfi *link_mfi(void)"),
                       "static const struct rtcp_mfi *link_mfi(void);")
 source = r'''
+#define _POSIX_C_SOURCE 200809L
 #include <assert.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -40,6 +41,7 @@ source = r'''
 #include "iap2_link_lubanlite.h"
 #include "carplay_app.h"
 #include "carplay_mfi_provider.h"
+#include "gnss_demo.h"
 #include "iap2_session.h"
 #include "rtcp_lubanlite.h"
 #include "rtcp_rtthread.h"
@@ -58,6 +60,34 @@ source = r'''
 #define IAP2_LINK_LANGUAGE "en"
 '''
 source += owner
+source += r'''
+static unsigned location_request, simulated_writes;
+static uint64_t simulated_now = 100;
+static char last_rmc[RTCP_LOCATION_NMEA_MAX + 1U];
+static unsigned test_location_requested(const iap2_session_t *session)
+{
+    assert(session == s_tunnel.session);
+    return location_request;
+}
+static bool test_send_location(iap2_session_t *session, const char *sentence, size_t length, uint64_t now)
+{
+    assert(session == s_tunnel.session && now == simulated_now && length == strlen(sentence));
+    assert(length <= RTCP_LOCATION_NMEA_MAX && sentence[0] == '$');
+    if (simulated_writes < 5)
+        assert(strstr(sentence, ",3327.00000,S,07040.50000,W,"));
+    if (!strncmp(sentence, "$GPRMC", 6))
+        memcpy(last_rmc, sentence, length + 1U);
+    unsigned checksum = 0, wire_checksum = 0;
+    assert(sentence[length - 3] == '*' && sscanf(sentence + length - 2, "%2x", &wire_checksum) == 1);
+    for (size_t index = 1; index < length - 3; ++index)
+        checksum ^= (unsigned char)sentence[index];
+    assert(checksum == wire_checksum);
+    ++simulated_writes;
+    return true;
+}
+#define iap2_session_location_requested test_location_requested
+#define iap2_session_send_location test_send_location
+'''
 source += text[text.index("bool carplay_iap2_tunnel_bytes("):]
 source += r'''
 struct test_thread { void (*entry)(void *); void *argument; };
@@ -114,7 +144,7 @@ int carplay_app_iap2_info(carplay_app_iap2_info_t *out) {
 bool carplay_app_send_iap(const uint8_t *data, size_t length) {
     (void)data; (void)length; return true;
 }
-static uint64_t now_ms(void) { return 100; }
+static uint64_t now_ms(void) { return simulated_now; }
 const struct rtcp_os rtcp_os_rtthread = {.now_ms = now_ms};
 static int enable(const char *name, const uint8_t address[6]) {
     assert(!strcmp(name, "rt-carplay") && !address && s_link.running); ++enables;
@@ -266,6 +296,85 @@ int main(void) {
     }
     atomic_store(&reader_done, true); assert(!pthread_join(observer, NULL));
     assert(receives == 32 && writes && claims == releases && !claimed && !pending);
+    carplay_gnss_config_t config;
+    assert(carplay_gnss_get_config(&config) && !config.enabled);
+    assert(carplay_gnss_parse("-33.450000", 90, &config.latitude));
+    assert(carplay_gnss_parse("-70.675", 180, &config.longitude));
+    assert(!carplay_gnss_parse("90.000001", 90, &config.latitude));
+    assert(!carplay_gnss_parse("121.1234567", 180, &config.longitude));
+    assert(!carplay_gnss_parse("-180.0e0", 180, &config.longitude));
+    assert(carplay_iap2_tunnel_bytes(NULL, 0, NULL));
+    carplay_gnss_status_t gnss;
+    carplay_gnss_get_status(&gnss);
+    assert(gnss.tunnel && !gnss.advertised);
+    config.enabled = true;
+    assert(carplay_gnss_set_config(&config));
+    assert(carplay_iap2_tunnel_tick(NULL) && simulated_writes == 0);
+    carplay_iap2_tunnel_stop(NULL);
+    assert(carplay_iap2_tunnel_bytes(NULL, 0, NULL));
+    carplay_gnss_get_status(&gnss);
+    assert(gnss.tunnel && gnss.advertised);
+    assert(carplay_iap2_tunnel_tick(NULL) && simulated_writes == 0);
+    location_request = RTCP_LOCATION_GGA | RTCP_LOCATION_RMC;
+    assert(carplay_iap2_tunnel_tick(NULL) && simulated_writes == 2);
+    simulated_now += 999;
+    assert(carplay_iap2_tunnel_tick(NULL) && simulated_writes == 2);
+    ++simulated_now;
+    assert(carplay_iap2_tunnel_tick(NULL) && simulated_writes == 4);
+    location_request = RTCP_LOCATION_RMC;
+    simulated_now += 1000;
+    assert(carplay_iap2_tunnel_tick(NULL) && simulated_writes == 5);
+    carplay_gnss_get_status(&gnss);
+    assert(gnss.gga_queued == 2 && gnss.rmc_queued == 3 && !gnss.failed);
+
+    config.latitude = 0;
+    config.longitude = 0;
+    config.end_latitude = 0;
+    config.end_longitude = 180;
+    config.moving = true;
+    config.speed_kmh = 0;
+    assert(!carplay_gnss_set_config(&config));
+    config.speed_kmh = 36;
+    assert(carplay_gnss_set_config(&config));
+    simulated_now += 1000;
+    assert(carplay_iap2_tunnel_tick(NULL) && simulated_writes == 6);
+    assert(strstr(last_rmc, ",0000.00000,N,00000.00000,E,19.44,90.0,"));
+    simulated_now += 1000;
+    assert(carplay_iap2_tunnel_tick(NULL) && simulated_writes == 7);
+    assert(strstr(last_rmc, ",0000.00000,N,00000.00540,E,19.44,90.0,"));
+    carplay_gnss_get_status(&gnss);
+    assert(gnss.motion == CARPLAY_GNSS_MOVING);
+    simulated_now += 2000;
+    assert(carplay_iap2_tunnel_tick(NULL) && simulated_writes == 8);
+    assert(strstr(last_rmc, ",0000.00000,N,00000.01080,E,0.00,0.0,"));
+    carplay_gnss_get_status(&gnss);
+    assert(gnss.motion == CARPLAY_GNSS_ARRIVED && !gnss.failed);
+    config.speed_kmh = 72;
+    assert(carplay_gnss_set_config(&config));
+    simulated_now += 1000;
+    assert(carplay_iap2_tunnel_tick(NULL) && simulated_writes == 9);
+    assert(strstr(last_rmc, ",0000.00000,N,00000.00000,E,38.88,90.0,"));
+
+    carplay_gnss_config_t dateline = config;
+    dateline.longitude = 179999990;
+    dateline.end_longitude = -179999000;
+    carplay_gnss_fix_t across = carplay_gnss_sample(&dateline, 1000);
+    assert(across.longitude < -179999000 && across.course_deci == 900);
+    dateline.longitude = 180000000;
+    dateline.end_longitude = -180000000;
+    assert(!carplay_gnss_valid_config(&dateline));
+    dateline.longitude = 0;
+    assert(!carplay_gnss_valid_config(&dateline));
+
+    config.enabled = false;
+    assert(carplay_gnss_set_config(&config));
+    simulated_now += 1000;
+    assert(carplay_iap2_tunnel_tick(NULL) && simulated_writes == 9);
+    carplay_iap2_tunnel_stop(NULL);
+    carplay_gnss_get_status(&gnss);
+    assert(!gnss.tunnel && !gnss.requested && !gnss.gga_queued && !gnss.rmc_queued);
+    assert(cmd_carplay_gnss(0, NULL) == RTCP_OK);
+    puts("Simulated GNSS: offer, subscription, signed checksummed NMEA, paced A-to-B motion, arrival, restart, dateline and stop passed");
     puts("Actual wireless iAP2 owner: rollback, command gate, pre-scheduling stop, startup cancellation, provider ownership, self-join, timeout retention and 32 restarts with concurrent atomic readers passed");
 }
 '''
@@ -277,6 +386,6 @@ with tempfile.TemporaryDirectory(prefix="wireless-iap2-worker-") as directory:
     libraries = [rtcp / "build/librtcp_core.a", rtcp / "build/mbedtls/libmbedcrypto.a"]
     subprocess.run([os.environ.get("CC", "cc"), "-std=c11", "-Wall", "-Wextra", "-Werror",
                     "-fsanitize=address,undefined", "-fno-pie", "-no-pie", "-pthread",
-                    *["-I" + str(item) for item in includes], str(path / "test.c"),
-                    *map(str, libraries), "-o", str(path / "test")], check=True)
+                    *["-I" + str(item) for item in includes], str(path / "test.c"), str(root / "app/gnss_demo.c"),
+                    *map(str, libraries), "-lm", "-o", str(path / "test")], check=True)
     subprocess.run([str(path / "test")], check=True, timeout=30)

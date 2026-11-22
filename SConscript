@@ -30,6 +30,8 @@ if GetDepend('RTCARPLAY_DEMO_LAUNCHER'):
     # disabled stub when the image has no audio/PWM driver.
     src += Glob('platform/audio_volume_lubanlite.c')
     src += Glob('platform/backlight_lubanlite.c')
+if GetDepend('RTCARPLAY_D213_BOARD_KEYS'):
+    src += Glob('platform/board_keys_lubanlite.c')
 if GetDepend('RTCARPLAY_SINGLE_SCREEN_FUSION'):
     src += Glob('app/fusion_display.c')
 if GetDepend('RTCARPLAY_VEHICLE_PROTOCOL_DEMO'):
@@ -79,6 +81,7 @@ if GetDepend('RTCARPLAY_TOUCH_PANEL'):
     src += Glob('platform/touch_panel_lubanlite.c')
 if GetDepend('RTCARPLAY_IAP2'):
     src += Glob('app/iap2_link_lubanlite.c')
+    src += Glob('app/gnss_demo.c')
 if GetDepend('RTCARPLAY_USB_HOST'):
     src += Glob('app/carplay_usb_cmd.c') + Glob('app/usb_pair_cache.c')
 

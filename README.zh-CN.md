@@ -68,6 +68,35 @@ ipheth_status
 
 设置 → 关于显示 Luban-Lite SDK 版本、rt-carplay SDK 版本、固件提交和 UTC 构建时间。设置 → 系统更新显示当前固件版本、源码提交和 A/B 槽位。检查更新通过有线以太网读取包含版本、完整提交、板型、包大小及 SHA256 的严格清单。不同提交会作为预览版本提供，其中也可能包含较旧提交。安装需要确认该确切目标并断开 CarPlay。工作线程将完整包暂存到 `/data`，校验存储内容后写入非活动槽位并重启。控制台 `carplay_ota status`、`carplay_ota check`、`carplay_ota install` 共用同一个任务入口。详见 [OTA 更新策略与验证](docs/zh-CN/ota.md)。
 
+## Classic CarPlay 控制
+
+在设置 → 手机控制中，可独立于 Launcher 主题请求 iPhone 使用自动、浅色或深色外观。本板自动模式使用日间外观。iPhone 上报播放信息后，页面显示曲名、艺人和播放状态。命令排队和套接字写入只反映接收端的进度，实际效果请查看 iPhone 渲染的 CarPlay 界面及地图。
+
+无线模式下，Demo 同时接收 AirPlay 与 Wi-Fi 隧道内的 iAP2 播放信息。诊断时从连接前开始录串口，依次播放、切歌和暂停，再执行 `carplay_status`。保留含 `now_playing` 的行即可检查 `0x5000` 入队、`0x5001` 或 AirPlay 更新的解析，以及 Demo 缓存的字段状态。日志不含曲名或艺人文本。
+
+无线 iAP2 隧道还会更新「设置 → 手机控制」中的「路线引导」卡片。在 iPhone 上开始导航，查看手机提供的目的地、当前道路和剩余距离，再结束路线和断开连接，确认卡片内容清除。`carplay_status` 的 `carplay route_guidance` 行记录各字段是否收到。
+
+「正在播放」和「路线引导」在中英文界面均使用完整的 Noto Sans SC 字符映射。见[字库覆盖与生成方式](ui/fonts/README.md)。
+
+### 模拟定位
+
+未接 GPS 模块的 D213 可以打开「设置 → 模拟定位」。「固定点」使用 A 点。「A 点到 B 点」需要两个不同且非对跖的坐标，以及 1 至 300 km/h 的整数速度。经纬度使用带正负号的十进制度，最多六位小数。先选择「开启」再无线连接。若现有会话建立时模拟处于关闭状态，开启后需重新连接。收到手机定位请求后，模拟沿大圆路径从 A 出发，到 B 后继续以零速度发送 B 点。点「应用」后，下一次采样会更新固定点或从 A 重新出发。点「关闭」会停止提交新定位。配置仅保存在内存，重启后模拟默认关闭。
+
+无线 iAP2 隧道在识别阶段声明 GGA/RMC 能力，收到请求后每秒为每个请求的类型发送一条。移动时 RMC 包含以节为单位的地速和相对于真北的航向。`carplay_gnss` 显示启用状态、能力声明、请求位掩码（`0x1` 为 GGA、`0x2` 为 RMC）、本次会话入队及失败计数、时间来源和移动状态。板载时钟未设置时，`clock=fixture` 表示使用合成的 2026 年 1 月 1 日 UTC 日期。验证时无线连接后打开地图，对照状态从 `moving` 变为 `arrived` 时地图上的位置。入队计数表示 SDK 接收了待发数据，iPhone 自行决定是否采用外部定位。
+
+D213ECV-DEMO V4.0 的 K4–K7 共用 `PA.6` 上的 `KEYADC` 电阻梯形网络，见原理图第 2、6 页和硬件说明书 §2.5.2（印刷页码 9）。Demo defconfig 启用 `RTCARPLAY_D213_BOARD_KEYS` 和 GPAI 通道 6，使用复用功能 2，并关闭内部上下拉。`RESET`、`UBOOT` 和 `WAKEUP` 保留板级用途。CarPlay 会话活动时，短按实体键将下表动作加入发送队列。
+
+| 板上按键 | 图纸标注电压 | Demo 功能 | RT-Thread 串口命令 |
+| --- | --- | --- | --- |
+| K4 UP | 0.3 V | CarPlay 返回 | `carplay_phone_key back` |
+| K5 DOWN | 0.6 V | CarPlay 主页 | `carplay_phone_key home` |
+| K6 LEFT | 1.0 V | Siri | `carplay_siri` |
+| K7 RIGHT | 1.3 V | 播放或暂停 | `carplay_phone_key play-pause` |
+
+空闲及逐键按住时运行 `carplay_board_keys`，可查看最近一次 ADC 计数和识别结果。初始窗口采用 BOM 阻值（10 kΩ 上拉，梯形电阻依次为 1、2.2、4.7、6.8 kΩ）、3.3 V 上拉电源及 SDK 的 3.0 V、12 位 GPAI 量程。图纸标注电压和分压计算有差异，需上板核对窗口。适配每 20 ms 采样，按下和释放均需连续三次读数确认，长按只触发一次。Receiver 工作线程发送手机控制命令。串口也支持 `carplay_phone_key previous` 和 `carplay_phone_key next`。融合画面的 Dashboard 入口返回本机 Launcher。
+
+D213 与 iPhone 验收时，先用 USB 连接，逐个测试实体键，包括长按和释放后再按。用 `carplay_board_keys` 核对 ADC 识别，必要时执行上表串口命令单独验证手机侧行为。保持地图可见，切换手机深浅外观并检查本机 Launcher 主题。播放音乐时将本机音量调至静音再恢复，切歌后核对播放信息，分别触发导航、通话和 Siri，检查压低音量、恢复、麦克风收音和音质。播放中拔掉 USB，再让已配对的 iPhone 切换到无线连接，强制断开 Wi-Fi 后重复验证。用 `carplay_connection status` 查看连接管理器状态，确认断开后旧的播放信息清空。
+
 ## 应用配置
 
 `rt-carplay application` 菜单拥有板级选项，通用 SDK 选项在 SDK Kconfig 中有唯一 Owner。GUI 配置启用下列功能，Headless 则有意省略媒体和输入设备。

@@ -4,6 +4,7 @@
  * volume, backlight, display mode and OTA state come from their real owners. */
 #include <rtthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
 #include "lvgl.h"
@@ -23,6 +24,16 @@
 #include "audio_volume_lubanlite.h"
 #include "backlight_lubanlite.h"
 #include "carplay_build_info.h"
+#if defined(RTCARPLAY_IAP2)
+#include "gnss_demo.h"
+#endif
+
+static void set_phone_text(lv_obj_t *label, const char *value)
+{
+    if (strcmp(lv_label_get_text(label), value) != 0)
+        lv_label_set_text(label, value);
+}
+
 #define lv_label_set_text     carplay_ui_set_text
 #define lv_label_set_text_fmt carplay_ui_set_text_fmt
 #define TR                    carplay_ui_translate
@@ -57,14 +68,20 @@ typedef enum
     SETTINGS_SOUND,
     SETTINGS_LANGUAGE,
     SETTINGS_ABOUT,
+    SETTINGS_PHONE,
+#if defined(RTCARPLAY_IAP2)
+    SETTINGS_GNSS,
+#endif
     SETTINGS_PAGE_COUNT
 } settings_page_t;
 
 enum
 {
     SETTINGS_DETAIL_WIDTH = 632,
-    SETTINGS_DETAIL_HEIGHT = 386,
-    SETTINGS_SIDEBAR_WIDTH = 252
+    SETTINGS_CONTENT_TOP = 100,
+    SETTINGS_DETAIL_HEIGHT = 432,
+    SETTINGS_SIDEBAR_WIDTH = 252,
+    SETTINGS_NAV_ROW_STEP = 60
 };
 
 static rt_mutex_t pointer_lock;
@@ -91,6 +108,16 @@ static lv_obj_t *conn_dot, *conn_state, *conn_action;
 /* Settings */
 static lv_obj_t *volume_value, *volume_slider, *brightness_value, *brightness_slider;
 static lv_obj_t *theme_buttons[3], *language_buttons[2], *display_buttons[2];
+static lv_obj_t *phone_appearance_buttons[3];
+static lv_obj_t *phone_title, *phone_artist, *phone_playback;
+static lv_obj_t *phone_road, *phone_destination, *phone_remaining, *phone_route_caption;
+LV_FONT_DECLARE(carplay_cjk_full_18);
+#if defined(RTCARPLAY_IAP2)
+static lv_obj_t *gnss_latitude, *gnss_longitude, *gnss_keyboard, *gnss_state, *gnss_counts;
+static lv_obj_t *gnss_end_latitude, *gnss_end_longitude, *gnss_speed;
+static lv_obj_t *gnss_buttons[2], *gnss_mode_buttons[2], *gnss_apply_button;
+static bool gnss_moving;
+#endif
 static lv_obj_t *display_note, *settings_hint;
 static lv_obj_t *settings_pages[SETTINGS_PAGE_COUNT];
 static lv_obj_t *settings_tabs[SETTINGS_PAGE_COUNT];
@@ -145,7 +172,10 @@ static lv_obj_t *text(lv_obj_t *parent, const char *value, int x, int top, int w
         lv_obj_set_width(obj, w);
         lv_label_set_long_mode(obj, LV_LABEL_LONG_CLIP);
     }
-    lv_label_set_text(obj, value);
+    if (font == &carplay_cjk_full_18)
+        set_phone_text(obj, value);
+    else
+        lv_label_set_text(obj, value);
     return obj;
 }
 
@@ -489,11 +519,14 @@ static void build_dashboard(lv_obj_t *parent)
 /* Header shared by the three inner pages. */
 static void build_header(lv_obj_t *parent, const char *title, lv_event_cb_t go_back)
 {
-    lv_obj_t *back = panel(parent, 54, 42, 44, 44, 13, CARPLAY_STYLE_CARD_ALT);
+    lv_obj_t *back = panel(parent, 54, 32, 44, 44, 13, CARPLAY_STYLE_CARD_ALT);
     lv_obj_add_flag(back, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(back, go_back, LV_EVENT_CLICKED, NULL);
-    icon_mask(parent, &carplay_icon_arrow_left_22, 65, 53, CARPLAY_STYLE_ICON_TEXT);
-    text(parent, title, 64, 88, 700, &carplay_ui_34, CARPLAY_STYLE_TEXT);
+    lv_obj_t *arrow = icon_mask(back, &carplay_icon_arrow_left_22, 0, 0,
+                               CARPLAY_STYLE_ICON_TEXT);
+    lv_obj_center(arrow);
+    lv_obj_t *heading = text(parent, title, 0, 0, 700, &carplay_ui_34, CARPLAY_STYLE_TEXT);
+    lv_obj_align_to(heading, back, LV_ALIGN_OUT_RIGHT_MID, 18, 0);
 }
 
 /* ---------------- connectivity ---------------- */
@@ -644,6 +677,14 @@ static void select_theme(lv_event_t *event)
     settings_status(result ? "Settings not saved." : "Settings saved.", result != 0);
 }
 
+static void select_phone_appearance(lv_event_t *event)
+{
+    unsigned choice = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    carplay_app_set_phone_appearance((rtcp_appearance_setting_t)choice);
+    apply_segments(phone_appearance_buttons, 3, choice);
+    settings_status("Phone appearance requested", false);
+}
+
 static void select_language(lv_event_t *event)
 {
     bool chinese = (uintptr_t)lv_event_get_user_data(event) != 0;
@@ -738,8 +779,8 @@ static void select_settings_page(lv_event_t *event)
 static lv_obj_t *settings_nav_row(lv_obj_t *sidebar, const char *caption, icon_asset_t icon,
                                   unsigned index, lv_event_cb_t callback)
 {
-    lv_obj_t *row = panel(sidebar, 10, 10 + 72 * (int)index, SETTINGS_SIDEBAR_WIDTH - 22,
-                          60, 12, CARPLAY_STYLE_CARD_ALT);
+    lv_obj_t *row = panel(sidebar, 10, 10 + SETTINGS_NAV_ROW_STEP * (int)index,
+                          SETTINGS_SIDEBAR_WIDTH - 22, 54, 12, CARPLAY_STYLE_CARD_ALT);
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(row, callback, LV_EVENT_CLICKED, (void *)(uintptr_t)index);
     lv_obj_t *image = icon_mask(row, icon, 16, 0, CARPLAY_STYLE_ICON_ACCENT);
@@ -816,6 +857,225 @@ static void build_about(lv_obj_t *parent)
     }
 }
 
+static void build_phone_settings(lv_obj_t *parent)
+{
+    lv_obj_t *appearance = panel(parent, 0, 0, SETTINGS_DETAIL_WIDTH - 4, 102, 16, CARPLAY_STYLE_CARD);
+    text(appearance, "Phone appearance", 24, 30, 255, &carplay_ui_21, CARPLAY_STYLE_TEXT);
+    text(appearance, "Auto uses daylight on this board", 24, 69, 550, &carplay_ui_14, CARPLAY_STYLE_FAINT);
+    const char *choices[] = { "Auto", "Light", "Dark" };
+    for (unsigned index = 0; index < 3; ++index)
+        phone_appearance_buttons[index] = segment(appearance, choices[index], 303 + 100 * (int)index, 14,
+                                                   100, 50, select_phone_appearance, (void *)(uintptr_t)index,
+                                                   &carplay_ui_15);
+    apply_segments(phone_appearance_buttons, 3, carplay_app_phone_appearance());
+
+    lv_obj_t *media = panel(parent, 0, 114, SETTINGS_DETAIL_WIDTH - 4, 122, 16, CARPLAY_STYLE_CARD);
+    text(media, "Now Playing", 24, 12, 370, &carplay_ui_18, CARPLAY_STYLE_MUTED);
+    phone_playback = text(media, "", 417, 12, 185, &carplay_cjk_full_18, CARPLAY_STYLE_MUTED);
+    phone_title = text(media, "-", 24, 42, 580, &carplay_cjk_full_18, CARPLAY_STYLE_TEXT);
+    phone_artist = text(media, "", 24, 79, 580, &carplay_cjk_full_18, CARPLAY_STYLE_MUTED);
+    lv_label_set_long_mode(phone_title, LV_LABEL_LONG_DOT);
+    lv_label_set_long_mode(phone_artist, LV_LABEL_LONG_DOT);
+
+    lv_obj_t *route = panel(parent, 0, 248, SETTINGS_DETAIL_WIDTH - 4, 126, 16, CARPLAY_STYLE_CARD);
+    phone_route_caption = text(route, "", 24, 12, 370, &carplay_cjk_full_18, CARPLAY_STYLE_MUTED);
+    phone_remaining = text(route, "", 417, 12, 185, &carplay_cjk_full_18, CARPLAY_STYLE_MUTED);
+    phone_destination = text(route, "-", 24, 42, 580, &carplay_cjk_full_18, CARPLAY_STYLE_TEXT);
+    phone_road = text(route, "", 24, 79, 580, &carplay_cjk_full_18, CARPLAY_STYLE_MUTED);
+    lv_label_set_long_mode(phone_remaining, LV_LABEL_LONG_DOT);
+    lv_label_set_long_mode(phone_destination, LV_LABEL_LONG_DOT);
+    lv_label_set_long_mode(phone_road, LV_LABEL_LONG_DOT);
+}
+
+#if defined(RTCARPLAY_IAP2)
+static void gnss_keyboard_close(lv_event_t *event)
+{
+    (void)event;
+    lv_keyboard_set_textarea(gnss_keyboard, NULL);
+    lv_obj_add_flag(gnss_keyboard, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void gnss_edit(lv_event_t *event)
+{
+    lv_keyboard_set_textarea(gnss_keyboard, lv_event_get_target_obj(event));
+    lv_obj_remove_flag(gnss_keyboard, LV_OBJ_FLAG_HIDDEN);
+    settings_status("", false);
+}
+
+static void gnss_show_mode(bool moving)
+{
+    gnss_moving = moving;
+    apply_segments(gnss_mode_buttons, 2, moving ? 1U : 0U);
+    lv_obj_t *route_fields[] = { gnss_end_latitude, gnss_end_longitude, gnss_speed };
+    for (unsigned index = 0; index < sizeof(route_fields) / sizeof(route_fields[0]); ++index)
+    {
+        if (moving)
+            lv_obj_remove_state(route_fields[index], LV_STATE_DISABLED);
+        else
+            lv_obj_add_state(route_fields[index], LV_STATE_DISABLED);
+    }
+}
+
+static void gnss_select_mode(lv_event_t *event)
+{
+    gnss_keyboard_close(NULL);
+    gnss_show_mode(lv_event_get_user_data(event) != NULL);
+    settings_status("", false);
+}
+
+static void gnss_apply(lv_event_t *event)
+{
+    unsigned mode = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    carplay_gnss_config_t config;
+    if (!carplay_gnss_get_config(&config))
+    {
+        settings_status("GNSS settings busy", true);
+        return;
+    }
+    if (mode != 0)
+    {
+        config.moving = gnss_moving;
+        if (!carplay_gnss_parse(lv_textarea_get_text(gnss_latitude), 90, &config.latitude) ||
+            !carplay_gnss_parse(lv_textarea_get_text(gnss_longitude), 180, &config.longitude) ||
+            (config.moving &&
+             (!carplay_gnss_parse(lv_textarea_get_text(gnss_end_latitude), 90, &config.end_latitude) ||
+              !carplay_gnss_parse(lv_textarea_get_text(gnss_end_longitude), 180, &config.end_longitude))))
+        {
+            settings_status("Invalid coordinates", true);
+            return;
+        }
+        if (config.moving)
+        {
+            const char *value = lv_textarea_get_text(gnss_speed);
+            char *end;
+            unsigned long speed = strtoul(value, &end, 10);
+            if (end == value || *end || !speed || speed > CARPLAY_GNSS_MAX_SPEED_KMH)
+            {
+                settings_status("Speed must be 1 to 300 km/h", true);
+                return;
+            }
+            config.speed_kmh = (unsigned)speed;
+            if (!carplay_gnss_valid_config(&config))
+            {
+                settings_status("Choose a different destination", true);
+                return;
+            }
+        }
+    }
+    if (mode < 2U)
+        config.enabled = mode == 1U;
+    if (!carplay_gnss_set_config(&config))
+    {
+        settings_status("GNSS settings busy", true);
+        return;
+    }
+    gnss_keyboard_close(NULL);
+    apply_segments(gnss_buttons, 2, config.enabled ? 1U : 0U);
+    settings_status("", false);
+}
+
+static lv_obj_t *gnss_entry(lv_obj_t *parent, int x, int y, int width, const char *value,
+                             bool coordinate)
+{
+    lv_obj_t *entry = lv_textarea_create(parent);
+    lv_obj_set_pos(entry, x, y);
+    lv_obj_set_size(entry, width, 40);
+    lv_obj_set_style_radius(entry, 8, 0);
+    lv_obj_set_style_text_font(entry, &carplay_ui_18, 0);
+    carplay_ui_style(entry, CARPLAY_STYLE_INPUT);
+    carplay_ui_style_part(entry, CARPLAY_STYLE_INPUT_CURSOR, LV_PART_CURSOR | LV_STATE_FOCUSED);
+    lv_obj_set_style_opa(entry, LV_OPA_50, LV_STATE_DISABLED);
+    lv_textarea_set_one_line(entry, true);
+    lv_textarea_set_max_length(entry, coordinate ? 11 : 3);
+    lv_textarea_set_accepted_chars(entry, coordinate ? "+-0123456789." : "0123456789");
+    lv_textarea_set_text(entry, value);
+    lv_obj_add_event_cb(entry, gnss_edit, LV_EVENT_CLICKED, NULL);
+    return entry;
+}
+
+static lv_obj_t *gnss_coordinate(lv_obj_t *parent, int x, int y, int32_t initial)
+{
+    char value[16];
+    carplay_gnss_format_coordinate(initial, value, sizeof(value));
+    return gnss_entry(parent, x, y, 240, value, true);
+}
+
+static void build_gnss_settings(lv_obj_t *parent)
+{
+    lv_obj_t *card = panel(parent, 0, 0, SETTINGS_DETAIL_WIDTH - 4, 236, 16, CARPLAY_STYLE_CARD);
+    gnss_mode_buttons[0] = segment(card, "Fixed point", 24, 12, 142, 38,
+                                   gnss_select_mode, NULL, &carplay_ui_15);
+    gnss_mode_buttons[1] = segment(card, "A to B", 172, 12, 142, 38,
+                                   gnss_select_mode, (void *)1, &carplay_ui_15);
+    text(card, "Latitude", 100, 58, 240, &carplay_ui_15, CARPLAY_STYLE_MUTED);
+    text(card, "Longitude", 358, 58, 240, &carplay_ui_15, CARPLAY_STYLE_MUTED);
+    text(card, "A", 32, 88, 40, &carplay_ui_17, CARPLAY_STYLE_TEXT);
+    text(card, "B", 32, 138, 40, &carplay_ui_17, CARPLAY_STYLE_TEXT);
+    carplay_gnss_config_t config = { 0 };
+    (void)carplay_gnss_get_config(&config);
+    gnss_latitude = gnss_coordinate(card, 100, 80, config.latitude);
+    gnss_longitude = gnss_coordinate(card, 358, 80, config.longitude);
+    gnss_end_latitude = gnss_coordinate(card, 100, 130, config.end_latitude);
+    gnss_end_longitude = gnss_coordinate(card, 358, 130, config.end_longitude);
+    text(card, "Speed (km/h)", 24, 193, 136, &carplay_ui_15, CARPLAY_STYLE_MUTED);
+    char speed[12];
+    snprintf(speed, sizeof(speed), "%u", config.speed_kmh);
+    gnss_speed = gnss_entry(card, 164, 182, 96, speed, false);
+    gnss_buttons[0] = segment(card, "Off", 350, 182, 70, 40, gnss_apply, NULL, &carplay_ui_15);
+    gnss_buttons[1] = segment(card, "On", 426, 182, 70, 40, gnss_apply, (void *)1, &carplay_ui_15);
+    gnss_apply_button = segment(card, "Apply", 506, 182, 92, 40, gnss_apply, (void *)2, &carplay_ui_15);
+    gnss_show_mode(config.moving);
+    apply_segments(gnss_buttons, 2, config.enabled ? 1U : 0U);
+    gnss_state = text(parent, "", 24, 244, 310, &carplay_ui_14, CARPLAY_STYLE_MUTED);
+    gnss_counts = text(parent, "", 350, 244, 248, &carplay_ui_14, CARPLAY_STYLE_MUTED);
+    gnss_keyboard = lv_keyboard_create(parent);
+    lv_obj_set_size(gnss_keyboard, SETTINGS_DETAIL_WIDTH - 4, 150);
+    lv_obj_align(gnss_keyboard, LV_ALIGN_TOP_LEFT, 0, 274);
+    lv_obj_set_style_radius(gnss_keyboard, 12, LV_PART_MAIN);
+    carplay_ui_style(gnss_keyboard, CARPLAY_STYLE_CARD);
+    carplay_ui_style_part(gnss_keyboard, CARPLAY_STYLE_INPUT, LV_PART_ITEMS);
+    carplay_ui_style_part(gnss_keyboard, CARPLAY_STYLE_INPUT, LV_PART_ITEMS | LV_STATE_CHECKED);
+    carplay_ui_style_part(gnss_keyboard, CARPLAY_STYLE_ACCENT_CARD, LV_PART_ITEMS | LV_STATE_PRESSED);
+    lv_obj_set_style_text_font(gnss_keyboard, LV_FONT_DEFAULT, LV_PART_ITEMS);
+    lv_keyboard_set_mode(gnss_keyboard, LV_KEYBOARD_MODE_NUMBER);
+    lv_obj_add_event_cb(gnss_keyboard, gnss_keyboard_close, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(gnss_keyboard, gnss_keyboard_close, LV_EVENT_CANCEL, NULL);
+    lv_obj_add_flag(gnss_keyboard, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void update_gnss_settings(void)
+{
+    carplay_gnss_config_t config;
+    if (!carplay_gnss_get_config(&config))
+        return;
+    carplay_gnss_status_t status;
+    carplay_gnss_get_status(&status);
+    const char *state = "Simulation off";
+    if (config.enabled)
+    {
+        if (!status.tunnel)
+            state = "Connect wirelessly to test";
+        else if (!status.advertised)
+            state = "Reconnect wireless CarPlay";
+        else if (!status.requested)
+            state = "Waiting for GNSS request";
+        else if (config.moving && status.motion == CARPLAY_GNSS_ARRIVED)
+            state = "Arrived at B";
+        else if (config.moving && status.motion == CARPLAY_GNSS_MOVING)
+            state = "Moving from A to B";
+        else
+            state = "Phone requested simulated GNSS";
+    }
+    if (strcmp(lv_label_get_text(gnss_state), TR(state)))
+        lv_label_set_text(gnss_state, state);
+    char counts[76];
+    snprintf(counts, sizeof(counts), "GGA %u   RMC %u   %s %u", status.gga_queued, status.rmc_queued,
+             TR("Failed"), status.failed);
+    if (strcmp(lv_label_get_text(gnss_counts), counts))
+        lv_label_set_text(gnss_counts, counts);
+}
+#endif
+
 static void build_settings(lv_obj_t *parent)
 {
     static const struct
@@ -825,12 +1085,16 @@ static void build_settings(lv_obj_t *parent)
     } tabs[SETTINGS_PAGE_COUNT] = {
         [SETTINGS_DISPLAY] = { "Display", &carplay_icon_sun_29 },
         [SETTINGS_SOUND] = { "Sound", &carplay_icon_volume_29 },
-        [SETTINGS_LANGUAGE] = { "Language", &carplay_icon_settings_24 },
+        [SETTINGS_LANGUAGE] = { "Language", &carplay_icon_languages_24 },
         [SETTINGS_ABOUT] = { "About", &carplay_icon_info_26 },
+        [SETTINGS_PHONE] = { "Phone controls", &carplay_icon_smartphone_24 },
+#if defined(RTCARPLAY_IAP2)
+        [SETTINGS_GNSS] = { "GNSS simulation", &carplay_icon_map_pin_24 },
+#endif
     };
     build_header(parent, "Settings", open_dashboard);
-    lv_obj_t *sidebar = panel(parent, 54, 146, SETTINGS_SIDEBAR_WIDTH, SETTINGS_DETAIL_HEIGHT,
-                              18, CARPLAY_STYLE_CARD);
+    lv_obj_t *sidebar = panel(parent, 54, SETTINGS_CONTENT_TOP, SETTINGS_SIDEBAR_WIDTH,
+                              SETTINGS_DETAIL_HEIGHT, 18, CARPLAY_STYLE_CARD);
     lv_obj_add_flag(sidebar, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(sidebar, LV_DIR_VER);
     for (unsigned index = 0; index < SETTINGS_PAGE_COUNT; ++index)
@@ -840,7 +1104,7 @@ static void build_settings(lv_obj_t *parent)
         settings_captions[index] = lv_obj_get_child(settings_tabs[index], 1);
         lv_obj_t *page = lv_obj_create(parent);
         lv_obj_remove_style_all(page);
-        lv_obj_set_pos(page, 338, 146);
+        lv_obj_set_pos(page, 338, SETTINGS_CONTENT_TOP);
         lv_obj_set_size(page, SETTINGS_DETAIL_WIDTH, SETTINGS_DETAIL_HEIGHT);
         lv_obj_set_scroll_dir(page, LV_DIR_VER);
         lv_obj_set_scrollbar_mode(page, LV_SCROLLBAR_MODE_AUTO);
@@ -848,7 +1112,9 @@ static void build_settings(lv_obj_t *parent)
     }
     lv_obj_t *update = settings_nav_row(sidebar, "System update", &carplay_icon_download_26,
                                         SETTINGS_PAGE_COUNT, open_ota);
-    icon_mask(update, &carplay_icon_chevron_right_23, 196, 19, CARPLAY_STYLE_ICON_MUTED);
+    lv_obj_t *chevron = icon_mask(update, &carplay_icon_chevron_right_23, 0, 0,
+                                 CARPLAY_STYLE_ICON_MUTED);
+    lv_obj_align(chevron, LV_ALIGN_RIGHT_MID, -11, 0);
 
     build_display_settings(settings_pages[SETTINGS_DISPLAY]);
     build_slider_card(settings_pages[SETTINGS_SOUND], 0, "Media volume", &carplay_icon_volume_29,
@@ -856,6 +1122,10 @@ static void build_settings(lv_obj_t *parent)
                       "Adjust local audio output");
     build_language_settings(settings_pages[SETTINGS_LANGUAGE]);
     build_about(settings_pages[SETTINGS_ABOUT]);
+    build_phone_settings(settings_pages[SETTINGS_PHONE]);
+#if defined(RTCARPLAY_IAP2)
+    build_gnss_settings(settings_pages[SETTINGS_GNSS]);
+#endif
     settings_hint = text(parent, "", 338, 548, 632, &carplay_ui_14, CARPLAY_STYLE_FAINT);
     show_settings_page(SETTINGS_DISPLAY);
 }
@@ -1272,6 +1542,26 @@ static void update_settings_state(void)
     static unsigned last_display = UINT32_MAX;
     demo_status_t status = { 0 };
     bool have = carplay_connection_status(&status);
+
+#if defined(RTCARPLAY_IAP2)
+    if (!lv_obj_has_flag(settings_pages[SETTINGS_GNSS], LV_OBJ_FLAG_HIDDEN))
+        update_gnss_settings();
+#endif
+    if (!lv_obj_has_flag(settings_pages[SETTINGS_PHONE], LV_OBJ_FLAG_HIDDEN))
+    {
+        set_phone_text(phone_route_caption, TR("Route guidance"));
+        carplay_phone_media_t media = { 0 };
+        (void)carplay_app_phone_media(&media);
+        const char *title = media.title[0] ? media.title : "-";
+        set_phone_text(phone_title, title);
+        set_phone_text(phone_artist, media.artist);
+        const char *playback = media.has_playing ? (media.playing ? "Playing" : "Not playing") : "";
+        set_phone_text(phone_playback, TR(playback));
+        const char *destination = media.route_destination[0] ? media.route_destination : "-";
+        set_phone_text(phone_destination, destination);
+        set_phone_text(phone_road, media.route_road);
+        set_phone_text(phone_remaining, media.route_remaining);
+    }
 
     (void)have;
     if (last_theme != theme_choice)

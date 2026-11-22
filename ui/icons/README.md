@@ -1,6 +1,6 @@
 # CarPlay UI icons
 
-These 14 masks are official [Lucide](https://lucide.dev) glyphs, not hand-drawn vectors. Lucide is licensed under the [ISC License](https://github.com/lucide-icons/lucide/blob/main/LICENSE); keep the notice with redistributions. The table of glyphs and sizes is `ICONS` in `../../tools/generate_icon_assets.py`.
+The masks use official [Lucide](https://lucide.dev) glyphs from the `lucide-static` 0.468.0 font. Lucide is licensed under the [ISC License](https://github.com/lucide-icons/lucide/blob/main/LICENSE). Keep the notice with redistributions. The table of glyphs and sizes is `ICONS` in `../../tools/generate_icon_assets.py`.
 
 Each icon is rasterised from the Lucide regular font at 8x and box-filtered down to a single-channel **A8** LVGL image, so one bitmap serves every colour: the page code recolours it at runtime through the `CARPLAY_STYLE_ICON_*` theme roles (`image_recolor`), in both themes. The C files are generated and excluded from clang-format.
 

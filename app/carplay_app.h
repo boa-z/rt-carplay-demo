@@ -15,6 +15,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "rtcp/events.h"
+#include "rtcp/display.h"
 
 /* Screen sink.  configuration=true announces the H.264 SPS/PPS; otherwise
  * annex_b is one access unit prefixed with a start code.  Called from the
@@ -183,3 +184,24 @@ bool carplay_app_send_iap(const uint8_t *, size_t);
 /* Thread-safe enqueue; event-channel write remains on the RTSP owner.
  * Returns RTCP_ESTATE during lifecycle/input entry contention. */
 int carplay_app_request_siri(void);
+
+typedef enum
+{
+    CARPLAY_PHONE_BACK = 1,
+    CARPLAY_PHONE_HOME,
+    CARPLAY_PHONE_PREVIOUS,
+    CARPLAY_PHONE_PLAY_PAUSE,
+    CARPLAY_PHONE_NEXT,
+} carplay_phone_action_t;
+
+typedef struct
+{
+    char title[129], artist[129];
+    bool has_playing, playing;
+    char route_road[129], route_destination[129], route_remaining[129];
+} carplay_phone_media_t;
+
+void carplay_app_set_phone_appearance(rtcp_appearance_setting_t);
+rtcp_appearance_setting_t carplay_app_phone_appearance(void);
+int carplay_app_phone_action(carplay_phone_action_t);
+bool carplay_app_phone_media(carplay_phone_media_t *);

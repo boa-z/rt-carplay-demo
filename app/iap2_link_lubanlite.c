@@ -21,10 +21,12 @@
 #include <stdio.h>
 #include <stdatomic.h>
 #include <string.h>
+#include <sys/time.h>
 
 #include "airplay_info_plist.h"
 #include "carplay_app.h"
 #include "carplay_mfi_provider.h"
+#include "gnss_demo.h"
 #include "iap2_session.h"
 #include "rtcp/rtcp.h"
 #include "rtcp_lubanlite.h"
@@ -82,6 +84,7 @@ typedef struct
     int fd;
     char ip_address[16];
     carplay_app_iap2_info_t endpoint;
+    const carplay_iap2_tunnel_callbacks_t *tunnel_callbacks;
 
     atomic_bool link_up;
     bool airplay_connected;
@@ -99,6 +102,9 @@ typedef struct
 
 static iap2_link_t s_link;
 static iap2_link_t s_tunnel;
+static carplay_gnss_status_t s_gnss;
+static uint64_t s_gnss_next_ms, s_gnss_start_ms;
+static unsigned s_gnss_revision;
 static bool s_handoff_requested;
 static atomic_bool s_handoff_done;
 static unsigned s_handoff_generation;
@@ -113,6 +119,7 @@ static _Atomic(rt_thread_t) s_link_thread;
 static void link_reset_service(iap2_link_t *link)
 {
     link->session = NULL;
+    link->tunnel_callbacks = NULL;
     link->fd = -1;
     memset(link->ip_address, 0, sizeof(link->ip_address));
     memset(&link->endpoint, 0, sizeof(link->endpoint));
@@ -321,6 +328,18 @@ static const struct rtcp_mfi *link_mfi(void)
     return NULL;
 }
 
+static void link_now_playing(const rtcp_now_playing_t *update, void *context)
+{
+    const iap2_link_t *link = context;
+    link->tunnel_callbacks->on_now_playing(update, link->tunnel_callbacks->context);
+}
+
+static void link_route_guidance(const rtcp_route_guidance_t *update, void *context)
+{
+    const iap2_link_t *link = context;
+    link->tunnel_callbacks->on_route_guidance(update, link->tunnel_callbacks->context);
+}
+
 static int link_session_create(iap2_link_t *link, const struct rtcp_mfi *mfi)
 {
     carplay_app_iap2_info_t snapshot;
@@ -363,8 +382,24 @@ static int link_session_create(iap2_link_t *link, const struct rtcp_mfi *mfi)
     config.on_event = link_event;
     config.context = link;
     config.airplay_tunnel = link == &s_tunnel;
+    if (config.airplay_tunnel)
+    {
+        carplay_gnss_config_t gnss;
+        config.identity.provide_location = carplay_gnss_get_config(&gnss) && gnss.enabled;
+    }
+    if (link->tunnel_callbacks && link->tunnel_callbacks->on_now_playing)
+        config.on_now_playing = link_now_playing;
+    if (link->tunnel_callbacks && link->tunnel_callbacks->on_route_guidance)
+        config.on_route_guidance = link_route_guidance;
 
     link->session = iap2_session_create(&config);
+    if (config.airplay_tunnel && link->session)
+    {
+        s_gnss = (carplay_gnss_status_t){ .tunnel = true, .advertised = config.identity.provide_location };
+        s_gnss_next_ms = 0;
+        s_gnss_revision = 0;
+        carplay_gnss_publish_status(&s_gnss);
+    }
     return link->session != NULL ? RTCP_OK : RTCP_ENOMEM;
 }
 
@@ -1101,10 +1136,10 @@ MSH_CMD_EXPORT_ALIAS(cmd_carplay_mfi, carplay_mfi,
  * own session until the new transport has proved authentication/identity. */
 bool carplay_iap2_tunnel_bytes(const uint8_t *bytes, size_t len, void *context)
 {
-    (void)context;
     if (!s_tunnel.session)
     {
         link_reset_service(&s_tunnel);
+        s_tunnel.tunnel_callbacks = context;
         if (link_session_create(&s_tunnel, link_mfi()) != RTCP_OK)
             return false;
         s_tunnel.link_up = true;
@@ -1116,12 +1151,59 @@ bool carplay_iap2_tunnel_bytes(const uint8_t *bytes, size_t len, void *context)
         iap2_session_feed(s_tunnel.session, bytes, len, rtcp_os_rtthread.now_ms());
     return s_tunnel.error == RTCP_OK;
 }
+
+static void tunnel_send_gnss(uint64_t now)
+{
+    unsigned requested = iap2_session_location_requested(s_tunnel.session);
+    if (requested != s_gnss.requested)
+    {
+        s_gnss.requested = requested;
+        carplay_gnss_publish_status(&s_gnss);
+    }
+    carplay_gnss_config_t gnss;
+    if (!requested || now < s_gnss_next_ms || !carplay_gnss_get_config(&gnss) || !gnss.enabled)
+        return;
+
+    s_gnss_next_ms = now + 1000U;
+    if (s_gnss_revision != gnss.revision)
+    {
+        s_gnss_revision = gnss.revision;
+        s_gnss_start_ms = now;
+    }
+    carplay_gnss_fix_t fix = carplay_gnss_sample(&gnss, now - s_gnss_start_ms);
+    s_gnss.motion = fix.motion;
+    time_t seconds = time(NULL);
+    s_gnss.fixture_clock = seconds < (time_t)1577836800;
+    if (s_gnss.fixture_clock)
+        seconds = (time_t)(1767225600U + now / 1000U % 86400U);
+    struct tm utc;
+    if (!gmtime_r(&seconds, &utc))
+        return;
+    char sentence[RTCP_LOCATION_NMEA_MAX + 1U];
+    const unsigned kinds[] = { RTCP_LOCATION_GGA, RTCP_LOCATION_RMC };
+    unsigned *queued[] = { &s_gnss.gga_queued, &s_gnss.rmc_queued };
+    for (size_t index = 0; index < sizeof(kinds) / sizeof(kinds[0]); ++index)
+    {
+        if (!(requested & kinds[index]))
+            continue;
+        size_t length = carplay_gnss_sentence(&fix, kinds[index], &utc, sentence);
+        if (length && iap2_session_send_location(s_tunnel.session, sentence, length, now))
+            ++*queued[index];
+        else
+            ++s_gnss.failed;
+    }
+    carplay_gnss_publish_status(&s_gnss);
+}
+
 bool carplay_iap2_tunnel_tick(void *context)
 {
     (void)context;
     if (!s_tunnel.session)
         return true;
-    iap2_session_advance(s_tunnel.session, rtcp_os_rtthread.now_ms());
+    uint64_t now = rtcp_os_rtthread.now_ms();
+    iap2_session_advance(s_tunnel.session, now);
+    if (s_tunnel.error == RTCP_OK)
+        tunnel_send_gnss(now);
     if (!s_handoff_done && s_handoff_requested && s_tunnel.authenticated &&
         s_tunnel.identification_accepted && s_tunnel.error == RTCP_OK)
     {
@@ -1153,8 +1235,32 @@ void carplay_iap2_tunnel_stop(void *context)
         IAP2_LOG("Wi-Fi tunnel iAP2 stopped");
     }
     link_reset_service(&s_tunnel);
+    s_gnss = (carplay_gnss_status_t){ 0 };
+    carplay_gnss_publish_status(&s_gnss);
     s_handoff_requested = s_handoff_done = false;
 }
+
+static int cmd_carplay_gnss(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+    carplay_gnss_config_t gnss;
+    if (!carplay_gnss_get_config(&gnss))
+        return RTCP_ESTATE;
+    carplay_gnss_status_t status;
+    carplay_gnss_get_status(&status);
+    const char *motion = !gnss.enabled ? "off" : !gnss.moving ? "fixed" :
+                         status.motion == CARPLAY_GNSS_ARRIVED ? "arrived" :
+                         status.motion == CARPLAY_GNSS_MOVING ? "moving" : "waiting";
+    rt_kprintf("carplay gnss: enabled=%u tunnel=%u offered=%u requested=0x%x gga=%u rmc=%u failed=%u clock=%s motion=%s\n",
+               (unsigned)gnss.enabled, (unsigned)status.tunnel, (unsigned)status.advertised,
+               status.requested, status.gga_queued, status.rmc_queued, status.failed,
+               status.fixture_clock ? "fixture" : status.gga_queued || status.rmc_queued ? "board" : "-",
+               motion);
+    return RTCP_OK;
+}
+MSH_CMD_EXPORT_ALIAS(cmd_carplay_gnss, carplay_gnss, Show synthetic GNSS tunnel diagnostics);
+
 bool carplay_iap2_request_handoff(const char *device, void *context)
 {
     (void)device;
