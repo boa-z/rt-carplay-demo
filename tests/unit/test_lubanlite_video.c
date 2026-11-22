@@ -15,7 +15,7 @@ static bool pressure;
 static bool reference_mode, reference_active, fail_next;
 static unsigned packet_type;
 static unsigned render_remaining, render_id, returned[16], return_count;
-static unsigned updates, vsyncs, displayed_id;
+static unsigned updates, vsyncs, displayed_id, wake_signals;
 static bool hardware_reads, disable_queued;
 static bool fail_present, fail_vsync, fail_disable, lifecycle, fail_startup, worker_pending;
 static bool hold_worker, self_worker, reader_pending, check_display_reentry;
@@ -56,6 +56,7 @@ int rt_mutex_release(rt_mutex_t m)
 int rt_sem_release(rt_sem_t s)
 {
     (void)s;
+    ++wake_signals;
     return 0;
 }
 int rt_sem_take(rt_sem_t s, int t)
@@ -335,6 +336,17 @@ static void reset(void)
 }
 int main(int argc, char **argv)
 {
+    reset();
+    wake_signals = 0;
+    video_frame_owned(true, config, sizeof(config), 0, NULL);
+    video_frame_owned(false, frame, sizeof(frame), 1000, NULL);
+    assert(wake_signals == 1);
+    nal_entry_t pending;
+    while (dequeue_nal(&s_sink, &pending))
+        free(pending.data);
+    video_frame_owned(false, frame, sizeof(frame), 2000, NULL);
+    assert(wake_signals == 2 && dequeue_nal(&s_sink, &pending));
+    free(pending.data);
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
     assert(carplay_fusion_init(1024, 600) == RTCP_OK);
     reset();

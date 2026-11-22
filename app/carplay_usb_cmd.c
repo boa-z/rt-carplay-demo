@@ -1105,6 +1105,9 @@ static int cmd_iap2(void)
     config.wired_reinvite_delay_ms = RTCARPLAY_WIRED_REINVITE_DELAY_MS;
 #endif
     config.on_event = iap2_usb_event;
+#ifdef RT_USING_RTC
+    config.on_device_time = carplay_app_on_device_time;
+#endif
 #ifdef RTCARPLAY_WIRED_PROTOCOL_TRACE
     config.observe_message = iap2_usb_observe;
 #endif

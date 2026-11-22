@@ -1,4 +1,5 @@
 # Generated assets and generated/adapted upstream source are not hand-formatted.
+assets/rt-carplay-oem-png.h
 ui/fonts/**
 ui/icons/**
 generated/**

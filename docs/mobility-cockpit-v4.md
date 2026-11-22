@@ -31,7 +31,11 @@ The generated file is excluded from clang-format (`.clang-format-ignore`), like 
 
 `ui/ui_language.c` maps each English label to its simplified-Chinese counterpart and switches live with `carplay_ui_set_chinese()`. CJK text is drawn with a Noto Sans SC subset at the matching size (16/18/24/30). All four CJK font files are generated from one union symbol set by `tools/generate_ui_fonts.py`, so a label can never render as missing-glyph boxes at one size only. English uses the Inter subsets produced by `tools/generate_display_fonts.py`.
 
-Both preferences persist through `app/launcher_preferences.c` in `/data/carplay-ui.bin`. The version-2 record is `"CPUI" | version | present mask | values | FNV-1a`, written to a temporary file and promoted, with a backup for recovery. Keys are `CARPLAY_PREF_{LANGUAGE,THEME,DISPLAY,WIRELESS,MIC_MUTED,VOLUME,BRIGHTNESS}`. A failed write is reported in Settings; it is never reported as saved.
+Preferences persist through `app/launcher_preferences.c` in `/data/carplay-ui.bin`. The record stores numerical settings and the Bluetooth name with a checksum. A temporary file and backup protect replacement. Settings reports a failed save.
+
+## Bluetooth name
+
+Open **Settings → Bluetooth**, enter a name with 1–28 printable ASCII characters and tap **Apply**. Restart the board to update the controller's Classic local name and discovery EIR. The default is `rt-carplay`. The Bluetooth address, pairing records, Wi-Fi network name and Bonjour name retain their existing values. Check the log for `Bluetooth local name` and scan from the phone. A phone with a saved bond can continue to display its cached label.
 
 ## Volume and brightness
 

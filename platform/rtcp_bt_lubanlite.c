@@ -929,6 +929,10 @@ int rtcp_bt_lubanlite_enable(const char *name, const uint8_t bdaddr[6])
         {
             RTCP_LOGW(BT_TAG, "set local name failed (%d)", err);
         }
+        else
+        {
+            RTCP_LOGI(BT_TAG, "Bluetooth local name: %s", name);
+        }
     }
 
     /* The EIR must exist before the controller answers inquiries; include

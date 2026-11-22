@@ -32,6 +32,7 @@ static carplay_ota_status_t ota_model;
 static unsigned ota_checks, ota_installs;
 static unsigned manager_calls;
 static unsigned stored_preferences[CARPLAY_PREF_COUNT];
+static char stored_bt_name[CARPLAY_BT_NAME_MAX + 1] = CARPLAY_BT_NAME_DEFAULT;
 static bool preferences_error;
 static rtcp_appearance_setting_t model_phone_appearance;
 static carplay_phone_media_t model_phone_media;
@@ -93,6 +94,17 @@ int carplay_preferences_set(carplay_preference_t key, unsigned value)
 int carplay_preferences_error(void)
 {
     return preferences_error;
+}
+void carplay_preferences_bt_name(char name[CARPLAY_BT_NAME_MAX + 1])
+{
+    memcpy(name, stored_bt_name, sizeof(stored_bt_name));
+}
+int carplay_preferences_set_bt_name(const char *name)
+{
+    if (!*name)
+        return -EINVAL;
+    snprintf(stored_bt_name, sizeof(stored_bt_name), "%s", name);
+    return 0;
 }
 
 bool carplay_volume_available(void)
@@ -377,6 +389,11 @@ static void click_back(lv_obj_t *page)
     assert(!"no back control");
 }
 
+LV_FONT_DECLARE(carplay_cjk_16);
+LV_FONT_DECLARE(carplay_cjk_18);
+LV_FONT_DECLARE(carplay_cjk_24);
+LV_FONT_DECLARE(carplay_cjk_30);
+
 int main(int argc, char **argv)
 {
     assert(argc == 2);
@@ -434,8 +451,48 @@ int main(int argc, char **argv)
     assert_settings_page(SETTINGS_DISPLAY);
     update_page(NULL);
     screenshot(argv[1], "03-settings_dark_en");
+    lv_obj_t *display_cards[] = {
+        lv_obj_get_parent(theme_buttons[0]),
+        lv_obj_get_parent(display_buttons[0]),
+        lv_obj_get_parent(fps_buttons[0]),
+    };
+    lv_area_t display_page_area;
+    lv_obj_get_coords(settings_pages[SETTINGS_DISPLAY], &display_page_area);
+    for (unsigned index = 0; index < sizeof(display_cards) / sizeof(display_cards[0]); ++index)
+    {
+        lv_area_t card_area;
+        lv_obj_get_coords(display_cards[index], &card_area);
+        assert(lv_area_get_height(&card_area) == lv_obj_get_height(display_cards[0]));
+        assert(card_area.y1 >= display_page_area.y1 && card_area.y2 <= display_page_area.y2);
+    }
+    lv_obj_send_event(fps_buttons[1], LV_EVENT_CLICKED, NULL);
+    assert(stored_preferences[CARPLAY_PREF_HIGH_FPS] == 1);
+    assert(!strcmp(lv_label_get_text(settings_hint), "Saved. Restart the receiver to apply."));
+    screenshot(argv[1], "03-settings-frame-rate_dark_en");
     assert(!strcmp(lv_label_get_text(volume_value), "60%"));
     assert(!strcmp(lv_label_get_text(brightness_value), "72%"));
+
+    lv_obj_scroll_to_view(settings_tabs[SETTINGS_BLUETOOTH], LV_ANIM_OFF);
+    click_caption(pages[PAGE_SETTINGS], "Bluetooth");
+    assert_settings_page(SETTINGS_BLUETOOTH);
+    assert(!strcmp(lv_textarea_get_text(bluetooth_name), CARPLAY_BT_NAME_DEFAULT));
+    lv_obj_send_event(bluetooth_name, LV_EVENT_CLICKED, NULL);
+    assert(!lv_obj_has_flag(bluetooth_keyboard, LV_OBJ_FLAG_HIDDEN));
+    lv_obj_update_layout(settings_pages[SETTINGS_BLUETOOTH]);
+    lv_area_t bluetooth_keyboard_area, bluetooth_page_area;
+    lv_obj_get_coords(bluetooth_keyboard, &bluetooth_keyboard_area);
+    lv_obj_get_coords(settings_pages[SETTINGS_BLUETOOTH], &bluetooth_page_area);
+    assert(bluetooth_keyboard_area.y1 == bluetooth_page_area.y1 + 174);
+    assert(bluetooth_keyboard_area.y2 <= bluetooth_page_area.y2);
+    screenshot(argv[1], "03-settings-bluetooth-keyboard_dark_en");
+    lv_textarea_set_text(bluetooth_name, "");
+    click_caption(settings_pages[SETTINGS_BLUETOOTH], "Apply");
+    assert(!strcmp(stored_bt_name, CARPLAY_BT_NAME_DEFAULT));
+    lv_textarea_set_text(bluetooth_name, "D213 CarPlay");
+    click_caption(settings_pages[SETTINGS_BLUETOOTH], "Apply");
+    assert(!strcmp(stored_bt_name, "D213 CarPlay"));
+    assert(lv_obj_has_flag(bluetooth_keyboard, LV_OBJ_FLAG_HIDDEN));
+    screenshot(argv[1], "03-settings-bluetooth_dark_en");
 
     click_caption(pages[PAGE_SETTINGS], "Sound");
     assert_settings_page(SETTINGS_SOUND);
@@ -497,10 +554,7 @@ int main(int argc, char **argv)
     assert_settings_page(SETTINGS_PHONE);
     lv_obj_send_event(phone_appearance_buttons[RTCP_APPEARANCE_LIGHT], LV_EVENT_CLICKED, NULL);
     assert(model_phone_appearance == RTCP_APPEARANCE_LIGHT && carplay_ui_dark());
-    model_phone_media = (carplay_phone_media_t){ .title = "Test Track", .artist = "Test Artist",
-                                                .has_playing = true, .playing = true,
-                                                .route_destination = "Central Station",
-                                                .route_road = "Main Street", .route_remaining = "2 km" };
+    model_phone_media = (carplay_phone_media_t){ .title = "Test Track", .artist = "Test Artist", .has_playing = true, .playing = true, .route_destination = "Central Station", .route_road = "Main Street", .route_remaining = "2 km" };
     update_page(NULL);
     assert(!strcmp(lv_label_get_text(phone_title), "Test Track"));
     assert(!strcmp(lv_label_get_text(phone_artist), "Test Artist"));
@@ -509,8 +563,7 @@ int main(int argc, char **argv)
     assert(!strcmp(lv_label_get_text(phone_road), "Main Street"));
     assert(!strcmp(lv_label_get_text(phone_remaining), "2 km"));
     assert(find_caption(settings_pages[SETTINGS_PHONE], "路线引导"));
-    model_phone_media = (carplay_phone_media_t){ .title = "龘\U00020087 Live", .artist = "麤樂隊",
-                                                .route_destination = "龘龍站" };
+    model_phone_media = (carplay_phone_media_t){ .title = "龘\U00020087 Live", .artist = "麤樂隊", .route_destination = "龘龍站" };
     update_page(NULL);
     assert(!strcmp(lv_label_get_text(phone_title), "龘\U00020087 Live"));
     assert(lv_obj_get_style_text_font(phone_title, 0) == &carplay_cjk_full_18);
@@ -518,6 +571,12 @@ int main(int argc, char **argv)
     lv_font_glyph_dsc_t glyph;
     assert(lv_font_get_glyph_dsc(&carplay_cjk_full_18, &glyph, 0x9f98, 0) && !glyph.is_placeholder);
     assert(lv_font_get_glyph_dsc(&carplay_cjk_full_18, &glyph, 0x20087, 0) && !glyph.is_placeholder);
+    const lv_font_t *clock_fonts[] = { &carplay_cjk_16, &carplay_cjk_18, &carplay_cjk_24, &carplay_cjk_30 };
+    const uint32_t clock_glyphs[] = { 0x4e0e, 0x504f, 0x540c, 0x5730, 0x671f, 0x6b65, 0x6cd5, 0x79fb, 0x949f };
+    for (size_t font = 0; font < sizeof(clock_fonts) / sizeof(clock_fonts[0]); ++font)
+        for (size_t index = 0; index < sizeof(clock_glyphs) / sizeof(clock_glyphs[0]); ++index)
+            assert(lv_font_get_glyph_dsc(clock_fonts[font], &glyph, clock_glyphs[index], 0) &&
+                   !glyph.is_placeholder);
     carplay_ui_set_chinese(false);
     update_page(NULL);
     assert(find_caption(settings_pages[SETTINGS_PHONE], "Route guidance"));

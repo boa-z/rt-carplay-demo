@@ -5,16 +5,19 @@
 #include <stdatomic.h>
 #include <stdio.h>
 
-#define DEGREE_SCALE 1000000
-#define MAX_SENTENCE RTCP_LOCATION_NMEA_MAX
-#define PI 3.14159265358979323846
+#define DEGREE_SCALE        1000000
+#define MAX_SENTENCE        RTCP_LOCATION_NMEA_MAX
+#define PI                  3.14159265358979323846
 #define RAD_PER_MICRODEGREE (PI / (180.0 * DEGREE_SCALE))
-#define EARTH_RADIUS_M 6371008.8
+#define EARTH_RADIUS_M      6371008.8
 
 static carplay_gnss_config_t config = {
-    .latitude = 31190000, .longitude = 121436000,
-    .end_latitude = 31190000, .end_longitude = 121437000,
-    .speed_kmh = 36, .revision = 1
+    .latitude = 31190000,
+    .longitude = 121436000,
+    .end_latitude = 31190000,
+    .end_longitude = 121437000,
+    .speed_kmh = 36,
+    .revision = 1
 };
 static atomic_flag config_lock = ATOMIC_FLAG_INIT;
 static atomic_uint status_flags, gga_queued, rmc_queued, failed;
@@ -120,7 +123,7 @@ static double bearing_to(double latitude, double end_latitude, double longitude_
 {
     return atan2(sin(longitude_delta) * cos(end_latitude),
                  cos(latitude) * sin(end_latitude) -
-                 sin(latitude) * cos(end_latitude) * cos(longitude_delta));
+                     sin(latitude) * cos(end_latitude) * cos(longitude_delta));
 }
 
 carplay_gnss_fix_t carplay_gnss_sample(const carplay_gnss_config_t *route, uint64_t elapsed_ms)
@@ -133,12 +136,13 @@ carplay_gnss_fix_t carplay_gnss_sample(const carplay_gnss_config_t *route, uint6
     double longitude = route->longitude * RAD_PER_MICRODEGREE;
     double end_latitude = route->end_latitude * RAD_PER_MICRODEGREE;
     double longitude_delta = remainder((route->end_longitude - route->longitude) *
-                                       RAD_PER_MICRODEGREE, 2.0 * PI);
+                                           RAD_PER_MICRODEGREE,
+                                       2.0 * PI);
     double east = sin(longitude_delta) * cos(end_latitude);
     double north = cos(latitude) * sin(end_latitude) -
                    sin(latitude) * cos(end_latitude) * cos(longitude_delta);
     double central_angle = atan2(hypot(east, north), sin(latitude) * sin(end_latitude) +
-                                 cos(latitude) * cos(end_latitude) * cos(longitude_delta));
+                                                         cos(latitude) * cos(end_latitude) * cos(longitude_delta));
     double travelled = (double)elapsed_ms * route->speed_kmh / (3600.0 * EARTH_RADIUS_M);
     if (travelled >= central_angle)
     {
@@ -204,8 +208,8 @@ void carplay_gnss_publish_status(const carplay_gnss_status_t *status)
     atomic_store(&rmc_queued, status->rmc_queued);
     atomic_store(&failed, status->failed);
     atomic_store(&status_flags, status->requested | (status->tunnel ? 4U : 0U) |
-                 (status->advertised ? 8U : 0U) | (status->fixture_clock ? 16U : 0U) |
-                 ((unsigned)status->motion << 5));
+                                    (status->advertised ? 8U : 0U) | (status->fixture_clock ? 16U : 0U) |
+                                    ((unsigned)status->motion << 5));
 }
 
 void carplay_gnss_get_status(carplay_gnss_status_t *out)

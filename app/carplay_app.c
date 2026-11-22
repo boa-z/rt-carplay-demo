@@ -18,6 +18,9 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef RT_USING_RTC
+#include <sys/time.h>
+#endif
 
 #include "airplay_ed25519.h"
 #include "airplay_info_plist.h"
@@ -28,12 +31,16 @@
 #include "airplay_vendor_ie.h"
 #include "carplay_ctrl.h"
 #include "input_bridge.h"
+#include "launcher_preferences.h"
 #include "mdns_browser.h"
 #include "mdns_responder.h"
 #include "rtcp/input.h"
 #include "rtcp/rtcp.h"
 #include "rtcp_lubanlite.h"
 #include "rtcp_rtthread.h"
+#if defined(RTCARPLAY_DEMO_LAUNCHER)
+#include "../assets/rt-carplay-oem-png.h"
+#endif
 #if defined(RTCARPLAY_VEHICLE_PROTOCOL_DEMO)
 #include "vehicle_protocol_demo.h"
 #endif
@@ -53,11 +60,157 @@
 #include "touch_panel_lubanlite.h"
 #endif
 
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+#include "fusion_display.h"
+#endif
+
 #if defined(RTCARPLAY_IAP2)
 #include "iap2_link_lubanlite.h"
 #endif
 
 #define APP_LOG(fmt, ...) rt_kprintf("[carplay] " fmt "\n", ##__VA_ARGS__)
+
+#if defined(RTCARPLAY_DEMO_LAUNCHER)
+static const rtcp_oem_icon_t demo_oem_icon = {
+    .png = carplay_demo_oem_icon_png,
+    .png_len = sizeof(carplay_demo_oem_icon_png),
+    .width_pixels = CARPLAY_DEMO_OEM_ICON_SIZE,
+    .height_pixels = CARPLAY_DEMO_OEM_ICON_SIZE,
+};
+#endif
+
+#ifdef RT_USING_RTC
+static rtcp_device_time_t s_pending_phone_time;
+static atomic_int s_phone_clock_offset = ATOMIC_VAR_INIT(INT_MIN);
+static atomic_bool s_clock_automatic = ATOMIC_VAR_INIT(true);
+static struct rt_mutex s_clock_lock;
+
+static int init_clock_lock(void)
+{
+    return rt_mutex_init(&s_clock_lock, "cpclock", RT_IPC_FLAG_PRIO);
+}
+INIT_PREV_EXPORT(init_clock_lock);
+
+void carplay_app_on_device_time(const rtcp_device_time_t *update, void *context)
+{
+    (void)context;
+    rt_base_t irq = rt_hw_interrupt_disable();
+    if (!atomic_load(&s_clock_automatic))
+    {
+        rt_hw_interrupt_enable(irq);
+        return;
+    }
+    if (update->has_unix_seconds)
+    {
+        s_pending_phone_time.has_unix_seconds = true;
+        s_pending_phone_time.unix_seconds = update->unix_seconds;
+    }
+    if (update->has_time_zone_offset)
+    {
+        s_pending_phone_time.has_time_zone_offset = true;
+        s_pending_phone_time.time_zone_offset_minutes = update->time_zone_offset_minutes;
+    }
+    if (update->has_daylight_saving_offset)
+    {
+        s_pending_phone_time.has_daylight_saving_offset = true;
+        s_pending_phone_time.daylight_saving_offset_minutes = update->daylight_saving_offset_minutes;
+    }
+    rt_hw_interrupt_enable(irq);
+}
+
+int carplay_app_clock_offset_minutes(void)
+{
+    int offset = atomic_load(&s_phone_clock_offset);
+    if (offset != INT_MIN)
+        return offset;
+#ifdef RT_LIBC_DEFAULT_TIMEZONE
+    return RT_LIBC_DEFAULT_TIMEZONE * 60;
+#else
+    return 0;
+#endif
+}
+
+bool carplay_app_clock_is_automatic(void)
+{
+    return atomic_load(&s_clock_automatic);
+}
+
+int carplay_app_set_clock_automatic(bool automatic)
+{
+    if (rt_mutex_take(&s_clock_lock, RT_WAITING_FOREVER) != RT_EOK)
+        return RTCP_EIO;
+    rt_base_t irq = rt_hw_interrupt_disable();
+    atomic_store(&s_clock_automatic, automatic);
+    if (!automatic)
+        s_pending_phone_time = (rtcp_device_time_t){ 0 };
+    rt_hw_interrupt_enable(irq);
+    rt_mutex_release(&s_clock_lock);
+    return RTCP_OK;
+}
+
+static int set_clock_utc(int64_t seconds)
+{
+    struct timeval value = { .tv_sec = (time_t)seconds };
+    if ((int64_t)value.tv_sec != seconds || seconds < 0)
+        return RTCP_EINVAL;
+    return settimeofday(&value, NULL) == 0 ? RTCP_OK : RTCP_EIO;
+}
+
+int carplay_app_set_local_clock(int64_t local_seconds, int offset_minutes)
+{
+    if (offset_minutes < -14 * 60 || offset_minutes > 14 * 60 || local_seconds < 0)
+        return RTCP_EINVAL;
+    if (rt_mutex_take(&s_clock_lock, RT_WAITING_FOREVER) != RT_EOK)
+        return RTCP_EIO;
+    int result = RTCP_ESTATE;
+    if (!atomic_load(&s_clock_automatic))
+    {
+        result = set_clock_utc(local_seconds - offset_minutes * 60L);
+        if (result == RTCP_OK)
+            atomic_store(&s_phone_clock_offset, offset_minutes);
+    }
+    rt_mutex_release(&s_clock_lock);
+    return result;
+}
+
+static void apply_phone_clock(void)
+{
+    static int time_zone_minutes = INT_MIN;
+    static int daylight_saving_minutes;
+    rt_base_t irq = rt_hw_interrupt_disable();
+    bool pending = s_pending_phone_time.has_unix_seconds || s_pending_phone_time.has_time_zone_offset ||
+                   s_pending_phone_time.has_daylight_saving_offset;
+    rt_hw_interrupt_enable(irq);
+    if (!pending || rt_mutex_take(&s_clock_lock, RT_WAITING_NO) != RT_EOK)
+        return;
+
+    irq = rt_hw_interrupt_disable();
+    rtcp_device_time_t update = s_pending_phone_time;
+    s_pending_phone_time = (rtcp_device_time_t){ 0 };
+    rt_hw_interrupt_enable(irq);
+
+    if (update.has_unix_seconds)
+    {
+        if (set_clock_utc(update.unix_seconds) != RTCP_OK)
+            APP_LOG("iPhone clock: RTC rejected UTC seconds");
+        else
+            APP_LOG("iPhone clock: RTC synchronized (UTC)");
+    }
+    if (update.has_time_zone_offset &&
+        update.time_zone_offset_minutes >= -14 * 60 && update.time_zone_offset_minutes <= 14 * 60)
+        time_zone_minutes = update.time_zone_offset_minutes;
+    if (update.has_daylight_saving_offset)
+        daylight_saving_minutes = update.daylight_saving_offset_minutes;
+    if (time_zone_minutes != INT_MIN && (update.has_time_zone_offset || update.has_daylight_saving_offset))
+    {
+        int offset = time_zone_minutes + daylight_saving_minutes;
+        int previous = atomic_exchange(&s_phone_clock_offset, offset);
+        if (previous != offset)
+            APP_LOG("iPhone clock: dashboard UTC offset %d minutes", offset);
+    }
+    rt_mutex_release(&s_clock_lock);
+}
+#endif
 
 /* Shell and receiver/demo threads share this flag; independent of sessions. */
 static atomic_bool s_perf_logging = ATOMIC_VAR_INIT(false);
@@ -203,12 +356,16 @@ typedef struct
 
     uint16_t width;
     uint16_t height;
+    uint8_t max_fps;
     uint16_t rotation;
     bool wired;
 
     uint8_t ipv4[4];
 
     uint8_t info_plist[AIRPLAY_INFO_PLIST_MAX_BYTES];
+    const rtcp_oem_icon_t *oem_icons;
+    size_t oem_icon_count;
+    const char *oem_icon_label;
     size_t info_plist_len;
     uint8_t txt[512];
     size_t txt_len;
@@ -264,6 +421,14 @@ typedef struct
     uint32_t screen_report_ms;
     uint32_t screen_report_frames;
     bool siri_pending;
+    unsigned projection_pending;
+    bool projection_pause_waiting;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    uint32_t projection_retained_stream;
+    bool projection_resume_waiting;
+    bool projection_resume_confirmed;
+#endif
+    rtcp_projection_owner_t projection_owner;
     carplay_phone_action_t phone_action_pending;
     int phone_appearance_sent;
     carplay_phone_media_t phone_media;
@@ -555,10 +720,20 @@ static void on_audio_input_stop(void *context)
     carplay_audio_input_request_stop();
 }
 #endif
+#endif
 
+#if defined(RTCARPLAY_AUDIO) || defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
 static void on_audio_modes(const rtcp_audio_modes_t *modes, void *context)
 {
     app_state_t *app = context;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    if (app->projection_resume_waiting && modes->has_screen)
+        app->projection_resume_confirmed =
+            rtcp_receiver_get_projection_owner(app->receiver) == RTCP_PROJECTION_PHONE;
+#endif
+#if defined(RTCARPLAY_AUDIO)
+    if (!app->audio_started)
+        return;
     if (rt_mutex_take(app->lock, RT_WAITING_FOREVER) == RT_EOK)
     {
         if (modes->has_main_audio)
@@ -594,7 +769,11 @@ static void on_audio_modes(const rtcp_audio_modes_t *modes, void *context)
         (void)rt_mutex_release(app->lock);
     }
     carplay_audio_sink_modes(modes);
+#endif
 }
+#endif
+
+#if defined(RTCARPLAY_AUDIO)
 static bool on_audio_duck(bool ducked, float db, uint32_t duration, void *context)
 {
     (void)context;
@@ -671,6 +850,28 @@ static void on_route_guidance(const rtcp_route_guidance_t *update, void *context
 }
 #endif
 
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+static bool on_host_ui(void *context)
+{
+    app_state_t *app = context;
+    if (rt_mutex_take(app->lock, RT_WAITING_FOREVER) != RT_EOK)
+        return false;
+    app->projection_pending = 0U;
+    app->projection_pause_waiting = false;
+    (void)rt_mutex_release(app->lock);
+    carplay_fusion_snapshot_t display;
+    carplay_fusion_snapshot(0, &display);
+    app->projection_retained_stream = display.effective != CARPLAY_LOCAL
+                                          ? rtcp_receiver_get_projection_stream_generation(app->receiver)
+                                          : 0U;
+    app->projection_resume_waiting = false;
+    app->projection_resume_confirmed = false;
+    carplay_fusion_set_projection_hidden(true);
+    APP_LOG("phone requested host UI");
+    return true;
+}
+#endif
+
 static void on_event_state(bool connected, void *context)
 {
     app_state_t *app = context;
@@ -678,10 +879,22 @@ static void on_event_state(bool connected, void *context)
         return;
     app->airplay_connected = connected;
     app->phone_appearance_sent = -1;
+    if (!connected)
+    {
+        app->projection_pause_waiting = false;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+        app->projection_retained_stream = 0U;
+        app->projection_resume_waiting = false;
+        app->projection_resume_confirmed = false;
+        carplay_fusion_video_stopped();
+        carplay_fusion_set_projection_hidden(false);
+#endif
+    }
     if (!connected && rt_mutex_take(app->lock, RT_WAITING_FOREVER) == RT_EOK)
     {
         app->phone_action_pending = 0;
         app->siri_pending = false;
+        app->projection_pending = 0;
         memset(&app->phone_media, 0, sizeof(app->phone_media));
         (void)rt_mutex_release(app->lock);
     }
@@ -825,6 +1038,9 @@ static void shutdown_stack(app_state_t *app)
         while (carplay_video_sink_stop() != RTCP_OK) rt_thread_mdelay(10);
         app->video_started = false;
     }
+#endif
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    carplay_fusion_set_projection_hidden(false);
 #endif
     if (app->bridge != NULL)
     {
@@ -1096,6 +1312,7 @@ static void publish_control_status(app_state_t *app, uint32_t now_ms)
 static void drain_receiver_commands(app_state_t *app)
 {
     bool siri = false;
+    unsigned projection = 0;
     carplay_phone_action_t phone_action = 0;
     if (rt_mutex_take(app->lock, RT_WAITING_NO) == RT_EOK)
     {
@@ -1111,6 +1328,8 @@ static void drain_receiver_commands(app_state_t *app)
         }
         siri = app->siri_pending;
         app->siri_pending = false;
+        projection = app->projection_pending;
+        app->projection_pending = 0;
         phone_action = app->phone_action_pending;
         app->phone_action_pending = 0;
         if (app->cipher_pending &&
@@ -1127,6 +1346,24 @@ static void drain_receiver_commands(app_state_t *app)
 
     if (!app->airplay_connected)
         return;
+    if (projection)
+    {
+        bool resume = projection == 2U;
+        int result = rtcp_receiver_set_projection_enabled(app->receiver, resume);
+        if (result == RTCP_OK)
+        {
+            app->projection_pause_waiting = !resume;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+            if (!resume)
+                app->projection_retained_stream = 0U;
+            app->projection_resume_waiting = resume && app->projection_retained_stream != 0U;
+            app->projection_resume_confirmed = false;
+            if (resume)
+                carplay_fusion_resume_projection_on_frame();
+#endif
+        }
+        APP_LOG("projection %s command rc=%d", resume ? "resume" : "pause", result);
+    }
     rtcp_appearance_setting_t appearance = carplay_app_phone_appearance();
     if ((int)appearance != app->phone_appearance_sent)
     {
@@ -1138,7 +1375,7 @@ static void drain_receiver_commands(app_state_t *app)
     if (phone_action == CARPLAY_PHONE_BACK || phone_action == CARPLAY_PHONE_HOME)
     {
         const rtcp_knob_report_t press = { .home = phone_action == CARPLAY_PHONE_HOME,
-                                          .back = phone_action == CARPLAY_PHONE_BACK };
+                                           .back = phone_action == CARPLAY_PHONE_BACK };
         const rtcp_knob_report_t release = { 0 };
         if (rtcp_receiver_send_knob(app->receiver, &press))
             (void)rtcp_receiver_send_knob(app->receiver, &release);
@@ -1184,6 +1421,20 @@ static void poll_thread(void *argument)
         int vehicle_error = carplay_vehicle_protocol_demo_tick(&app->vehicle_demo, app->os.now_ms());
 #endif
         (void)rtcp_receiver_poll(app->receiver, 10);
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+        if (app->projection_resume_confirmed)
+        {
+            app->projection_resume_waiting = false;
+            app->projection_resume_confirmed = false;
+            uint32_t stream = rtcp_receiver_get_projection_stream_generation(app->receiver);
+            if (stream && stream == app->projection_retained_stream &&
+                carplay_fusion_resume_latched_projection())
+                APP_LOG("projection resumed from the retained frame");
+        }
+#endif
+#ifdef RT_USING_RTC
+        apply_phone_clock();
+#endif
         /* Snapshot on the owner thread; the shell never dereferences a
          * screen server that the protocol loop may tear down. */
         uint32_t sample_ms = (uint32_t)app->os.now_ms();
@@ -1197,6 +1448,14 @@ static void poll_thread(void *argument)
             rtcp_receiver_diagnostics_t diagnostics;
             (void)rtcp_receiver_get_diagnostics(app->receiver, &diagnostics);
             (void)rtcp_receiver_get_state(app->receiver, &app->receiver_state);
+            app->projection_owner = rtcp_receiver_get_projection_owner(app->receiver);
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+            if (app->projection_pause_waiting && app->projection_owner == RTCP_PROJECTION_HOST)
+            {
+                carplay_fusion_set_projection_hidden(true);
+                app->projection_pause_waiting = false;
+            }
+#endif
             if (!app->receiver_state.transport_connected)
                 memset(&app->phone_media, 0, sizeof(app->phone_media));
             app->screen_stats = diagnostics.screen;
@@ -1493,7 +1752,10 @@ static int build_announcement_data(app_state_t *app)
     info.width_physical_mm = (uint16_t)(((uint32_t)RTCARPLAY_PANEL_WIDTH_MM * app->width + 512U) / 1024U);
     info.height_physical_mm = (uint16_t)(((uint32_t)RTCARPLAY_PANEL_HEIGHT_MM * app->height + 300U) / 600U);
 #endif
-    info.max_fps = 30U;
+    info.max_fps = app->max_fps;
+    info.oem_icons = app->oem_icons;
+    info.oem_icon_count = app->oem_icon_count;
+    info.oem_icon_label = app->oem_icon_label;
     const rtcp_appearance_setting_t appearance = carplay_app_phone_appearance();
     const rtcp_display_profile_t display = {
         .struct_size = sizeof(display),
@@ -1616,10 +1878,14 @@ static int carplay_app_start_owned(const carplay_app_config_t *config)
     app->os.random = rtcp_lubanlite_random;
     app->width = config->width_pixels;
     app->height = config->height_pixels;
+    app->max_fps = carplay_preferences_get(CARPLAY_PREF_HIGH_FPS, CARPLAY_PREF_HIGH_FPS_DEFAULT) ? 60U : 30U;
     app->rotation = config->rotation_degrees;
     app->wired = config->wired;
     app->on_screen = config->on_screen;
     app->screen_context = config->screen_context;
+    app->oem_icons = config->oem_icons;
+    app->oem_icon_count = config->oem_icon_count;
+    app->oem_icon_label = config->oem_icon_label;
 
     if (config->rotation_degrees != 0U && config->rotation_degrees != 90U &&
         config->rotation_degrees != 180U && config->rotation_degrees != 270U)
@@ -1730,6 +1996,10 @@ static int carplay_app_start_owned(const carplay_app_config_t *config)
     receiver_config.family = app->wired ? RTCP_AF_INET6 : RTCP_AF_INET;
     receiver_config.media.on_video = on_screen_message;
     receiver_config.media.video_context = app;
+#if defined(RTCARPLAY_AUDIO) || defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    receiver_config.media.on_audio_modes = on_audio_modes;
+    receiver_config.media.audio_context = app;
+#endif
     receiver_config.on_event_state = on_event_state;
     receiver_config.event_state_context = app;
 #if defined(RTCARPLAY_VEHICLE_PROTOCOL_DEMO)
@@ -1741,6 +2011,9 @@ static int carplay_app_start_owned(const carplay_app_config_t *config)
     {
         app->tunnel_callbacks.on_now_playing = on_now_playing;
         app->tunnel_callbacks.on_route_guidance = on_route_guidance;
+#ifdef RT_USING_RTC
+        app->tunnel_callbacks.on_device_time = carplay_app_on_device_time;
+#endif
         app->tunnel_callbacks.context = app;
         receiver_config.iap2.context = &app->tunnel_callbacks;
         receiver_config.iap2.on_bytes = carplay_iap2_tunnel_bytes;
@@ -1754,13 +2027,11 @@ static int carplay_app_start_owned(const carplay_app_config_t *config)
     {
         receiver_config.media.on_audio = on_audio_pcm;
         receiver_config.media.on_audio_stop_ex = on_audio_stop;
-        receiver_config.media.on_audio_modes = on_audio_modes;
         receiver_config.media.on_audio_duck = on_audio_duck;
 #if defined(RTCARPLAY_MICROPHONE)
         receiver_config.media.on_audio_input_start = on_audio_input_start;
         receiver_config.media.on_audio_input_stop = on_audio_input_stop;
 #endif
-        receiver_config.media.audio_context = app;
         receiver_config.media.on_volume = on_volume;
         receiver_config.media.volume_context = app;
     }
@@ -1768,6 +2039,10 @@ static int carplay_app_start_owned(const carplay_app_config_t *config)
     result = rtcp_receiver_create(&receiver_config, &app->receiver);
     if (result == RTCP_OK)
         (void)rtcp_receiver_set_now_playing_callback(app->receiver, on_now_playing, app);
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    if (result == RTCP_OK)
+        (void)rtcp_receiver_set_host_ui_callback(app->receiver, on_host_ui, app);
+#endif
 #if defined(RTCARPLAY_AUDIO)
     if (result == RTCP_OK && app->audio_started)
         publish_phone_volume(app);
@@ -2143,6 +2418,11 @@ int carplay_app_autostart_display(bool wired, uint16_t width, uint16_t height)
     config.height_pixels = height;
     config.rotation_degrees = CARPLAY_APP_DEFAULT_ROTATION;
     config.wired = wired;
+#if defined(RTCARPLAY_DEMO_LAUNCHER)
+    config.oem_icons = &demo_oem_icon;
+    config.oem_icon_count = 1U;
+    config.oem_icon_label = "rt-carplay";
+#endif
     return carplay_app_start(&config);
 }
 
@@ -2301,12 +2581,14 @@ static int carplay_status_owned(int argc, char **argv)
                (unsigned)points, reads, events);
 #endif
     unsigned queued = 0, full = 0;
+    rtcp_projection_owner_t projection_owner = RTCP_PROJECTION_UNKNOWN;
     bool media_title = false, media_artist = false, media_state = false, playing = false;
     bool route_road = false, route_destination = false, route_remaining = false;
     if (s_app.lock && rt_mutex_take(s_app.lock, RT_WAITING_FOREVER) == RT_EOK)
     {
         queued = s_app.touch_queued;
         full = s_app.touch_queue_full;
+        projection_owner = s_app.projection_owner;
         media_title = s_app.phone_media.title[0] != '\0';
         media_artist = s_app.phone_media.artist[0] != '\0';
         media_state = s_app.phone_media.has_playing;
@@ -2323,6 +2605,9 @@ static int carplay_status_owned(int argc, char **argv)
     rt_kprintf("carplay touch: queued=%u queue_full=%u HID_sent=%u HID_failed=%u\n",
                queued, full,
                s_app.hid_reports_sent, s_app.hid_reports_failed);
+    const char *owner = projection_owner == RTCP_PROJECTION_PHONE ? "phone" : projection_owner == RTCP_PROJECTION_HOST ? "host"
+                                                                                                                       : "unknown";
+    rt_kprintf("carplay MainScreen owner=%s\n", owner);
     rtcp_screen_stats_t screen = { 0 };
     if (s_app.lock != NULL && rt_mutex_take(s_app.lock, RT_WAITING_NO) == RT_EOK)
     {
@@ -2333,6 +2618,8 @@ static int carplay_status_owned(int argc, char **argv)
     uint32_t interval = now - s_app.screen_report_ms;
     uint32_t delta = screen.frames >= s_app.screen_report_frames ? screen.frames - s_app.screen_report_frames : screen.frames;
     unsigned fps10 = interval != 0U ? (unsigned)((uint64_t)delta * 10000U / interval) : 0U;
+    rt_kprintf("carplay screen offer: %ux%u offered_max_fps=%u\n",
+               (unsigned)s_app.width, (unsigned)s_app.height, (unsigned)s_app.max_fps);
     rt_kprintf("carplay screen RX: frames=%u wire_KiB=%u recv_calls=%u interval=%ums fps=%u.%u\n",
                (unsigned)screen.frames, (unsigned)(screen.wire_bytes / 1024U),
                (unsigned)screen.recv_calls, (unsigned)interval, fps10 / 10U, fps10 % 10U);
@@ -2471,9 +2758,11 @@ static void bt_serve_thread(void *parameter)
 {
     (void)parameter;
     int result = RTCP_OK;
+    char bt_name[CARPLAY_BT_NAME_MAX + 1];
     if (!s_bt_serve)
         goto done;
-    result = rtcp_bt_lubanlite.enable("rt-carplay", NULL);
+    carplay_preferences_bt_name(bt_name);
+    result = rtcp_bt_lubanlite.enable(bt_name, NULL);
     if (result != RTCP_OK)
     {
         APP_LOG("bt enable failed rc=%d", result);
@@ -2807,6 +3096,36 @@ rtcp_appearance_setting_t carplay_app_phone_appearance(void)
     return (rtcp_appearance_setting_t)atomic_load(&s_phone_appearance);
 }
 
+int carplay_app_set_projection_enabled(bool enabled)
+{
+    if (!snapshot_enter())
+        return RTCP_ESTATE;
+    int result = RTCP_ESTATE;
+    if (s_receiver_running && !s_receiver_shutting_down && s_app.lock &&
+        rt_mutex_take(s_app.lock, RT_WAITING_NO) == RT_EOK)
+    {
+        if (s_app.airplay_connected)
+        {
+            s_app.projection_pending = enabled ? 2U : 1U;
+            result = RTCP_OK;
+        }
+        (void)rt_mutex_release(s_app.lock);
+    }
+    snapshot_leave();
+    return result;
+}
+
+static int cmd_carplay_projection(int argc, char **argv)
+{
+    if (argc == 2 && !strcmp(argv[1], "resume"))
+        return carplay_app_set_projection_enabled(true);
+    if (argc == 2 && !strcmp(argv[1], "pause"))
+        return carplay_app_set_projection_enabled(false);
+    rt_kprintf("carplay_projection pause|resume\n");
+    return RTCP_EINVAL;
+}
+MSH_CMD_EXPORT_ALIAS(cmd_carplay_projection, carplay_projection, Request MainScreen focus without disconnecting);
+
 int carplay_app_phone_action(carplay_phone_action_t action)
 {
     if (action < CARPLAY_PHONE_BACK || action > CARPLAY_PHONE_NEXT)
@@ -2856,7 +3175,7 @@ MSH_CMD_EXPORT_ALIAS(cmd_carplay_siri, carplay_siri, Request Siri through the en
 #if defined(RTCARPLAY_DEMO_LAUNCHER)
 static int cmd_carplay_phone_key(int argc, char **argv)
 {
-    static const char *const names[] = {
+    static const char * const names[] = {
         [CARPLAY_PHONE_BACK] = "back",
         [CARPLAY_PHONE_HOME] = "home",
         [CARPLAY_PHONE_PLAY_PAUSE] = "play-pause",

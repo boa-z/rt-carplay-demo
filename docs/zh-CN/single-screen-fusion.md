@@ -8,7 +8,7 @@
 
 进入 **设置 → 显示 → CarPlay 显示**，选择 **全屏** 或 **融合**。全屏请求原生 1024x600 视频，融合请求 768x600 视频，旁边保留 256 像素仪表。有线和无线连接均采用所选尺寸。下方 Shell 命令还提供本地仪表模式。
 
-全屏只显示原生 1024x600 CarPlay 视频，本地 UI 硬件图层完全透明，没有设置按钮，也不保留本地触摸角落。已锁存视频区域内的触摸全部交给手机。需修改设置时，可在断连后返回启动台，或使用下述连接所有者命令；没有新增隐藏手势或叠加菜单。
+全屏显示原生 1024x600 CarPlay 视频，本地 UI 硬件图层完全透明，已锁存视频区域内的触摸全部交给手机。会话内可通过 OEM 图标或 `carplay_projection pause` 返回启动台。
 
 几何变化异步执行：连接管理器先关闭 USB/iAP2 借用者，再停止旧 Receiver，以新尺寸重建 Receiver、HID、视频接收器和 `/info`，随后在同一有线/无线连接所有者上等待重连。退出期间保持本地仪表，LOCAL 保留已选手机几何；重复同尺寸请求不重连，待处理请求合并。设备/音频工具打开时可暂时拒绝切换。已应用的显示模式保存到应用配置，在连接线程启动前恢复。LOCAL 在本次启动期间保留此前手机几何，重启后使用默认融合几何，同时仍保持 LOCAL 显示。本版本真实 iPhone 重连和原生尺寸输出仍为 NOT_RUN。
 
@@ -19,6 +19,12 @@
 对应命令为 `carplay_connection display fullscreen`、`carplay_connection display fusion`、`carplay_connection display local`。`carplay_connection status` 显示选定尺寸和是否等待退出，`carplay_display status` 显示实际锁存的视频/输入尺寸。旧 `carplay_display fullscreen/fusion/local` 命令保留为仅修改合成布局的诊断，不重建会话。
 
 物理尺寸也随区域变化：`RTCARPLAY_PANEL_WIDTH_MM`、`RTCARPLAY_PANEL_HEIGHT_MM` 描述整块 LCD 有效区，应用再按手机区域缩放。默认保留此前估计的 200x120 mm，因此融合 768x600 声明 150x120 mm，原生全屏声明 200x120 mm。默认值不是实测校准；请使用不含边框的有效区宽、高来配置密度和比例。本次修正较小像素区域仍声明整屏物理宽度的问题，是否改善用户报告的压缩感仍需手机实测。
+
+## CarPlay 帧率
+
+**设置 → 显示 → CarPlay 帧率**默认使用 60 fps。已保存的 30 fps 选项继续生效。重启接收端后再连接，新的 `/info` `maxFPS` 才会生效。重启开发板会重新启动接收端。D213 的 1024×600 面板时序约为 60 Hz。实际视频发送频率由 iPhone 决定，视频接收端会保留扫描输出缓冲区直到显示栅栏完成。
+
+实机对照时，对两档分别选用全屏并播放相同的持续动画至少十秒。每段开始和结束分别执行 `carplay_status` 与 `carplay_video status`，比较 `offered_max_fps`、接收帧率、`presented_fps`、队列丢弃和各阶段耗时。有线和无线分别测试。实测 `presented_fps` 持续接近 60 才能确认开发板达到目标。
 
 ## 手机分辨率与黑边
 
@@ -46,13 +52,23 @@ carplay_display simulate
 
 状态包含请求/实际模式、请求/锁存布局代次、视频状态、几何区域、逻辑输入尺寸、显示错误和车辆数据来源，不输出配对材料。启用本演示不会声明 Type 111、HEVC、虚构显示目录或 UI Sync 能力。
 
+## OEM 图标与会话内切换
+
+Demo 在有线和无线连接中都会提供 **rt-carplay** OEM 图标。固件内置的 180 × 180 PNG 来自 [Demo 标志 SVG](../../assets/rt-carplay-oem.svg)。修改 SVG 后，在装有 Pillow 的环境中从应用目录运行 `python tools/generate_oem_icon.py`，重新构建并连接以协商新的 `/info`。固件构建直接使用生成的头文件。定制宿主可以在调用 `carplay_app_start()` 前设置 `carplay_app_config_t.oem_icons`、`oem_icon_count` 和 `oem_icon_label`，素材需保留到接收端停止。
+
+点击 CarPlay 内置的 OEM 返回入口后，Demo 立即切到本地启动台，现有会话可用于恢复投屏。在仪表条点击 **仪表** 或执行 `carplay_projection pause` 可显式请求将 MainScreen 交给宿主。
+
+在启动台打开 **车机互联 → 重新显示 CarPlay**，或执行 `carplay_projection resume`，通过现有会话发送 `requestUI`。从 OEM 图标返回后，如果手机通过新的 `modesChanged` 确认取得 MainScreen，且 Type 110 流和显示布局仍有效，Demo 会直接显示保留帧。视频流已经更换或保留帧失效时，Demo 会等待新解码帧。即使手机暂时关闭屏幕流，只要会话仍在，恢复入口依然可用。使用 `carplay_status` 查看 MainScreen 所有权，使用 `carplay_connection status` 查看会话和视频状态。如果整个会话结束，由连接管理器重新建立连接。有线测试时保持音乐播放，点击 OEM 返回入口再恢复，检查 RTSP 会话和 iAP2 链路是否持续连接。
+
 ## 硬件合成与资源归属
 
 MPP 继续将 H.264 解码到自己的帧缓冲，DE 负责视频缩放和位置。GUI 线程在 FUSION 中将现有不透明 UI 帧缓冲裁剪为右侧区域，并使用逐像素 alpha，让 DE 整屏 UI 平面的空白区域保持透明。D213 实测全局 alpha 255 会使该区域不透明，即使解码和图层计数正常也遮住视频。LOCAL 恢复原始几何和 alpha，FULLSCREEN 使用全局 alpha 零；跨 LVGL 缓冲切换保留当前物理地址，不增加逐帧视频软件拷贝。要求现有 UI 图层为未旋转、未裁剪的 1024×600 配置，几何不匹配会请求 LOCAL 并记录错误。
 
 只有视频图层更新和 VSYNC 都成功后才发布新的输入矩形。手机静止画面也会随模式改变重新摆放，但不计为新视频帧。交换失败时保留两个可能仍被扫描的帧；停止或重建必须先关闭视频层并确认 VSYNC，失败则保留资源供重试。UI 切换失败会尝试回滚，由 GUI 定时器重试 LOCAL。持续的显示 ioctl 故障仍需实机诊断，软件不能保证硬件故障后的仪表可见性。
 
-触摸使用已锁存矩形和协商逻辑尺寸，拒绝黑边和待锁存布局，禁止第二指抢占；手机手势越界时在最后有效坐标抬起，模式、会话或几何变化时取消触摸。本地手势跨区域仍属于本地 UI，定时取消也能处理静止手指。短暂关中断只用于有界状态复制，不在其中调用 LVGL、ioctl、日志或外部回调。
+触控使用已锁存的显示矩形和协商后的逻辑尺寸。CarPlay 区域独立跟踪最多两个触点 ID。本地 UI 依然只跟踪一个触点，触点不会在两个区域之间转交。黑边和布局待锁存期间的触控会被忽略。CarPlay 触点越出视频区时在最后的有效坐标释放，另一触点可以继续移动。模式、会话或几何尺寸变化时，所有已捕获触点都会释放，包括静止的手指。短暂关中断只用于有界状态更新，期间不调用 LVGL、设备 ioctl、日志或外部回调。
+
+上板后，在融合模式投屏地图区域内做双指缩放，操作前后各执行一次 `carplay_display status`。第二根手指被路由到 CarPlay 时，`two_finger_starts` 会增加。用 `carplay_status` 检查队列溢出或 HID 发送失败，并观察投屏地图是否缩放。
 
 ## 车辆数据与测量
 

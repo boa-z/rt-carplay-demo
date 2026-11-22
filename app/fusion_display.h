@@ -25,6 +25,7 @@ typedef struct
     uint16_t width, height, local_width, logical_width, logical_height;
     rtcp_display_rect_t video_rect;
     uint32_t generation, video_generation, touch_epoch, last_present_ms;
+    uint32_t two_finger_starts;
     int error;
     carplay_vehicle_sample_t vehicle;
 } carplay_fusion_snapshot_t;
@@ -46,6 +47,9 @@ typedef struct
  * Initialize once from the GUI before starting the connection owner. */
 int carplay_fusion_init(uint16_t width, uint16_t height);
 int carplay_fusion_set_mode(carplay_display_mode_t);
+void carplay_fusion_set_projection_hidden(bool hidden);
+void carplay_fusion_resume_projection_on_frame(void);
+bool carplay_fusion_resume_latched_projection(void);
 void carplay_fusion_snapshot(uint32_t now_ms, carplay_fusion_snapshot_t *);
 /* Real vehicle integration supplies samples here; no guessed CAN mappings.
  * The sample is copied. Default data is explicitly simulated until replaced. */
@@ -56,13 +60,14 @@ void carplay_fusion_use_simulated(void);
 bool carplay_fusion_video_target(uint16_t panel_width, uint16_t panel_height,
                                  rtcp_display_rect_t *, uint32_t *generation);
 void carplay_fusion_video_latched(const rtcp_display_rect_t *, uint16_t logical_width,
-                                  uint16_t logical_height, uint32_t generation, uint32_t now_ms);
+                                  uint16_t logical_height, uint32_t generation, uint32_t now_ms,
+                                  bool new_frame);
 void carplay_fusion_video_stopped(void);
 void carplay_fusion_display_error(int error);
-/* Single-pointer gesture ownership. A changed layout/session cancels a held
- * gesture; a phone gesture leaving its latched video rectangle releases at
- * its last valid position. The remainder is swallowed until physical UP.
- * GUI calls cancel periodically even when the finger has not moved. */
+/* The phone can hold two contacts; local UI uses one pointer. A layout/session
+ * change cancels held contacts. A phone contact leaving the latched rectangle
+ * releases at its last valid position and waits for physical UP. Each call to
+ * cancel returns one stale contact; drain until CARPLAY_TOUCH_NONE. */
 carplay_fusion_touch_t carplay_fusion_touch(uint8_t phase, uint16_t id, uint16_t x, uint16_t y);
 carplay_fusion_touch_t carplay_fusion_cancel_touch(void);
 const char *carplay_fusion_mode_name(carplay_display_mode_t);

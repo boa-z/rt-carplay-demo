@@ -6,10 +6,18 @@
 #include <string.h>
 
 static carplay_fusion_snapshot_t state;
-static bool simulate = true, touching, blocked;
-static uint16_t blocked_id;
-static uint32_t gesture_epoch;
-static carplay_fusion_touch_t held;
+static bool simulate = true;
+static bool projection_hidden;
+static bool resume_on_frame;
+
+typedef struct
+{
+    carplay_fusion_touch_t held;
+    uint32_t epoch;
+    bool blocked;
+} fusion_contact_t;
+
+static fusion_contact_t contacts[RTCP_TOUCH_CONTACTS];
 
 static void advance(uint32_t *value)
 {
@@ -18,7 +26,41 @@ static void advance(uint32_t *value)
 }
 static carplay_display_mode_t effective(void)
 {
-    return state.video_active ? state.requested : CARPLAY_LOCAL;
+    return state.video_active && !projection_hidden ? state.requested : CARPLAY_LOCAL;
+}
+
+void carplay_fusion_set_projection_hidden(bool hidden)
+{
+    rt_base_t irq = rt_hw_interrupt_disable();
+    resume_on_frame = false;
+    if (projection_hidden != hidden)
+    {
+        projection_hidden = hidden;
+        advance(&state.touch_epoch);
+    }
+    rt_hw_interrupt_enable(irq);
+}
+
+void carplay_fusion_resume_projection_on_frame(void)
+{
+    rt_base_t irq = rt_hw_interrupt_disable();
+    resume_on_frame = projection_hidden;
+    rt_hw_interrupt_enable(irq);
+}
+
+bool carplay_fusion_resume_latched_projection(void)
+{
+    rt_base_t irq = rt_hw_interrupt_disable();
+    bool resumed = projection_hidden && resume_on_frame && state.video_active &&
+                   state.video_generation == state.generation && state.requested != CARPLAY_LOCAL;
+    if (resumed)
+    {
+        projection_hidden = false;
+        resume_on_frame = false;
+        advance(&state.touch_epoch);
+    }
+    rt_hw_interrupt_enable(irq);
+    return resumed;
 }
 
 const char *carplay_fusion_mode_name(carplay_display_mode_t mode)
@@ -136,16 +178,23 @@ bool carplay_fusion_video_target(uint16_t width, uint16_t height,
 }
 
 void carplay_fusion_video_latched(const rtcp_display_rect_t *rect, uint16_t width,
-                                  uint16_t height, uint32_t generation, uint32_t now)
+                                  uint16_t height, uint32_t generation, uint32_t now,
+                                  bool new_frame)
 {
     if (!rect || !rect->width || !rect->height || !width || !height)
         return;
     rt_base_t irq = rt_hw_interrupt_disable();
     if (state.initialized)
     {
-        if (!state.video_active || memcmp(&state.video_rect, rect, sizeof(*rect)) ||
+        bool resuming = resume_on_frame && new_frame;
+        if (resuming || !state.video_active || memcmp(&state.video_rect, rect, sizeof(*rect)) ||
             state.logical_width != width || state.logical_height != height)
             advance(&state.touch_epoch);
+        if (resuming)
+        {
+            projection_hidden = false;
+            resume_on_frame = false;
+        }
         state.video_rect = *rect;
         state.logical_width = width;
         state.logical_height = height;
@@ -173,24 +222,31 @@ void carplay_fusion_display_error(int error)
     rt_hw_interrupt_enable(irq);
 }
 
-static carplay_fusion_touch_t cancel(void)
+static carplay_fusion_touch_t release_contact(fusion_contact_t *contact, bool wait_for_up)
 {
-    carplay_fusion_touch_t action = { 0 };
-    if (touching && gesture_epoch != state.touch_epoch)
-    {
-        action = held;
-        action.phase = RTCP_TOUCH_UP;
-        touching = false;
-        blocked = true;
-        blocked_id = held.id;
-    }
+    carplay_fusion_touch_t action = contact->held;
+    action.phase = RTCP_TOUCH_UP;
+    if (wait_for_up)
+        contact->blocked = true;
+    else
+        *contact = (fusion_contact_t){ 0 };
     return action;
 }
 
 carplay_fusion_touch_t carplay_fusion_cancel_touch(void)
 {
+    carplay_fusion_touch_t action = { 0 };
     rt_base_t irq = rt_hw_interrupt_disable();
-    carplay_fusion_touch_t action = cancel();
+    for (unsigned index = 0; index < RTCP_TOUCH_CONTACTS; ++index)
+    {
+        fusion_contact_t *contact = &contacts[index];
+        if (contact->held.owner != CARPLAY_TOUCH_NONE && !contact->blocked &&
+            contact->epoch != state.touch_epoch)
+        {
+            action = release_contact(contact, true);
+            break;
+        }
+    }
     rt_hw_interrupt_enable(irq);
     return action;
 }
@@ -201,58 +257,77 @@ carplay_fusion_touch_t carplay_fusion_touch(uint8_t phase, uint16_t id, uint16_t
     if (phase != RTCP_TOUCH_DOWN && phase != RTCP_TOUCH_MOVE && phase != RTCP_TOUCH_UP)
         return action;
     rt_base_t irq = rt_hw_interrupt_disable();
-    action = cancel();
-    if (blocked)
+    fusion_contact_t *contact = NULL;
+    fusion_contact_t *free_slot = NULL;
+    carplay_touch_owner_t active_owner = CARPLAY_TOUCH_NONE;
+    bool current_phone_contact = false;
+    for (unsigned index = 0; index < RTCP_TOUCH_CONTACTS; ++index)
     {
-        if (id == blocked_id && phase == RTCP_TOUCH_UP)
-            blocked = false;
+        fusion_contact_t *slot = &contacts[index];
+        if (slot->held.owner == CARPLAY_TOUCH_NONE)
+            free_slot = slot;
+        else if (slot->held.id == id)
+            contact = slot;
+        if (!slot->blocked && slot->held.owner != CARPLAY_TOUCH_NONE)
+        {
+            active_owner = slot->held.owner;
+            current_phone_contact = active_owner == CARPLAY_TOUCH_PHONE &&
+                                    slot->epoch == state.touch_epoch;
+        }
+    }
+    if (contact && contact->blocked)
+    {
+        if (phase == RTCP_TOUCH_UP)
+            *contact = (fusion_contact_t){ 0 };
+        goto done;
+    }
+    if (contact && contact->epoch != state.touch_epoch)
+    {
+        action = release_contact(contact, phase != RTCP_TOUCH_UP);
         goto done;
     }
     if (!state.initialized)
         goto done;
     if (x >= state.width || y >= state.height)
     {
-        if (touching && held.id == id)
-        {
-            action = held;
-            action.phase = RTCP_TOUCH_UP;
-            touching = false;
-            blocked = phase != RTCP_TOUCH_UP;
-            blocked_id = id;
-        }
+        if (contact)
+            action = release_contact(contact, phase != RTCP_TOUCH_UP);
         goto done;
     }
     uint16_t px = x, py = y;
     bool phone = state.video_active && state.video_generation == state.generation &&
                  effective() != CARPLAY_LOCAL && rtcp_display_map_point(&state.video_rect, state.logical_width, state.logical_height, x, y, &px, &py);
-    if (!touching && phase == RTCP_TOUCH_DOWN)
+    if (!contact)
     {
-        carplay_touch_owner_t owner = phone                                                                                                     ? CARPLAY_TOUCH_PHONE
-                                      : effective() == CARPLAY_LOCAL || (effective() == CARPLAY_FUSION && x >= state.width - state.local_width) ? CARPLAY_TOUCH_LOCAL
-                                                                                                                                                : CARPLAY_TOUCH_NONE;
-        if (owner == CARPLAY_TOUCH_NONE)
+        if (!free_slot || phase != RTCP_TOUCH_DOWN)
             goto done;
-        held = (carplay_fusion_touch_t){ .owner = owner, .id = id };
-        touching = true;
-        gesture_epoch = state.touch_epoch;
+        if (phone && active_owner != CARPLAY_TOUCH_LOCAL)
+        {
+            free_slot->held.owner = CARPLAY_TOUCH_PHONE;
+            if (current_phone_contact)
+                ++state.two_finger_starts;
+        }
+        else if (active_owner == CARPLAY_TOUCH_NONE &&
+                 (effective() == CARPLAY_LOCAL ||
+                  (effective() == CARPLAY_FUSION && x >= state.width - state.local_width)))
+            free_slot->held.owner = CARPLAY_TOUCH_LOCAL;
+        else
+            goto done;
+        free_slot->held.id = id;
+        free_slot->epoch = state.touch_epoch;
+        contact = free_slot;
     }
-    if (!touching || held.id != id)
-        goto done;
-    if (held.owner == CARPLAY_TOUCH_PHONE && !phone)
+    if (contact->held.owner == CARPLAY_TOUCH_PHONE && !phone)
     {
-        action = held;
-        action.phase = RTCP_TOUCH_UP;
-        touching = false;
-        blocked = phase != RTCP_TOUCH_UP;
-        blocked_id = id;
+        action = release_contact(contact, phase != RTCP_TOUCH_UP);
         goto done;
     }
-    held.phase = phase;
-    held.x = held.owner == CARPLAY_TOUCH_PHONE ? px : x;
-    held.y = held.owner == CARPLAY_TOUCH_PHONE ? py : y;
-    action = held;
+    contact->held.phase = phase;
+    contact->held.x = contact->held.owner == CARPLAY_TOUCH_PHONE ? px : x;
+    contact->held.y = contact->held.owner == CARPLAY_TOUCH_PHONE ? py : y;
+    action = contact->held;
     if (phase == RTCP_TOUCH_UP)
-        touching = false;
+        *contact = (fusion_contact_t){ 0 };
 done:
     rt_hw_interrupt_enable(irq);
     return action;
@@ -292,6 +367,7 @@ static int cmd_carplay_display(int argc, char **argv)
                s.vehicle.simulated ? "SIMULATED" : s.vehicle.available ? "PROVIDER"
                                                                        : "UNAVAILABLE",
                s.vehicle.speed_kph, s.vehicle.gear, s.vehicle.battery_percent);
+    rt_kprintf("[carplay-display] two_finger_starts=%u\n", (unsigned)s.two_finger_starts);
     return RTCP_OK;
 }
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_display, carplay_display, Single screen CarPlay display modes and vehicle data);

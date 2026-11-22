@@ -31,7 +31,11 @@ python -I tools/generate_icon_assets.py <path>/lucide.ttf
 
 `ui/ui_language.c` 维护英中标签对照并支持 `carplay_ui_set_chinese()` 即时切换。中文使用 Noto Sans SC 子集，按 16/18/24/30 四档字号匹配。四个 CJK 字体文件都由 `tools/generate_ui_fonts.py` 按同一符号并集生成，因此不会出现某个字号缺字显示方块的情况。英文使用 `tools/generate_display_fonts.py` 生成的 Inter 子集。
 
-偏好通过 `app/launcher_preferences.c` 持久化到 `/data/carplay-ui.bin`。版本 2 记录布局为 `"CPUI" | version | present mask | values | FNV-1a`，先写临时文件再替换，并保留备份用于恢复。键为 `CARPLAY_PREF_{LANGUAGE,THEME,DISPLAY,WIRELESS,MIC_MUTED,VOLUME,BRIGHTNESS}`。写入失败会在设置页提示。
+偏好通过 `app/launcher_preferences.c` 持久化到 `/data/carplay-ui.bin`。记录包含数值设置、蓝牙名称和校验值。文件通过临时文件和备份替换，保存失败时设置页会提示。
+
+## 蓝牙名称
+
+进入 **设置 → 蓝牙**，输入 1–28 个可打印 ASCII 字符并点击 **应用**。重启开发板后，控制器的经典蓝牙本地名称和发现 EIR 生效。默认名称为 `rt-carplay`。蓝牙地址、配对记录、Wi-Fi 网络名称和 Bonjour 名称各自沿用原有值。检查串口中的 `Bluetooth local name`，并用手机扫描确认。已有配对的手机可能继续显示缓存名称。
 
 ## 音量与亮度
 

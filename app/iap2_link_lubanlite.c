@@ -28,6 +28,7 @@
 #include "carplay_mfi_provider.h"
 #include "gnss_demo.h"
 #include "iap2_session.h"
+#include "launcher_preferences.h"
 #include "rtcp/rtcp.h"
 #include "rtcp_lubanlite.h"
 #include "rtcp_rtthread.h"
@@ -340,6 +341,12 @@ static void link_route_guidance(const rtcp_route_guidance_t *update, void *conte
     link->tunnel_callbacks->on_route_guidance(update, link->tunnel_callbacks->context);
 }
 
+static void link_device_time(const rtcp_device_time_t *update, void *context)
+{
+    const iap2_link_t *link = context;
+    link->tunnel_callbacks->on_device_time(update, link->tunnel_callbacks->context);
+}
+
 static int link_session_create(iap2_link_t *link, const struct rtcp_mfi *mfi)
 {
     carplay_app_iap2_info_t snapshot;
@@ -391,6 +398,8 @@ static int link_session_create(iap2_link_t *link, const struct rtcp_mfi *mfi)
         config.on_now_playing = link_now_playing;
     if (link->tunnel_callbacks && link->tunnel_callbacks->on_route_guidance)
         config.on_route_guidance = link_route_guidance;
+    if (config.airplay_tunnel && link->tunnel_callbacks && link->tunnel_callbacks->on_device_time)
+        config.on_device_time = link_device_time;
 
     link->session = iap2_session_create(&config);
     if (config.airplay_tunnel && link->session)
@@ -426,6 +435,7 @@ static void link_thread(void *parameter)
     bool provider_installed = false;
     bool transport_attempted = false;
     int result = RTCP_OK;
+    char bt_name[CARPLAY_BT_NAME_MAX + 1];
     if (!s_serve)
         goto done;
 
@@ -447,7 +457,8 @@ static void link_thread(void *parameter)
     if (!s_serve)
         goto done;
     transport_attempted = true;
-    result = rtcp_bt_lubanlite.enable("rt-carplay", NULL);
+    carplay_preferences_bt_name(bt_name);
+    result = rtcp_bt_lubanlite.enable(bt_name, NULL);
     if (result != RTCP_OK)
     {
         IAP2_LOG("Bluetooth enable failed rc=%d", result);
@@ -1249,13 +1260,15 @@ static int cmd_carplay_gnss(int argc, char **argv)
         return RTCP_ESTATE;
     carplay_gnss_status_t status;
     carplay_gnss_get_status(&status);
-    const char *motion = !gnss.enabled ? "off" : !gnss.moving ? "fixed" :
-                         status.motion == CARPLAY_GNSS_ARRIVED ? "arrived" :
-                         status.motion == CARPLAY_GNSS_MOVING ? "moving" : "waiting";
+    const char *motion = !gnss.enabled ? "off" : !gnss.moving                        ? "fixed"
+                                             : status.motion == CARPLAY_GNSS_ARRIVED ? "arrived"
+                                             : status.motion == CARPLAY_GNSS_MOVING  ? "moving"
+                                                                                     : "waiting";
     rt_kprintf("carplay gnss: enabled=%u tunnel=%u offered=%u requested=0x%x gga=%u rmc=%u failed=%u clock=%s motion=%s\n",
                (unsigned)gnss.enabled, (unsigned)status.tunnel, (unsigned)status.advertised,
                status.requested, status.gga_queued, status.rmc_queued, status.failed,
-               status.fixture_clock ? "fixture" : status.gga_queued || status.rmc_queued ? "board" : "-",
+               status.fixture_clock ? "fixture" : status.gga_queued || status.rmc_queued ? "board"
+                                                                                         : "-",
                motion);
     return RTCP_OK;
 }

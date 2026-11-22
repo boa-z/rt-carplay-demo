@@ -24,11 +24,12 @@ set(UI_SOURCES
     ../../ui/fonts/carplay_cjk_16.c
     ../../ui/fonts/carplay_cjk_18.c
     ../../ui/fonts/carplay_cjk_24.c
-    ../../ui/fonts/carplay_cjk_30.c)
+    ../../ui/fonts/carplay_cjk_30.c
+    ../../ui/fonts/carplay_cjk_full_18.c)
 
 # Actual V4 pages with modeled connection, audio, backlight and OTA owners.
 add_executable(launcher_preview main.c)
-target_sources(launcher_preview PRIVATE ${UI_SOURCES} ../../ui/fonts/carplay_cjk_full_18.c ../../app/gnss_demo.c)
+target_sources(launcher_preview PRIVATE ${UI_SOURCES} ../../app/gnss_demo.c)
 target_include_directories(launcher_preview PRIVATE
     ../../ui ../support/lubanlite_demo ../../app ../../platform
     "${SDK_ROOT}/packages/third-party/rt-carplay/include"
@@ -36,7 +37,7 @@ target_include_directories(launcher_preview PRIVATE
 target_compile_definitions(launcher_preview PRIVATE
     RTCARPLAY_INTERNET_SHARE RTCARPLAY_MICROPHONE RTCARPLAY_IAP2
     LPKG_RT_CARPLAY_LUBANLITE_WIFI RTCARPLAY_OTA
-    CARPLAY_PREFERENCES_EXTERNAL_PROVIDER)
+    LPKG_BT_DEVICE_NAME_DYNAMIC CARPLAY_PREFERENCES_EXTERNAL_PROVIDER)
 target_compile_options(launcher_preview PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(launcher_preview PRIVATE lvgl m)
 

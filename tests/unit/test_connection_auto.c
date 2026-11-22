@@ -23,6 +23,7 @@ enum
 };
 static unsigned scenario, now, boot, radio_at, pairs, opens, starts, closes;
 static unsigned radio_starts, radio_stops, first_pair_at;
+static unsigned last_pair_at;
 static unsigned network_samples;
 static bool receiver, wired, radio, usb_session, seen_live;
 static jmp_buf done;
@@ -192,8 +193,18 @@ int carplay_usb_pair(void)
     }
     if (scenario == EVENT_LOSS && pairs == 2)
     {
-        assert(seen_live && closes && now - first_pair_at >= 1000);
-        longjmp(done, 1); /* Reconnect while USB remains physically attached. */
+        assert(seen_live && closes && now - first_pair_at >= 1000 && !radio_starts);
+        last_pair_at = now;
+        return RTCP_EIO;
+    }
+    if (scenario == EVENT_LOSS && pairs >= 3)
+    {
+        assert(!radio_starts && status.usb_error == RTCP_EIO);
+        assert(now - last_pair_at >= (pairs == 3 ? 5000U : 10000U));
+        last_pair_at = now;
+        if (pairs == 4)
+            longjmp(done, 1);
+        return RTCP_EIO;
     }
     if (scenario == NO_NETWORK && pairs == 2)
     {
@@ -399,9 +410,10 @@ int main(void)
             memset(retry_waiting, 0, sizeof(retry_waiting));
             automatic = true;
             wireless_enabled = scenario != USB_RETRY && scenario != NO_PICTURE &&
-                               scenario != EVENT_LOSS && scenario != USB_START_FAILURE;
+                               scenario != USB_START_FAILURE;
             requested_wireless = status.wireless = wireless_enabled;
-            if (scenario == ATTACHED_TIMEOUT || scenario == USB_DISPLAY_SWITCH)
+            if (scenario == ATTACHED_TIMEOUT || scenario == USB_DISPLAY_SWITCH ||
+                scenario == EVENT_LOSS)
                 requested_wireless = status.wireless = false;
             status_lock = (void *)1;
             manager_open = retry_requested = false;
@@ -414,7 +426,7 @@ int main(void)
             if (scenario == ENUM_RETRY)
                 assert(opens == 3 && elapsed() >= 10000);
             if (scenario == RADIO_FAILURE)
-                assert(status.wireless_error == RTCP_EIO);
+                assert(status.wireless_error == RTCP_EIO && retry_waiting[1] && failures[1] == 1U);
             if (scenario == USB_RETRY)
                 assert(pairs == 2);
         }

@@ -11,15 +11,22 @@ typedef enum
     CARPLAY_PREF_MIC_MUTED,  /* 0 enabled, 1 muted */
     CARPLAY_PREF_VOLUME,     /* 0..100 percent of the local mixer */
     CARPLAY_PREF_BRIGHTNESS, /* 5..100 percent of the panel PWM */
+    CARPLAY_PREF_HIGH_FPS,   /* 0 = 30 fps, 1 = 60 fps */
     CARPLAY_PREF_COUNT
 } carplay_preference_t;
 
 /* Per-key accepted maximum; values outside the range are never stored. */
-#define CARPLAY_PREF_VOLUME_MAX     100U
-#define CARPLAY_PREF_BRIGHTNESS_MAX 100U
-#define CARPLAY_PREF_BRIGHTNESS_MIN 5U
+#define CARPLAY_PREF_VOLUME_MAX       100U
+#define CARPLAY_PREF_BRIGHTNESS_MAX   100U
+#define CARPLAY_PREF_BRIGHTNESS_MIN   5U
+#define CARPLAY_PREF_HIGH_FPS_DEFAULT 1U
+#define CARPLAY_BT_NAME_MAX           28U
+#define CARPLAY_BT_NAME_DEFAULT       "rt-carplay"
 
-#if defined(RT_USING_DFS) || defined(CARPLAY_PREFERENCES_EXTERNAL_PROVIDER)
+#include <string.h>
+
+#if (defined(RT_USING_DFS) && defined(RTCARPLAY_AUTO_CONNECT)) || \
+    defined(CARPLAY_PREFERENCES_EXTERNAL_PROVIDER)
 /* Initialize on the application startup owner before worker/UI requests. */
 int carplay_preferences_init(void);
 unsigned carplay_preferences_get(carplay_preference_t key, unsigned fallback);
@@ -27,6 +34,8 @@ unsigned carplay_preferences_get(carplay_preference_t key, unsigned fallback);
  * written. A successful call is the only confirmation that the choice persists. */
 int carplay_preferences_set(carplay_preference_t key, unsigned value);
 int carplay_preferences_error(void);
+void carplay_preferences_bt_name(char name[CARPLAY_BT_NAME_MAX + 1]);
+int carplay_preferences_set_bt_name(const char *name);
 #else
 static inline int carplay_preferences_init(void)
 {
@@ -46,6 +55,10 @@ static inline int carplay_preferences_set(carplay_preference_t key, unsigned val
 static inline int carplay_preferences_error(void)
 {
     return 0;
+}
+static inline void carplay_preferences_bt_name(char name[CARPLAY_BT_NAME_MAX + 1])
+{
+    memcpy(name, CARPLAY_BT_NAME_DEFAULT, sizeof(CARPLAY_BT_NAME_DEFAULT));
 }
 #endif
 #endif

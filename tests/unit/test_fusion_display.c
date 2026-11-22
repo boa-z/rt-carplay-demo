@@ -81,7 +81,7 @@ static void latch(void)
     uint32_t generation;
     assert(carplay_fusion_video_target(1024, 600, &viewport, &generation));
     assert(rtcp_display_fit(&viewport, 1920, 1080, &destination));
-    carplay_fusion_video_latched(&destination, 1024, 600, generation, 123000);
+    carplay_fusion_video_latched(&destination, 1024, 600, generation, 123000, true);
 }
 static carplay_fusion_touch_t touch(uint8_t phase, uint16_t x, uint16_t y)
 {
@@ -110,11 +110,17 @@ int main(void)
     assert(touch(RTCP_TOUCH_DOWN, 384, 300).owner == CARPLAY_TOUCH_PHONE);
     action = touch(RTCP_TOUCH_MOVE, 384, 300);
     assert(action.x == 512 && action.y == 300);
-    /* A second finger cannot take over the captured gesture. */
     assert(carplay_fusion_touch(RTCP_TOUCH_DOWN, 8, 900, 100).owner == CARPLAY_TOUCH_NONE);
+    action = carplay_fusion_touch(RTCP_TOUCH_DOWN, 9, 192, 300);
+    assert(action.owner == CARPLAY_TOUCH_PHONE && action.id == 9 && action.x == 256 && action.y == 300);
+    assert(carplay_fusion_touch(RTCP_TOUCH_DOWN, 10, 500, 300).owner == CARPLAY_TOUCH_NONE);
+    assert(snapshot().two_finger_starts == 1);
     action = touch(RTCP_TOUCH_MOVE, 900, 300);
     assert(action.owner == CARPLAY_TOUCH_PHONE && action.phase == RTCP_TOUCH_UP && action.x == 512);
     assert(touch(RTCP_TOUCH_MOVE, 900, 300).owner == CARPLAY_TOUCH_NONE);
+    action = carplay_fusion_touch(RTCP_TOUCH_MOVE, 9, 96, 300);
+    assert(action.owner == CARPLAY_TOUCH_PHONE && action.phase == RTCP_TOUCH_MOVE && action.x == 128);
+    assert(carplay_fusion_touch(RTCP_TOUCH_UP, 9, 96, 300).owner == CARPLAY_TOUCH_PHONE);
     assert(touch(RTCP_TOUCH_UP, 900, 300).owner == CARPLAY_TOUCH_NONE);
     assert(touch(RTCP_TOUCH_DOWN, 900, 100).owner == CARPLAY_TOUCH_LOCAL);
     assert(touch(RTCP_TOUCH_MOVE, 300, 100).owner == CARPLAY_TOUCH_LOCAL);
@@ -123,9 +129,16 @@ int main(void)
     assert(touch(RTCP_TOUCH_UP, 300, 20).owner == CARPLAY_TOUCH_NONE);
     action = touch(RTCP_TOUCH_DOWN, 767, 515);
     assert(action.owner == CARPLAY_TOUCH_PHONE && action.x < 1024 && action.y < 600);
+    assert(carplay_fusion_touch(RTCP_TOUCH_DOWN, 9, 192, 300).owner == CARPLAY_TOUCH_PHONE);
     assert(carplay_fusion_set_mode(CARPLAY_FULLSCREEN) == RTCP_OK);
     action = carplay_fusion_cancel_touch();
     assert(action.owner == CARPLAY_TOUCH_PHONE && action.phase == RTCP_TOUCH_UP);
+    carplay_fusion_touch_t other_release = carplay_fusion_cancel_touch();
+    assert(other_release.owner == CARPLAY_TOUCH_PHONE && other_release.phase == RTCP_TOUCH_UP &&
+           other_release.id != action.id);
+    assert(carplay_fusion_cancel_touch().owner == CARPLAY_TOUCH_NONE);
+    assert(carplay_fusion_touch(RTCP_TOUCH_MOVE, 9, 192, 300).owner == CARPLAY_TOUCH_NONE);
+    assert(carplay_fusion_touch(RTCP_TOUCH_UP, 9, 192, 300).owner == CARPLAY_TOUCH_NONE);
     (void)touch(RTCP_TOUCH_UP, 767, 515);
     assert(touch(RTCP_TOUCH_DOWN, 200, 200).owner == CARPLAY_TOUCH_NONE); /* layout not latched */
     latch();
@@ -200,7 +213,7 @@ int main(void)
     uint32_t viewport_generation;
     assert(carplay_fusion_video_target(1024, 600, &viewport, &viewport_generation));
     assert(rtcp_display_fit(&viewport, 768, 600, &destination));
-    carplay_fusion_video_latched(&destination, 768, 600, viewport_generation, 123000);
+    carplay_fusion_video_latched(&destination, 768, 600, viewport_generation, 123000, true);
     s = snapshot();
     assert(s.video_rect.x == 0 && s.video_rect.y == 0 && s.logical_width == 768);
     action = touch(RTCP_TOUCH_DOWN, 0, 0);
@@ -209,6 +222,24 @@ int main(void)
     assert(action.owner == CARPLAY_TOUCH_PHONE && action.x == 767 && action.y == 599);
     assert(touch(RTCP_TOUCH_DOWN, 768, 599).owner == CARPLAY_TOUCH_LOCAL);
     assert(touch(RTCP_TOUCH_UP, 768, 599).owner == CARPLAY_TOUCH_LOCAL);
+
+    carplay_fusion_set_projection_hidden(true);
+    carplay_fusion_video_latched(&destination, 768, 600, viewport_generation, 123001, true);
+    assert(snapshot().effective == CARPLAY_LOCAL);
+    assert(!carplay_fusion_resume_latched_projection());
+    carplay_fusion_resume_projection_on_frame();
+    assert(carplay_fusion_resume_latched_projection());
+    assert(snapshot().effective == CARPLAY_FUSION);
+
+    carplay_fusion_set_projection_hidden(true);
+    carplay_fusion_resume_projection_on_frame();
+    carplay_fusion_video_stopped();
+    assert(!carplay_fusion_resume_latched_projection());
+    carplay_fusion_video_latched(&destination, 768, 600, viewport_generation, 123002, false);
+    assert(snapshot().effective == CARPLAY_LOCAL);
+    carplay_fusion_video_latched(&destination, 768, 600, viewport_generation, 123003, true);
+    assert(snapshot().effective == CARPLAY_FUSION);
+
     rtcp_display_rect_t target;
     uint32_t generation;
     (void)carplay_fusion_set_mode(CARPLAY_FUSION);

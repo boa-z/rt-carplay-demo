@@ -49,7 +49,8 @@ with tempfile.TemporaryDirectory() as temp:
         subprocess.run([
             "node", str(args.converter), "--font", str(path), "--size", "18",
             "--bpp", "2", "--range", ",".join(ranges), "--no-kerning",
-            "--format", "lvgl", "--lv-font-name", output.stem, "-o", str(output),
+            "--format", "lvgl", "--lv-fallback", "lv_font_montserrat_16",
+            "--lv-font-name", output.stem, "-o", str(output),
         ], check=True)
         text = output.read_text(encoding="utf-8")
         text = text[text.index("#ifdef LV_LVGL_H_INCLUDE_SIMPLE"):]
@@ -66,7 +67,7 @@ with tempfile.TemporaryDirectory() as temp:
             "node", str(args.converter), "--font", str(path), "--size", str(size),
             "--bpp", "4", "--range", "0x20-0x7e", "--symbols", symbols,
             "--no-compress", "--no-kerning", "--format", "lvgl",
-            "--lv-fallback", "lv_font_montserrat_16", "--lv-font-name", name,
+            "--lv-fallback", "carplay_cjk_full_18", "--lv-font-name", name,
             "-o", str(output),
         ], check=True)
         text = output.read_text(encoding="utf-8")

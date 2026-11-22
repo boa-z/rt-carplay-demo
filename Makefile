@@ -35,9 +35,17 @@ sdk-libraries:
 	$(MAKE) -C $(RTCP_ROOT) $(patsubst $(RTCP_ROOT)/%,%,$(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS))
 $(BOARD_BINS): | sdk-libraries $(BUILD)
 $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS): sdk-libraries
-check: $(BOARD_BINS) check-auto-connections check-internet-share check-udp-burst check-usb-file-sync check-ota check-native-ncm check-vehicle-protocol-demo
+check: $(BOARD_BINS) check-auto-connections check-internet-share check-udp-burst check-usb-file-sync check-ota check-native-ncm check-vehicle-protocol-demo check-launcher-preferences
 	@set -e; for t in $(BOARD_BINS); do ./$$t; done
 	$(MAKE) check-lubanlite-video check-lubanlite-touch check-lubanlite-demo check-lubanlite-bonds check-lubanlite-usb check-lubanlite-handoff check-lubanlite-reconnect check-lubanlite-capabilities check-wired-identity check-wired-trace check-iap2-endpoints check-usb-iap2-worker check-wireless-iap2-worker
+
+.PHONY: check-launcher-preferences
+check-launcher-preferences: | $(BUILD)
+	@mkdir -p "$(BUILD)/launcher-preferences"
+	$(CC) $(CFLAGS) -DRT_USING_DFS -DRTCARPLAY_AUTO_CONNECT \
+	  -Itests/support/lubanlite_demo tests/unit/test_launcher_preferences.c \
+	  -o "$(BUILD)/launcher-preferences/test_launcher_preferences"
+	cd "$(BUILD)/launcher-preferences" && ./test_launcher_preferences
 
 .PHONY: check-internet-share
 check-internet-share:

@@ -3,6 +3,7 @@
  * Presentation only. Connection policy lives in app/; theme, language,
  * volume, backlight, display mode and OTA state come from their real owners. */
 #include <rtthread.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,6 +28,10 @@
 #if defined(RTCARPLAY_IAP2)
 #include "gnss_demo.h"
 #endif
+#if defined(LPKG_BT_DEVICE_NAME_DYNAMIC) && \
+    (defined(RT_USING_DFS) || defined(CARPLAY_PREFERENCES_EXTERNAL_PROVIDER))
+#define CARPLAY_BT_NAME_SETTINGS 1
+#endif
 
 static void set_phone_text(lv_obj_t *label, const char *value)
 {
@@ -42,6 +47,8 @@ static void set_phone_text(lv_obj_t *label, const char *value)
 #endif
 #if defined(RT_USING_RTC)
 #include <drivers/rtc.h>
+#include <sys/time.h>
+#include <time.h>
 #endif
 
 LV_FONT_DECLARE(carplay_display_220);
@@ -67,8 +74,14 @@ typedef enum
     SETTINGS_DISPLAY,
     SETTINGS_SOUND,
     SETTINGS_LANGUAGE,
+#if defined(RT_USING_RTC)
+    SETTINGS_CLOCK,
+#endif
     SETTINGS_ABOUT,
     SETTINGS_PHONE,
+#if defined(CARPLAY_BT_NAME_SETTINGS)
+    SETTINGS_BLUETOOTH,
+#endif
 #if defined(RTCARPLAY_IAP2)
     SETTINGS_GNSS,
 #endif
@@ -108,6 +121,10 @@ static lv_obj_t *conn_dot, *conn_state, *conn_action;
 /* Settings */
 static lv_obj_t *volume_value, *volume_slider, *brightness_value, *brightness_slider;
 static lv_obj_t *theme_buttons[3], *language_buttons[2], *display_buttons[2];
+static lv_obj_t *fps_buttons[2];
+#if defined(CARPLAY_BT_NAME_SETTINGS)
+static lv_obj_t *bluetooth_name, *bluetooth_keyboard;
+#endif
 static lv_obj_t *phone_appearance_buttons[3];
 static lv_obj_t *phone_title, *phone_artist, *phone_playback;
 static lv_obj_t *phone_road, *phone_destination, *phone_remaining, *phone_route_caption;
@@ -119,6 +136,11 @@ static lv_obj_t *gnss_buttons[2], *gnss_mode_buttons[2], *gnss_apply_button;
 static bool gnss_moving;
 #endif
 static lv_obj_t *display_note, *settings_hint;
+#if defined(RT_USING_RTC)
+static lv_obj_t *clock_current, *clock_date, *clock_time, *clock_zone, *clock_keyboard, *clock_apply;
+static lv_obj_t *clock_mode_buttons[2];
+static void load_clock_settings(void);
+#endif
 static lv_obj_t *settings_pages[SETTINGS_PAGE_COUNT];
 static lv_obj_t *settings_tabs[SETTINGS_PAGE_COUNT];
 static lv_obj_t *settings_captions[SETTINGS_PAGE_COUNT];
@@ -412,10 +434,8 @@ static void clock_text(char *out, size_t size)
         snprintf(out, size, "--:--");
         return;
     }
-#if defined(RT_LIBC_DEFAULT_TIMEZONE)
-    seconds += (time_t)RT_LIBC_DEFAULT_TIMEZONE * 3600;
-#endif
-    long rem = (long)(seconds % 86400);
+    long rem = (long)(seconds % 86400) + carplay_app_clock_offset_minutes() * 60L;
+    rem = (rem % 86400 + 86400) % 86400;
     snprintf(out, size, "%02ld:%02ld", rem / 3600, rem / 60 % 60);
 #else
     snprintf(out, size, "--:--");
@@ -523,7 +543,7 @@ static void build_header(lv_obj_t *parent, const char *title, lv_event_cb_t go_b
     lv_obj_add_flag(back, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(back, go_back, LV_EVENT_CLICKED, NULL);
     lv_obj_t *arrow = icon_mask(back, &carplay_icon_arrow_left_22, 0, 0,
-                               CARPLAY_STYLE_ICON_TEXT);
+                                CARPLAY_STYLE_ICON_TEXT);
     lv_obj_center(arrow);
     lv_obj_t *heading = text(parent, title, 0, 0, 700, &carplay_ui_34, CARPLAY_STYLE_TEXT);
     lv_obj_align_to(heading, back, LV_ALIGN_OUT_RIGHT_MID, 18, 0);
@@ -531,16 +551,27 @@ static void build_header(lv_obj_t *parent, const char *title, lv_event_cb_t go_b
 
 /* ---------------- connectivity ---------------- */
 
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+static bool can_resume_projection(const demo_status_t *status)
+{
+    if (!status->receiver.session_established || status->display_reconfiguring ||
+        (status->stage != DEMO_LIVE && status->stage != DEMO_CONNECT))
+        return false;
+    carplay_fusion_snapshot_t display;
+    carplay_fusion_snapshot(rt_tick_get_millisecond(), &display);
+    return display.effective == CARPLAY_LOCAL;
+}
+#endif
+
 static void connect_action(lv_event_t *event)
 {
     (void)event;
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
     demo_status_t status = { 0 };
-    if (carplay_connection_status(&status) && status.stage == DEMO_LIVE &&
-        !status.display_reconfiguring && !carplay_launcher_video_is_active())
+    if (carplay_connection_status(&status) && can_resume_projection(&status))
     {
-        /* A live session is held in LOCAL while the local pages are open. */
-        carplay_fusion_ui_resume();
+        if (carplay_app_set_projection_enabled(true) == RTCP_OK)
+            carplay_fusion_ui_resume();
         return;
     }
 #endif
@@ -716,6 +747,15 @@ static void select_display(lv_event_t *event)
 #endif
 }
 
+static void select_fps(lv_event_t *event)
+{
+    unsigned choice = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    int result = carplay_preferences_set(CARPLAY_PREF_HIGH_FPS, choice);
+    if (result == 0)
+        apply_segments(fps_buttons, 2, choice);
+    settings_status(result ? "Settings not saved." : "Saved. Restart the receiver to apply.", result != 0);
+}
+
 typedef const lv_image_dsc_t *icon_asset_t;
 
 static void build_slider_card(lv_obj_t *parent, int y, const char *title, icon_asset_t icon,
@@ -723,7 +763,7 @@ static void build_slider_card(lv_obj_t *parent, int y, const char *title, icon_a
                               unsigned minimum, unsigned maximum,
                               lv_event_cb_t callback, const char *hint)
 {
-    lv_obj_t *card = panel(parent, 0, y, SETTINGS_DETAIL_WIDTH - 4, 144, 16,
+    lv_obj_t *card = panel(parent, 0, y, SETTINGS_DETAIL_WIDTH - 4, 128, 16,
                            CARPLAY_STYLE_CARD);
     icon_mask(card, icon, 23, 16, CARPLAY_STYLE_ICON_ACCENT);
     text(card, title, 68, 19, 380, &carplay_ui_21, CARPLAY_STYLE_TEXT);
@@ -768,6 +808,10 @@ static void show_settings_page(settings_page_t target)
         carplay_ui_style(settings_captions[index], selected ? CARPLAY_STYLE_ACCENT_TEXT
                                                             : CARPLAY_STYLE_TEXT);
     }
+#if defined(RT_USING_RTC)
+    if (target == SETTINGS_CLOCK)
+        load_clock_settings();
+#endif
 }
 
 static void select_settings_page(lv_event_t *event)
@@ -790,16 +834,21 @@ static lv_obj_t *settings_nav_row(lv_obj_t *sidebar, const char *caption, icon_a
     return row;
 }
 
+static lv_obj_t *display_option_card(lv_obj_t *parent, int top, const char *title, int title_top)
+{
+    lv_obj_t *card = panel(parent, 0, top, SETTINGS_DETAIL_WIDTH - 4, 90, 16, CARPLAY_STYLE_CARD);
+    text(card, title, 24, title_top, 265, &carplay_ui_21, CARPLAY_STYLE_TEXT);
+    panel(card, 301, 17, 304, 56, 11, CARPLAY_STYLE_SEGMENT);
+    return card;
+}
+
 static void build_display_settings(lv_obj_t *parent)
 {
     build_slider_card(parent, 0, "Display brightness", &carplay_icon_sun_29,
                       &brightness_value, &brightness_slider, CARPLAY_PREF_BRIGHTNESS_MIN,
                       CARPLAY_PREF_BRIGHTNESS_MAX, brightness_event, "Adjust panel backlight");
 
-    lv_obj_t *appearance = panel(parent, 0, 156, SETTINGS_DETAIL_WIDTH - 4, 90, 16,
-                                 CARPLAY_STYLE_CARD);
-    text(appearance, "Appearance", 24, 34, 230, &carplay_ui_21, CARPLAY_STYLE_TEXT);
-    panel(appearance, 301, 17, 304, 56, 11, CARPLAY_STYLE_SEGMENT);
+    lv_obj_t *appearance = display_option_card(parent, 138, "Appearance", 34);
     theme_buttons[0] = segment(appearance, "Light", 303, 20, 100, 50, select_theme, (void *)0,
                                &carplay_ui_15);
     theme_buttons[1] = segment(appearance, "Dark", 403, 20, 100, 50, select_theme, (void *)1,
@@ -808,16 +857,80 @@ static void build_display_settings(lv_obj_t *parent)
                                &carplay_ui_15);
     lv_obj_add_state(theme_buttons[2], LV_STATE_DISABLED);
 
-    lv_obj_t *display = panel(parent, 0, 258, SETTINGS_DETAIL_WIDTH - 4, 116, 16,
-                              CARPLAY_STYLE_CARD);
-    text(display, "CarPlay display", 24, 34, 230, &carplay_ui_21, CARPLAY_STYLE_TEXT);
-    panel(display, 301, 17, 304, 56, 11, CARPLAY_STYLE_SEGMENT);
+    lv_obj_t *display = display_option_card(parent, 238, "CarPlay display", 19);
     display_buttons[0] = segment(display, "Fullscreen", 303, 20, 150, 50, select_display,
                                  (void *)0, &carplay_ui_15);
     display_buttons[1] = segment(display, "Fusion", 453, 20, 150, 50, select_display,
                                  (void *)1, &carplay_ui_15);
-    display_note = text(display, "", 24, 82, 580, &carplay_ui_14, CARPLAY_STYLE_FAINT);
+    display_note = text(display, "", 24, 48, 265, &carplay_ui_14, CARPLAY_STYLE_MUTED);
+    lv_label_set_long_mode(display_note, LV_LABEL_LONG_WRAP);
+
+    lv_obj_t *fps = display_option_card(parent, 338, "CarPlay frame rate", 19);
+    text(fps, "Requested maximum", 24, 48, 265, &carplay_ui_14, CARPLAY_STYLE_MUTED);
+    fps_buttons[0] = segment(fps, "30 fps", 303, 20, 150, 50, select_fps, (void *)0,
+                             &carplay_ui_15);
+    fps_buttons[1] = segment(fps, "60 fps", 453, 20, 150, 50, select_fps, (void *)1,
+                             &carplay_ui_15);
+    apply_segments(fps_buttons, 2,
+                   carplay_preferences_get(CARPLAY_PREF_HIGH_FPS, CARPLAY_PREF_HIGH_FPS_DEFAULT));
 }
+
+#if defined(CARPLAY_BT_NAME_SETTINGS)
+static void bluetooth_keyboard_close(lv_event_t *event)
+{
+    (void)event;
+    lv_keyboard_set_textarea(bluetooth_keyboard, NULL);
+    lv_obj_add_flag(bluetooth_keyboard, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void bluetooth_edit(lv_event_t *event)
+{
+    (void)event;
+    lv_keyboard_set_textarea(bluetooth_keyboard, bluetooth_name);
+    lv_obj_remove_flag(bluetooth_keyboard, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void bluetooth_save(lv_event_t *event)
+{
+    (void)event;
+    int result = carplay_preferences_set_bt_name(lv_textarea_get_text(bluetooth_name));
+    if (result == 0)
+        bluetooth_keyboard_close(NULL);
+    const char *message = result == -EINVAL ? "Invalid Bluetooth name" : "Settings not saved.";
+    settings_status(result ? message : "Saved. Restart the device to apply.", result != 0);
+}
+
+static void build_bluetooth_settings(lv_obj_t *parent)
+{
+    lv_obj_t *card = panel(parent, 0, 0, SETTINGS_DETAIL_WIDTH - 4, 162, 16, CARPLAY_STYLE_CARD);
+    text(card, "Bluetooth name", 24, 20, 580, &carplay_ui_21, CARPLAY_STYLE_TEXT);
+    text(card, "1-28 printable ASCII characters", 24, 121, 580, &carplay_ui_14, CARPLAY_STYLE_MUTED);
+    bluetooth_name = lv_textarea_create(card);
+    lv_textarea_set_one_line(bluetooth_name, true);
+    lv_textarea_set_max_length(bluetooth_name, CARPLAY_BT_NAME_MAX);
+    lv_obj_set_pos(bluetooth_name, 24, 56);
+    lv_obj_set_size(bluetooth_name, 416, 50);
+    lv_obj_set_style_text_font(bluetooth_name, &carplay_ui_18, LV_PART_MAIN);
+    carplay_ui_style(bluetooth_name, CARPLAY_STYLE_INPUT);
+    char name[CARPLAY_BT_NAME_MAX + 1];
+    carplay_preferences_bt_name(name);
+    lv_textarea_set_text(bluetooth_name, name);
+    lv_obj_add_event_cb(bluetooth_name, bluetooth_edit, LV_EVENT_CLICKED, NULL);
+
+    button_text(card, "Apply", 456, 56, 148, 50, 10, CARPLAY_STYLE_ACCENT_CARD,
+                CARPLAY_STYLE_ACCENT_TEXT, &carplay_ui_18, bluetooth_save, NULL);
+    bluetooth_keyboard = lv_keyboard_create(parent);
+    lv_obj_set_size(bluetooth_keyboard, SETTINGS_DETAIL_WIDTH - 4, 198);
+    lv_obj_align(bluetooth_keyboard, LV_ALIGN_TOP_LEFT, 0, 174);
+    carplay_ui_style(bluetooth_keyboard, CARPLAY_STYLE_CARD);
+    carplay_ui_style_part(bluetooth_keyboard, CARPLAY_STYLE_INPUT, LV_PART_ITEMS);
+    carplay_ui_style_part(bluetooth_keyboard, CARPLAY_STYLE_INPUT, LV_PART_ITEMS | LV_STATE_CHECKED);
+    carplay_ui_style_part(bluetooth_keyboard, CARPLAY_STYLE_ACCENT_CARD, LV_PART_ITEMS | LV_STATE_PRESSED);
+    lv_obj_add_event_cb(bluetooth_keyboard, bluetooth_keyboard_close, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(bluetooth_keyboard, bluetooth_keyboard_close, LV_EVENT_CANCEL, NULL);
+    bluetooth_keyboard_close(NULL);
+}
+#endif
 
 static void build_language_settings(lv_obj_t *parent)
 {
@@ -865,8 +978,8 @@ static void build_phone_settings(lv_obj_t *parent)
     const char *choices[] = { "Auto", "Light", "Dark" };
     for (unsigned index = 0; index < 3; ++index)
         phone_appearance_buttons[index] = segment(appearance, choices[index], 303 + 100 * (int)index, 14,
-                                                   100, 50, select_phone_appearance, (void *)(uintptr_t)index,
-                                                   &carplay_ui_15);
+                                                  100, 50, select_phone_appearance, (void *)(uintptr_t)index,
+                                                  &carplay_ui_15);
     apply_segments(phone_appearance_buttons, 3, carplay_app_phone_appearance());
 
     lv_obj_t *media = panel(parent, 0, 114, SETTINGS_DETAIL_WIDTH - 4, 122, 16, CARPLAY_STYLE_CARD);
@@ -975,7 +1088,7 @@ static void gnss_apply(lv_event_t *event)
 }
 
 static lv_obj_t *gnss_entry(lv_obj_t *parent, int x, int y, int width, const char *value,
-                             bool coordinate)
+                            bool coordinate)
 {
     lv_obj_t *entry = lv_textarea_create(parent);
     lv_obj_set_pos(entry, x, y);
@@ -1076,6 +1189,219 @@ static void update_gnss_settings(void)
 }
 #endif
 
+#if defined(RT_USING_RTC)
+static bool read_local_clock(struct tm *value)
+{
+    time_t utc = time(NULL);
+    if (utc <= 0)
+        return false;
+    int64_t local = (int64_t)utc + carplay_app_clock_offset_minutes() * 60L;
+    time_t seconds = (time_t)local;
+    return (int64_t)seconds == local && gmtime_r(&seconds, value) != NULL;
+}
+
+static void format_clock_zone(char *out, size_t size)
+{
+    int offset = carplay_app_clock_offset_minutes();
+    int minutes = abs(offset);
+    snprintf(out, size, "%c%02d:%02d", offset < 0 ? '-' : '+', minutes / 60, minutes % 60);
+}
+
+static void update_clock_settings(void)
+{
+    struct tm local;
+    char timestamp[64] = "--";
+    if (read_local_clock(&local))
+    {
+        char zone[12];
+        format_clock_zone(zone, sizeof(zone));
+        size_t used = strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &local);
+        if (used)
+            snprintf(timestamp + used, sizeof(timestamp) - used, "  UTC%s", zone);
+    }
+    set_phone_text(clock_current, timestamp);
+}
+
+static void close_clock_keyboard(lv_event_t *event)
+{
+    (void)event;
+    lv_keyboard_set_textarea(clock_keyboard, NULL);
+    lv_obj_add_flag(clock_keyboard, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void load_clock_settings(void)
+{
+    struct tm local;
+    char date[16] = "", time_text[16] = "", zone[12];
+    if (read_local_clock(&local))
+    {
+        strftime(date, sizeof(date), "%Y-%m-%d", &local);
+        strftime(time_text, sizeof(time_text), "%H:%M:%S", &local);
+    }
+    format_clock_zone(zone, sizeof(zone));
+    lv_textarea_set_text(clock_date, date);
+    lv_textarea_set_text(clock_time, time_text);
+    lv_textarea_set_text(clock_zone, zone);
+    bool automatic = carplay_app_clock_is_automatic();
+    apply_segments(clock_mode_buttons, 2, automatic ? 0U : 1U);
+    lv_obj_t *manual[] = { clock_date, clock_time, clock_zone, clock_apply };
+    for (size_t index = 0; index < sizeof(manual) / sizeof(manual[0]); ++index)
+    {
+        if (automatic)
+            lv_obj_add_state(manual[index], LV_STATE_DISABLED);
+        else
+            lv_obj_remove_state(manual[index], LV_STATE_DISABLED);
+    }
+    close_clock_keyboard(NULL);
+    update_clock_settings();
+}
+
+static void select_clock_mode(lv_event_t *event)
+{
+    bool automatic = lv_event_get_user_data(event) == NULL;
+    if (carplay_app_set_clock_automatic(automatic) != RTCP_OK)
+    {
+        settings_status("Unable to set clock", true);
+        return;
+    }
+    settings_status("", false);
+    load_clock_settings();
+}
+
+static void apply_manual_clock(lv_event_t *event)
+{
+    (void)event;
+    const char *date = lv_textarea_get_text(clock_date);
+    const char *time_text = lv_textarea_get_text(clock_time);
+    const char *zone = lv_textarea_get_text(clock_zone);
+    int year, month, day, hour, minute, second, zone_hour, zone_minute;
+    int date_end = 0, time_end = 0, zone_end = 0;
+    char sign;
+    if (strlen(date) != 10 || strlen(time_text) != 8 || strlen(zone) != 6 ||
+        sscanf(date, "%4d-%2d-%2d%n", &year, &month, &day, &date_end) != 3 || date_end != 10 ||
+        sscanf(time_text, "%2d:%2d:%2d%n", &hour, &minute, &second, &time_end) != 3 || time_end != 8 ||
+        sscanf(zone, "%c%2d:%2d%n", &sign, &zone_hour, &zone_minute, &zone_end) != 3 || zone_end != 6 ||
+        year < 1970 || month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 ||
+        minute < 0 || minute > 59 || second < 0 || second > 59 ||
+        (sign != '+' && sign != '-') || zone_hour < 0 || zone_hour > 14 || zone_minute < 0 || zone_minute > 59 ||
+        (zone_hour == 14 && zone_minute != 0))
+    {
+        settings_status("Invalid date, time or UTC offset", true);
+        return;
+    }
+
+    struct tm requested = { .tm_year = year - 1900, .tm_mon = month - 1, .tm_mday = day, .tm_hour = hour, .tm_min = minute, .tm_sec = second };
+    time_t local_seconds = timegm(&requested);
+    struct tm checked;
+    if (local_seconds < 0 || !gmtime_r(&local_seconds, &checked) || checked.tm_year != year - 1900 ||
+        checked.tm_mon != month - 1 || checked.tm_mday != day || checked.tm_hour != hour ||
+        checked.tm_min != minute || checked.tm_sec != second)
+    {
+        settings_status("Invalid date, time or UTC offset", true);
+        return;
+    }
+
+    int offset = (zone_hour * 60 + zone_minute) * (sign == '-' ? -1 : 1);
+    if (carplay_app_set_local_clock((int64_t)local_seconds, offset) != RTCP_OK)
+    {
+        settings_status("Unable to set clock", true);
+        return;
+    }
+    settings_status("Clock updated", false);
+    load_clock_settings();
+}
+
+static void edit_clock_field(lv_event_t *event)
+{
+    lv_keyboard_set_textarea(clock_keyboard, lv_event_get_target_obj(event));
+    lv_obj_remove_flag(clock_keyboard, LV_OBJ_FLAG_HIDDEN);
+}
+
+static lv_obj_t *clock_field(lv_obj_t *parent, const char *label, int left, int width,
+                             const char *placeholder, const char *characters, unsigned max_length)
+{
+    text(parent, label, left, 132, width, &carplay_ui_15, CARPLAY_STYLE_TEXT);
+    lv_obj_t *entry = lv_textarea_create(parent);
+    lv_obj_set_pos(entry, left, 160);
+    lv_obj_set_size(entry, width, 40);
+    carplay_ui_style(entry, CARPLAY_STYLE_INPUT);
+    lv_textarea_set_one_line(entry, true);
+    lv_textarea_set_accepted_chars(entry, characters);
+    lv_textarea_set_max_length(entry, max_length);
+    lv_textarea_set_placeholder_text(entry, placeholder);
+    lv_obj_add_event_cb(entry, edit_clock_field, LV_EVENT_CLICKED, NULL);
+    return entry;
+}
+
+static void build_clock_settings(lv_obj_t *parent)
+{
+    lv_obj_t *card = panel(parent, 0, 0, SETTINGS_DETAIL_WIDTH - 4, 223, 16, CARPLAY_STYLE_CARD);
+    text(card, "Local time", 24, 16, 580, &carplay_ui_15, CARPLAY_STYLE_MUTED);
+    clock_current = text(card, "", 24, 40, 580, &carplay_ui_21, CARPLAY_STYLE_TEXT);
+    clock_mode_buttons[0] = segment(card, "Sync with iPhone", 24, 83, 172, 38,
+                                    select_clock_mode, NULL, &carplay_ui_15);
+    clock_mode_buttons[1] = segment(card, "Manual", 204, 83, 104, 38,
+                                    select_clock_mode, (void *)1, &carplay_ui_15);
+    clock_date = clock_field(card, "Date", 24, 158, "YYYY-MM-DD", "0123456789-", 10);
+    clock_time = clock_field(card, "Time", 194, 126, "HH:MM:SS", "0123456789:", 8);
+    clock_zone = clock_field(card, "UTC offset", 332, 126, "+08:00", "0123456789+-:", 6);
+    clock_apply = segment(card, "Apply", 482, 160, 116, 40, apply_manual_clock, NULL, &carplay_ui_15);
+
+    static const char *keys[] = {
+        "1",
+        "2",
+        "3",
+        "-",
+        "\n",
+        "4",
+        "5",
+        "6",
+        "+",
+        "\n",
+        "7",
+        "8",
+        "9",
+        ":",
+        "\n",
+        LV_SYMBOL_CLOSE,
+        "0",
+        LV_SYMBOL_BACKSPACE,
+        LV_SYMBOL_OK,
+        "",
+    };
+    static const lv_buttonmatrix_ctrl_t controls[] = {
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+    };
+    clock_keyboard = lv_keyboard_create(parent);
+    lv_obj_set_size(clock_keyboard, SETTINGS_DETAIL_WIDTH - 4, 176);
+    lv_obj_align(clock_keyboard, LV_ALIGN_TOP_LEFT, 0, 236);
+    carplay_ui_style(clock_keyboard, CARPLAY_STYLE_CARD);
+    carplay_ui_style_part(clock_keyboard, CARPLAY_STYLE_INPUT, LV_PART_ITEMS);
+    carplay_ui_style_part(clock_keyboard, CARPLAY_STYLE_ACCENT_CARD, LV_PART_ITEMS | LV_STATE_PRESSED);
+    lv_obj_set_style_text_font(clock_keyboard, LV_FONT_DEFAULT, LV_PART_ITEMS);
+    lv_keyboard_set_map(clock_keyboard, LV_KEYBOARD_MODE_USER_1, keys, controls);
+    lv_keyboard_set_mode(clock_keyboard, LV_KEYBOARD_MODE_USER_1);
+    lv_obj_add_event_cb(clock_keyboard, close_clock_keyboard, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(clock_keyboard, close_clock_keyboard, LV_EVENT_CANCEL, NULL);
+    close_clock_keyboard(NULL);
+}
+#endif
+
 static void build_settings(lv_obj_t *parent)
 {
     static const struct
@@ -1086,8 +1412,14 @@ static void build_settings(lv_obj_t *parent)
         [SETTINGS_DISPLAY] = { "Display", &carplay_icon_sun_29 },
         [SETTINGS_SOUND] = { "Sound", &carplay_icon_volume_29 },
         [SETTINGS_LANGUAGE] = { "Language", &carplay_icon_languages_24 },
+#if defined(RT_USING_RTC)
+        [SETTINGS_CLOCK] = { "Date & time", &carplay_icon_refresh_24 },
+#endif
         [SETTINGS_ABOUT] = { "About", &carplay_icon_info_26 },
         [SETTINGS_PHONE] = { "Phone controls", &carplay_icon_smartphone_24 },
+#if defined(CARPLAY_BT_NAME_SETTINGS)
+        [SETTINGS_BLUETOOTH] = { "Bluetooth", &carplay_icon_link_24 },
+#endif
 #if defined(RTCARPLAY_IAP2)
         [SETTINGS_GNSS] = { "GNSS simulation", &carplay_icon_map_pin_24 },
 #endif
@@ -1113,7 +1445,7 @@ static void build_settings(lv_obj_t *parent)
     lv_obj_t *update = settings_nav_row(sidebar, "System update", &carplay_icon_download_26,
                                         SETTINGS_PAGE_COUNT, open_ota);
     lv_obj_t *chevron = icon_mask(update, &carplay_icon_chevron_right_23, 0, 0,
-                                 CARPLAY_STYLE_ICON_MUTED);
+                                  CARPLAY_STYLE_ICON_MUTED);
     lv_obj_align(chevron, LV_ALIGN_RIGHT_MID, -11, 0);
 
     build_display_settings(settings_pages[SETTINGS_DISPLAY]);
@@ -1121,8 +1453,14 @@ static void build_settings(lv_obj_t *parent)
                       &volume_value, &volume_slider, 0, CARPLAY_PREF_VOLUME_MAX, volume_event,
                       "Adjust local audio output");
     build_language_settings(settings_pages[SETTINGS_LANGUAGE]);
+#if defined(RT_USING_RTC)
+    build_clock_settings(settings_pages[SETTINGS_CLOCK]);
+#endif
     build_about(settings_pages[SETTINGS_ABOUT]);
     build_phone_settings(settings_pages[SETTINGS_PHONE]);
+#if defined(CARPLAY_BT_NAME_SETTINGS)
+    build_bluetooth_settings(settings_pages[SETTINGS_BLUETOOTH]);
+#endif
 #if defined(RTCARPLAY_IAP2)
     build_gnss_settings(settings_pages[SETTINGS_GNSS]);
 #endif
@@ -1501,6 +1839,11 @@ static void update_connectivity(const demo_status_t *status, bool have_status)
     bool connected = have_status && status->stage == DEMO_LIVE;
     bool busy = have_status && (status->stage == DEMO_PAIR || status->stage == DEMO_NETWORK ||
                                 status->stage == DEMO_CONNECT);
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    bool resume = have_status && can_resume_projection(status);
+    connected |= resume;
+    busy &= !resume;
+#endif
     static bool shown_connected, connected_known;
     if (!connected_known || connected != shown_connected)
     {
@@ -1521,10 +1864,6 @@ static void update_connectivity(const demo_status_t *status, bool have_status)
             lv_obj_remove_state(conn_action, LV_STATE_DISABLED);
     }
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
-    /* The strip's "Dashboard" control hands the panel back to the local pages
-     * while the session stays live; this action returns to the projection. */
-    bool resume = have_status && connected && !status->display_reconfiguring &&
-                  !carplay_launcher_video_is_active();
     static bool shown_resume, resume_known;
     if (!resume_known || resume != shown_resume)
     {
@@ -1543,6 +1882,10 @@ static void update_settings_state(void)
     demo_status_t status = { 0 };
     bool have = carplay_connection_status(&status);
 
+#if defined(RT_USING_RTC)
+    if (!lv_obj_has_flag(settings_pages[SETTINGS_CLOCK], LV_OBJ_FLAG_HIDDEN))
+        update_clock_settings();
+#endif
 #if defined(RTCARPLAY_IAP2)
     if (!lv_obj_has_flag(settings_pages[SETTINGS_GNSS], LV_OBJ_FLAG_HIDDEN))
         update_gnss_settings();
@@ -1591,6 +1934,21 @@ static void update_settings_state(void)
 #endif
 }
 
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+static void update_projection(lv_timer_t *timer)
+{
+    (void)timer;
+    static carplay_display_mode_t last_mode = CARPLAY_LOCAL;
+    carplay_fusion_snapshot_t display;
+    carplay_fusion_snapshot(rt_tick_get_millisecond(), &display);
+    if (display.effective != last_mode)
+    {
+        last_mode = display.effective;
+        (void)carplay_fusion_ui_update(NULL);
+    }
+}
+#endif
+
 static void update_page(lv_timer_t *timer)
 {
     (void)timer;
@@ -1633,7 +1991,13 @@ static void update_page(lv_timer_t *timer)
         was_live = live;
 
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
-    dispatch_fusion_touch(carplay_fusion_cancel_touch());
+    for (unsigned index = 0; index < RTCP_TOUCH_CONTACTS; ++index)
+    {
+        carplay_fusion_touch_t action = carplay_fusion_cancel_touch();
+        if (action.owner == CARPLAY_TOUCH_NONE)
+            break;
+        dispatch_fusion_touch(action);
+    }
     if (carplay_fusion_ui_update(&status))
         return;
 #endif
@@ -1756,6 +2120,9 @@ void carplay_demo_launcher_init(void)
     carplay_fusion_ui_init(screen, (uint16_t)width, (uint16_t)height);
 #endif
     lv_timer_create(update_page, 250, NULL);
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    lv_timer_create(update_projection, 33, NULL);
+#endif
     int touch = carplay_touch_panel_start((uint16_t)width, (uint16_t)height,
                                           launcher_panel_touch, NULL);
     if (touch != RTCP_OK)

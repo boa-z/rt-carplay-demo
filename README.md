@@ -78,6 +78,12 @@ The wireless iAP2 tunnel also feeds the Route guidance card under Settings → P
 
 Now Playing and Route guidance use the complete Noto Sans SC glyph map in both UI languages. See [font coverage and regeneration](ui/fonts/README.md).
 
+### iPhone clock synchronization
+
+Open **Settings → Date & time** to see the local RTC time and its UTC offset. **Sync with iPhone** accepts iAP2 `DeviceTimeUpdate` over wired USB and the wireless AirPlay DataStream tunnel, writes UTC to the board RTC, and uses the phone's time-zone and daylight-saving offsets for display. To set the clock offline, select **Manual**, enter the local date, time and UTC offset, and choose **Apply**. Manual mode ignores incoming phone updates. When switching back to automatic, the demo applies the next update from the phone. Reconnect if the phone sends its time only when the session starts. The selected mode and UTC offset are kept for the current boot. At startup, the demo uses automatic mode and the board's configured time zone until a phone sends an offset.
+
+To validate on D213, connect an iPhone and check the serial log for `iPhone clock: RTC synchronized (UTC)`. Compare the local dashboard time with the phone, then repeat after changing the phone time zone or reconnecting. Test USB and wireless separately. If synchronization is missing, capture the iAP2 identification and subsequent messages through the first minute of the session.
+
 ### Simulated GNSS
 
 On a D213 without a GPS module, open Settings → GNSS simulation. **Fixed point** uses point A. **A to B** takes two distinct, non-antipodal points and an integer speed from 1 to 300 km/h. Enter signed decimal degrees with up to six fractional digits. Choose **On** before connecting wirelessly, or reconnect if the current session was created with simulation off. The route starts at A on the first requested fix, follows a direct great-circle path, then keeps sending point B at zero speed. **Apply** updates the fix or restarts the route at A on the next sample. **Off** stops queuing new fixes. Configuration is kept in RAM and simulation is off after reboot.

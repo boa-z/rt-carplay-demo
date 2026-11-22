@@ -500,11 +500,14 @@ static void demo_worker(void *argument)
                 status.last_error = 0;
             status.storage_error = 0;
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+            if (display_pending)
+            {
+                memset(retry_waiting, 0, sizeof(retry_waiting));
+                memset(failures, 0, sizeof(failures));
+            }
             applied_width = requested_width;
             display_pending = false;
             (void)carplay_fusion_set_mode(requested_display);
-            memset(retry_waiting, 0, sizeof(retry_waiting));
-            memset(failures, 0, sizeof(failures));
 #endif
             (void)rt_mutex_release(status_lock);
         }
@@ -526,10 +529,8 @@ static void demo_worker(void *argument)
                     publish(DEMO_WAIT, 0);
                 (void)idle_actions();
                 sample_debug();
-                bool attached_timeout = !status.wireless &&
-                                        status.usb_error == RTCP_ETIMEDOUT && status.usb;
                 bool alternate = status.wireless ? usb_armed && carplay_usb_attached() && retry_due(false)
-                                                 : !attached_timeout && wireless_enabled && retry_due(true);
+                                                 : !status.usb && wireless_enabled && retry_due(true);
                 if (alternate)
                     (void)automatic_select(!status.wireless);
                 rt_thread_mdelay(200);
@@ -543,7 +544,10 @@ static void demo_worker(void *argument)
             if (automatic)
             {
                 connection_finished(status.wireless, ret);
-                (void)automatic_select(!status.wireless && wireless_enabled && retry_due(true));
+                if (status.wireless)
+                    (void)automatic_select(false);
+                else if ((!usb_armed || !carplay_usb_attached()) && wireless_enabled && retry_due(true))
+                    (void)automatic_select(true);
                 while (!mode_changed() && !retry_due(status.wireless) && !idle_actions())
                 {
                     sample_debug();
@@ -593,7 +597,7 @@ static void demo_worker(void *argument)
             }
             sample_debug();
             if (automatic && wireless_enabled && retry_due(true) &&
-                (!usb_armed || !carplay_usb_attached() || !retry_due(false)))
+                !status.usb)
             {
                 if (automatic_select(true))
                     break;
@@ -701,13 +705,6 @@ static void demo_worker(void *argument)
         if (automatic)
         {
             connection_finished(false, ret);
-            /* A trusted phone can remain attached while its network/session
-             * is not ready. Retry with the existing bounded backoff instead
-             * of power-cycling the wireless stack between every timeout.
-             * Other failures and physical removal retain wireless fallback. */
-            bool attached_timeout = ret == RTCP_ETIMEDOUT && carplay_usb_attached();
-            if (!attached_timeout && wireless_enabled && retry_due(true))
-                (void)automatic_select(true);
             continue;
         }
         if (carplay_usb_attached())

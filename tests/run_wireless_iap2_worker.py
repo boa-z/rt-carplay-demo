@@ -43,6 +43,7 @@ source = r'''
 #include "carplay_mfi_provider.h"
 #include "gnss_demo.h"
 #include "iap2_session.h"
+#include "launcher_preferences.h"
 #include "rtcp_lubanlite.h"
 #include "rtcp_rtthread.h"
 #include "rtcp/rtcp.h"

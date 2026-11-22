@@ -14,8 +14,17 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "rtcp/device_time.h"
 #include "rtcp/events.h"
 #include "rtcp/display.h"
+
+#ifdef RT_USING_RTC
+void carplay_app_on_device_time(const rtcp_device_time_t *update, void *context);
+int carplay_app_clock_offset_minutes(void);
+bool carplay_app_clock_is_automatic(void);
+int carplay_app_set_clock_automatic(bool automatic);
+int carplay_app_set_local_clock(int64_t local_seconds, int offset_minutes);
+#endif
 
 /* Screen sink.  configuration=true announces the H.264 SPS/PPS; otherwise
  * annex_b is one access unit prefixed with a start code.  Called from the
@@ -45,6 +54,10 @@ typedef struct
      * IPv6 on the phone's CDC-NCM link.  The address advertised in
      * CarPlayStartSession is read from the "u1" netif on demand. */
     bool wired;
+    /* Optional OEM tile assets. Keep the label and PNGs valid until stop. */
+    const rtcp_oem_icon_t *oem_icons;
+    size_t oem_icon_count;
+    const char *oem_icon_label;
 } carplay_app_config_t;
 
 /* Fills config with the defaults above; width/height are left for the
@@ -72,6 +85,7 @@ int carplay_app_autostart_display(bool wired, uint16_t width, uint16_t height);
 int carplay_app_stop(void);
 
 bool carplay_app_is_running(void);
+int carplay_app_set_projection_enabled(bool enabled);
 /* Owner-published protocol state, copied under the snapshot/queue guards.
  * May lag one diagnostic tick (100 ms); zeroed on failure/retirement. */
 int carplay_app_session_state(rtcp_receiver_state_t *state);

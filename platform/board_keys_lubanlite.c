@@ -136,7 +136,7 @@ INIT_APP_EXPORT(board_key_init);
 #ifdef RT_USING_FINSH
 static void board_key_status(void)
 {
-    static const char *const names[] = { "unknown", "released", "K4 UP", "K5 DOWN", "K6 LEFT", "K7 RIGHT" };
+    static const char * const names[] = { "unknown", "released", "K4 UP", "K5 DOWN", "K6 LEFT", "K7 RIGHT" };
     unsigned sample = atomic_load_explicit(&latest_adc, memory_order_relaxed);
     if (sample == UINT_MAX)
         rt_kprintf("KEYADC PA.6: no sample\n");

@@ -5,6 +5,7 @@
  * projection side, and the launcher's own pages are never shown while the
  * strip is active. */
 #include "fusion_dashboard.h"
+#include "carplay_app.h"
 #include "fusion_display.h"
 #include "video_layer_policy.h"
 #include "video_sink_lubanlite.h"
@@ -80,14 +81,20 @@ static lv_obj_t *label(lv_obj_t *parent, int x, int top, int w, const lv_font_t 
 static void show_dashboard(lv_event_t *event)
 {
     (void)event;
-    carplay_launcher_show_dashboard();
     carplay_fusion_ui_show_launcher();
+    carplay_launcher_show_dashboard();
 }
 
 void carplay_fusion_ui_show_launcher(void)
 {
     showing_launcher = true;
-    (void)carplay_fusion_set_mode(CARPLAY_LOCAL);
+    carplay_fusion_snapshot_t snapshot;
+    carplay_fusion_snapshot(rt_tick_get_millisecond(), &snapshot);
+    if (snapshot.effective != CARPLAY_LOCAL)
+    {
+        (void)carplay_app_set_projection_enabled(false);
+        carplay_fusion_set_projection_hidden(true);
+    }
     if (launcher_screen && lv_screen_active() != launcher_screen)
         lv_screen_load(launcher_screen);
 }

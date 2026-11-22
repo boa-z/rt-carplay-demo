@@ -461,6 +461,7 @@ static void test_viewport_metadata(void)
     {
         app->width = i ? 1024 : 768;
         app->height = 600;
+        app->max_fps = i ? 60 : 30;
         assert(build_announcement_data(app) == RTCP_OK);
         airplay_bplist_doc_t doc;
         airplay_bplist_object_t root, displays, display, object;
@@ -469,9 +470,9 @@ static void test_viewport_metadata(void)
         assert(airplay_bplist_root(&doc, &root) == AIRPLAY_BPLIST_OK);
         assert(airplay_bplist_dict_get(&doc, root, "displays", &displays) == AIRPLAY_BPLIST_OK);
         assert(airplay_bplist_array_get(&doc, displays, 0, &display) == AIRPLAY_BPLIST_OK);
-        const char *keys[] = { "widthPixels", "heightPixels", "widthPhysical", "heightPhysical" };
-        const uint64_t expected[] = { app->width, 600, i ? 200 : 150, 120 };
-        for (unsigned k = 0; k < 4; ++k)
+        const char *keys[] = { "widthPixels", "heightPixels", "widthPhysical", "heightPhysical", "maxFPS" };
+        const uint64_t expected[] = { app->width, 600, i ? 200 : 150, 120, app->max_fps };
+        for (unsigned k = 0; k < sizeof(keys) / sizeof(keys[0]); ++k)
         {
             assert(airplay_bplist_dict_get(&doc, display, keys[k], &object) == AIRPLAY_BPLIST_OK);
             assert(airplay_bplist_get_uint(&doc, object, &value) == AIRPLAY_BPLIST_OK && value == expected[k]);

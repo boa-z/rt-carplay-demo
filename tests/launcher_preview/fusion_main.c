@@ -37,8 +37,16 @@ int carplay_launcher_fusion_apply(const carplay_fusion_snapshot_t *s)
 /* The strip's Dashboard control asks the launcher page owner to select its
  * dashboard before the panel is handed back. */
 static bool launcher_selected;
+static bool projection_paused;
+int carplay_app_set_projection_enabled(bool enabled)
+{
+    projection_paused = !enabled;
+    return RTCP_OK;
+}
+
 void carplay_launcher_show_dashboard(void)
 {
+    assert(projection_paused);
     launcher_selected = true;
 }
 bool carplay_connection_set_display_mode(carplay_display_mode_t mode)
@@ -178,7 +186,7 @@ int main(int argc, char **argv)
     rtcp_display_rect_t rect = { .x = 0, .y = 0, .width = 768, .height = 600 };
     carplay_fusion_snapshot_t s;
     carplay_fusion_snapshot(now, &s);
-    carplay_fusion_video_latched(&rect, 768, 600, s.generation, now);
+    carplay_fusion_video_latched(&rect, 768, 600, s.generation, now, true);
     status.stage = DEMO_LIVE;
     screenshot(argv[1], "05-fusion_dark_en", &status, true);
     assert(!strcmp(lv_label_get_text(speed_label), "26"));
@@ -210,8 +218,11 @@ int main(int argc, char **argv)
     assert(selected == CARPLAY_FUSION);
     assert(carplay_fusion_ui_update(&status) == false); /* launcher owns it now */
 
-    /* Resume CarPlay (Connectivity action) restores the strip. */
     carplay_fusion_ui_resume();
+    carplay_fusion_resume_projection_on_frame();
+    assert(carplay_fusion_ui_update(&status) == false);
+    carplay_fusion_snapshot(now, &s);
+    carplay_fusion_video_latched(&rect, 768, 600, s.generation, now, true);
     assert(carplay_fusion_ui_update(&status) == true);
 
     /* FULLSCREEN hides the strip and reports ownership to the launcher. */

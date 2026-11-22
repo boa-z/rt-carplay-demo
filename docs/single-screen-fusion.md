@@ -8,7 +8,7 @@ The unified D213 image enables `RTCARPLAY_SINGLE_SCREEN_FUSION` on the 1024×600
 
 Open **Settings → Display → CarPlay display** and select **Fullscreen** or **Fusion**. Fullscreen requests native 1024x600 video. Fusion requests 768x600 video beside the 256-pixel instrument strip. Both wired and wireless connections use the selected geometry. The shell commands below also provide a local instrument mode.
 
-Full screen shows only native 1024x600 CarPlay video. The local UI hardware layer is transparent and there is no settings button or reserved local touch corner. Every point inside the latched video rectangle belongs to the phone. To change settings, return to the launcher after disconnecting, or use the owner commands below. No hidden gesture or overlay is added.
+Full screen shows native 1024x600 CarPlay video. The local UI hardware layer is transparent, and every point inside the latched video rectangle belongs to the phone. Use the OEM tile or `carplay_projection pause` to return to the launcher during the session.
 
 Geometry changes are asynchronous: the connection owner closes USB/iAP2 borrowers before stopping the old Receiver, recreates the Receiver/HID/sink and `/info` at the selected size, then allows reconnection on the same wired/wireless owner. Local instruments remain visible during retirement; LOCAL retains the chosen phone geometry. Repeated same-size requests do not restart the session, and pending requests coalesce. Device/audio tools can temporarily refuse a change. The applied display mode is saved in the application preferences and restored before the connection worker starts. LOCAL keeps the previous phone geometry during that boot; after reboot it uses the default fusion geometry while retaining LOCAL presentation. Real-iPhone reconnection and native output remain NOT_RUN for this revision.
 
@@ -19,6 +19,12 @@ When a new connection reaches LIVE after video has been presented, the launcher 
 The equivalent owner requests are `carplay_connection display fullscreen`, `carplay_connection display fusion` and `carplay_connection display local`. `carplay_connection status` shows the selected size and whether retirement is pending. `carplay_display status` reports the actual latched video/input geometry. The older `carplay_display fullscreen/fusion/local` commands remain composition-only diagnostics; they do not rebuild the session.
 
 Physical size metadata now follows the viewport: `RTCARPLAY_PANEL_WIDTH_MM` and `RTCARPLAY_PANEL_HEIGHT_MM` describe the full LCD active area, and the application scales them into each phone viewport. Their defaults preserve the previous estimated 200x120 mm; a 768x600 fusion viewport therefore reports 150x120 mm, while native full screen reports 200x120 mm. These estimates are not measured panel calibration. Configure measured active width/height, excluding the bezel, for correct layout density and physical proportions. This fixes the earlier mismatch of a smaller pixel viewport with a full-panel physical width; actual improvement of the reported compressed appearance still needs a phone test.
+
+## CarPlay frame rate
+
+In **Settings → Display → CarPlay frame rate**, the default is 60 fps. A saved 30 fps selection stays in effect. Restart the receiver before connecting to apply the new `/info` `maxFPS`. Rebooting the board restarts the receiver. The D213 1024×600 panel timing is approximately 60 Hz. The iPhone chooses its actual video rate, and the video sink retains each scanout buffer through the display fence.
+
+For a board comparison, use Fullscreen and the same active animation for at least ten seconds at each setting. Sample `carplay_status` and `carplay_video status` at both ends of the interval. Compare `offered_max_fps`, the incoming rate, `presented_fps`, queue drops and stage times. Repeat on wired and wireless connections. Only a sustained measured `presented_fps` near 60 establishes the target on the board.
 
 ## Phone resolution and black bars
 
@@ -46,13 +52,23 @@ carplay_display simulate
 
 The status command reports requested/effective modes, requested/latched layout generations, video presence, geometry, logical input size, display error and vehicle source. It never prints pairing material. No Type 111, HEVC, synthetic display catalogue or UI Sync capability is advertised by enabling this demo.
 
+## OEM tile and session-local switching
+
+The launcher advertises an **rt-carplay** OEM tile over both USB and wireless. The embedded 180 × 180 PNG comes from [the demo logo SVG](../assets/rt-carplay-oem.svg). After editing the SVG, run `python tools/generate_oem_icon.py` from the application directory with Pillow installed, rebuild, and reconnect to negotiate the updated `/info`. Firmware builds use the generated header. Custom hosts can supply `carplay_app_config_t.oem_icons`, `oem_icon_count` and `oem_icon_label` before `carplay_app_start()`. Keep the assets available until stop because the app refreshes `/info` for each peer.
+
+The CarPlay OEM tile asks the demo to show the local launcher. The demo switches the local display immediately and leaves the existing session available. Tap **Dashboard** on the instrument strip or run `carplay_projection pause` to explicitly request MainScreen for the host.
+
+From the launcher, open **Connectivity → Resume CarPlay**, or run `carplay_projection resume`. This sends `requestUI` over the existing session. After an OEM return, a new `modesChanged` granting MainScreen to the phone can immediately reveal the retained frame if the same Type 110 stream and display layout are still active. A replaced stream or invalidated frame requires a newly decoded frame. The button remains available if the phone closes only the screen stream. Use `carplay_status` to inspect MainScreen ownership and `carplay_connection status` to check the session and video state. If the whole session ends, the connection manager handles reconnection. For a wired check, keep music playing through the OEM tile and resume round trip, and verify that the RTSP session and iAP2 link survive.
+
 ## Hardware composition and ownership
 
 MPP continues to decode H.264 to its owned frame buffers. DE scales and positions the video layer. The GUI owner crops the existing opaque UI framebuffer to the right strip in FUSION and uses pixel alpha so the empty part of DE's full-panel UI surface remains transparent. Global alpha 255 made that area opaque on D213 and hid the video despite valid decode/layer counters. LOCAL restores the original geometry/alpha; FULLSCREEN uses global alpha zero. It preserves the current framebuffer physical address across LVGL buffer swaps. There is no added per-frame video software copy. This path requires the existing unrotated, uncropped 1024×600 UI layer; a geometry mismatch requests LOCAL and records an error.
 
 Only a successful video layer update and VSYNC publish a new input rectangle. Static phone images are re-presented on mode changes without counting them as newly received frames. Failed swaps retain both potentially scanned frames. Shutdown/reset must disable the video layer and confirm VSYNC before returning frames or destroying MPP; failed fences retain ownership for retry. The UI policy attempts rollback on a layer/alpha/VSYNC transition failure and retries LOCAL from the GUI timer. Persistent display ioctl failure still requires diagnosis on the board; software cannot guarantee visible instruments after hardware failure.
 
-Touch mapping uses the latched rectangle and negotiated logical dimensions. It rejects bars and a pending layout, prevents a second finger from stealing the first contact, releases a phone gesture at its last valid coordinates when it leaves the video, and cancels contacts on mode/session/geometry changes. A local gesture stays local across region boundaries. Periodic cancellation handles stationary fingers too. Bounded state copies use short single-core interrupt masking; no LVGL, device ioctl, logging or external callback runs inside that span.
+Touch mapping uses the latched rectangle and negotiated logical dimensions. The CarPlay region tracks up to two independent contact IDs. The local UI keeps single-pointer ownership, and contacts cannot transfer between regions. Touches in the letterbox or in a pending layout are ignored. A phone contact that leaves the video is released at its last valid coordinates, while the other phone contact can continue. Mode, session and geometry changes release all captured contacts, including stationary fingers. Bounded state updates use short single-core interrupt masking; no LVGL, device ioctl, logging or external callback runs inside that span.
+
+On the board, run `carplay_display status` before and after pinching entirely inside the projected map in Fusion mode. `two_finger_starts` increases when a second contact is routed to CarPlay. Use `carplay_status` to check for queue overflows or HID send failures and confirm zoom on the projected map.
 
 ## Vehicle provider and measurements
 

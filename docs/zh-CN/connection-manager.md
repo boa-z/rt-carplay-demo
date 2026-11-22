@@ -16,7 +16,7 @@
 
 只有一个 Receiver 和一个应用会话 Owner 运行。无线空闲发现期间，如果尚未观察到 Bluetooth、Handoff 或 AirPlay 竞争者，已连接的 USB 手机取得连接权。一旦无线配对或 Handoff 开始，USB 等待该次尝试结束，不抢占活动会话。USB 尝试先收回无线 iAP2 Owner、Provider 和 Receiver，再启动 IPv6 Receiver。无线运行时 USB 枚举持续启用。由于开发板共享 Receiver、媒体和 MFi 资源，有线尝试或会话期间暂停另一条无线会话；同时待命不表示两个协议会话同时运行。
 
-无线保留既有 Bond 恢复、RFCOMM 服务、MFi 和 Wi-Fi Handoff 流程。原 Owner 两秒后主动寻呼已保存 Bond，每 30 秒重试，在 Handoff 或活动会话期间暂停寻呼。未重写 Bond Key、SDP 或协议定时器。管理器另设失败尝试冷却时间，依次为 5、10、20、40 秒，之后最多 60 秒；一路冷却时另一路仍可被选择。正常断开使用一秒静默期。USB 拔出清除其冷却时间，Retry 清除两路冷却。截止时间比较处理 32 位 Tick 回绕。
+无线保留既有 Bond 恢复、RFCOMM 服务、MFi 和 Wi-Fi Handoff 流程。原 Owner 两秒后主动寻呼已保存 Bond，每 30 秒重试，在 Handoff 或活动会话期间暂停寻呼。管理器为有线和无线分别保留失败退避时间，依次为 5、10、20、40 秒，之后最多 60 秒，自动切换传输方式时保留各自的退避。USB 已经接管连接后，只要 iPhone 仍插着，就继续走有线重试。拔出 iPhone 会清除 USB 的退避，并允许已启用的无线发现接管。正常断开等待一秒，手动重试清除两路退避。截止时间比较处理 32 位 Tick 回绕。
 
 USB Trust、IPv6 就绪和首帧等待保留原传输限制。GUI 的 LIVE 要求 `carplay_video_sink_has_presented()`，即图层提交和 vsync 成功，独立于解码帧计数。显示失败可能增加解码计数，但不能将会话标为 LIVE。Headless 没有物理显示，使用协议会话状态副本。LIVE 后协议会话丢失会触发清理和重连，即使 USB/iAP2 仍然连接。状态副本可能落后一个 100 ms 发布周期，丢线判断先观察会话已建立，再将后续 False 解释为断开。
 

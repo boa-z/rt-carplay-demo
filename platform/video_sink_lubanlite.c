@@ -199,26 +199,26 @@ static void drop_nal(video_sink_t *sink)
     }
 }
 
-static void enqueue_nal(video_sink_t *sink, const uint8_t *data, size_t len,
+static bool enqueue_nal(video_sink_t *sink, const uint8_t *data, size_t len,
                         uint32_t pts_us, bool configure)
 {
     if (len == 0U || len > SINK_MAX_NAL_BYTES)
     {
         drop_nal(sink);
-        return;
+        return false;
     }
     uint8_t *copy = malloc(len);
     if (copy == NULL)
     {
         drop_nal(sink);
-        return;
+        return false;
     }
     memcpy(copy, data, len);
 
     if (rt_mutex_take(sink->lock, RT_WAITING_FOREVER) != RT_EOK)
     {
         free(copy);
-        return;
+        return false;
     }
     unsigned next = (sink->head + 1U) % SINK_QUEUE_LENGTH;
     if (next == sink->tail)
@@ -226,8 +226,9 @@ static void enqueue_nal(video_sink_t *sink, const uint8_t *data, size_t len,
         (void)rt_mutex_release(sink->lock);
         free(copy);
         drop_nal(sink);
-        return;
+        return false;
     }
+    bool was_empty = sink->head == sink->tail;
     sink->queue[sink->head].data = copy;
     sink->queue[sink->head].len = len;
     sink->queue[sink->head].pts_us = pts_us;
@@ -239,6 +240,7 @@ static void enqueue_nal(video_sink_t *sink, const uint8_t *data, size_t len,
     if (pending > sink->queue_peak)
         sink->queue_peak = pending;
     (void)rt_mutex_release(sink->lock);
+    return was_empty;
 }
 
 static bool dequeue_nal(video_sink_t *sink, nal_entry_t *out)
@@ -274,8 +276,8 @@ static void video_frame_owned(bool configuration, const uint8_t *annex_b,
      * decoding its PPS. MPP walks Annex-B start codes inside this packet. */
     if (configuration)
     {
-        enqueue_nal(sink, annex_b, annex_b_len, pts_us, true);
-        (void)rt_sem_release(sink->wake);
+        if (enqueue_nal(sink, annex_b, annex_b_len, pts_us, true))
+            (void)rt_sem_release(sink->wake);
         return;
     }
     const uint8_t *end = annex_b + annex_b_len;
@@ -283,16 +285,18 @@ static void video_frame_owned(bool configuration, const uint8_t *annex_b,
     if (cursor == NULL)
         return; /* not Annex-B; nothing to feed the decoder */
 
+    bool wake = false;
     while (cursor < end)
     {
         const uint8_t *next = find_start_code(cursor + 3U, end);
         size_t nal_len = (size_t)((next != NULL ? next : end) - cursor);
-        enqueue_nal(sink, cursor, nal_len, pts_us, configuration);
+        wake |= enqueue_nal(sink, cursor, nal_len, pts_us, false);
         if (next == NULL)
             break;
         cursor = next;
     }
-    (void)rt_sem_release(sink->wake);
+    if (wake)
+        (void)rt_sem_release(sink->wake);
 }
 
 /* ------------------------------------------------------------------ */
@@ -310,8 +314,11 @@ static bool disable_video_layer(video_sink_t *sink)
     return rt_device_control(sink->fb, AICFB_WAIT_FOR_VSYNC, NULL) >= 0;
 }
 
-static bool present_frame(video_sink_t *sink, const struct mpp_frame *frame)
+static bool present_frame(video_sink_t *sink, const struct mpp_frame *frame, bool new_frame)
 {
+#if !defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    (void)new_frame;
+#endif
     struct aicfb_layer_data layer;
     memset(&layer, 0, sizeof(layer));
     layer.layer_id = AICFB_LAYER_TYPE_VIDEO;
@@ -377,7 +384,7 @@ static bool present_frame(video_sink_t *sink, const struct mpp_frame *frame)
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
         sink->fusion_generation = generation;
         carplay_fusion_video_latched(&destination, sink->display_width, sink->display_height,
-                                     generation, sink_now_ms());
+                                     generation, sink_now_ms(), new_frame);
 #endif
         return true;
     }
@@ -386,10 +393,10 @@ static bool present_frame(video_sink_t *sink, const struct mpp_frame *frame)
 }
 
 /* Include retries in presentation timings; these are wall-clock stage costs. */
-static bool present_timed(video_sink_t *sink, const struct mpp_frame *frame)
+static bool present_timed(video_sink_t *sink, const struct mpp_frame *frame, bool new_frame)
 {
     uint32_t start = sink_now_ms();
-    bool presented = present_frame(sink, frame);
+    bool presented = present_frame(sink, frame, new_frame);
     uint32_t elapsed = sink_now_ms() - start;
     ++sink->present_calls;
     sink->present_ms += elapsed;
@@ -445,7 +452,7 @@ static unsigned drain_frames(video_sink_t *sink)
      * buffer the DE may still read. Also retries with no new decoded output. */
     if (sink->have_pending_scanout)
     {
-        if (sink->stop || !present_timed(sink, &sink->pending_scanout))
+        if (sink->stop || !present_timed(sink, &sink->pending_scanout, true))
             return 0;
         commit_scanout(sink, &sink->pending_scanout);
         sink->have_pending_scanout = false;
@@ -481,7 +488,7 @@ static unsigned drain_frames(video_sink_t *sink)
     }
     if (have_newest)
     {
-        bool presented = present_timed(sink, &newest);
+        bool presented = present_timed(sink, &newest, true);
         ++sink->frame_count;
         if (presented)
             commit_scanout(sink, &newest);
@@ -727,7 +734,7 @@ static void apply_display_mode(video_sink_t *sink)
     if (!sink->stop && sink->have_frame && !sink->have_pending_scanout &&
         carplay_fusion_video_target(sink->panel_width, sink->panel_height, &viewport, &generation) &&
         generation != sink->fusion_generation)
-        (void)present_timed(sink, &sink->held);
+        (void)present_timed(sink, &sink->held, false);
 }
 #endif
 
@@ -1256,11 +1263,13 @@ static int cmd_carplay_video_owned(int argc, char **argv)
                    (unsigned)video_pending_owned(), nals, frames,
                    dropped, errors);
         video_sink_t *sink = &s_sink;
+        unsigned latched = sink->latched_frames;
         uint32_t now = sink_now_ms();
         uint32_t elapsed = now - sink->report_ms;
-        unsigned fps10 = elapsed != 0U ? (unsigned)((uint64_t)(frames - sink->report_frames) * 10000U / elapsed) : 0U;
-        rt_kprintf("[" TAG "] interval=%ums fps=%u.%u packets=%u queue_peak=%u resets=%u skipped=%u\n",
-                   (unsigned)elapsed, fps10 / 10U, fps10 % 10U,
+        unsigned fps10 = elapsed != 0U ? (unsigned)((uint64_t)(latched - sink->report_frames) * 10000U / elapsed) : 0U;
+        rt_kprintf("[" TAG "] interval=%ums presented_fps=%u.%u latched=%u\n",
+                   (unsigned)elapsed, fps10 / 10U, fps10 % 10U, latched);
+        rt_kprintf("[" TAG "] input NALs=%u queue_peak=%u resets=%u skipped=%u\n",
                    nals - sink->report_nals, sink->queue_peak, sink->decoder_resets,
                    sink->skipped_frames);
         rt_kprintf("[" TAG "] recovery: repeated_configs=%u waiting_idr=%u skipped_nals=%u\n",
@@ -1274,7 +1283,7 @@ static int cmd_carplay_video_owned(int argc, char **argv)
                    sink->present_calls ? (unsigned)(sink->present_ms / sink->present_calls) : 0U,
                    (unsigned)sink->present_max_ms);
         sink->report_ms = now;
-        sink->report_frames = frames;
+        sink->report_frames = latched;
         sink->report_nals = nals;
         video_read_leave();
         return 0;
