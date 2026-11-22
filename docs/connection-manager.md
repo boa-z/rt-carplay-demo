@@ -4,7 +4,7 @@
 
 ## Responsibility
 
-`app/connection_manager.c` owns the application connection worker, Receiver start/stop, USB pairing, wireless iAP2 handoff, stage publication, pairing confirmation, device trust records and audio-test scheduling. It has no LVGL dependency. `ui/lvgl_launcher.c` owns presentation and the pointer queue; it posts requests and reads caller-owned snapshots. Protocol endpoint teardown stays in the independent SDK Receiver. V2.1 was completed as the software prerequisite recorded in [the verification handoff](refactoring-v21-verification.md) before this automatic connection work.
+`app/connection_manager.c` owns the application connection worker, Receiver start/stop, USB pairing, wireless iAP2 handoff, stage publication, pairing confirmation, device trust records and audio-test scheduling. It has no LVGL dependency. `ui/lvgl_launcher.c` owns presentation and the pointer queue, posts requests and reads caller-owned snapshots. Protocol endpoint teardown stays in the independent SDK Receiver.
 
 ## Startup and lifetime
 
@@ -51,7 +51,7 @@ make -C application/rt-thread/rtcarplay check-lubanlite-usb
 make -C application/rt-thread/rtcarplay check-lubanlite-video
 ```
 
-The actual automatic worker runs 32 repetitions of boot discovery, wireless reservation against USB arrival, USB cooldown/retry, asynchronous radio failure, USB-open failure, first-frame timeout, attached AirPlay loss, Receiver startup failure and clock wrap, under both GUI and Headless compilation. The actual USB Class binds before owner subscription in a separate automatic build. Video tests reject readiness after layer/vsync failure even with nonzero decoded counters. Existing manual-mode, trust/storage, manager exclusion, pointer overflow/routing, audio ownership, lifecycle and protocol tests are retained. Two syntax checks compile the manager without LVGL headers. [Launcher verification](launcher-v2.md) adds actual LVGL rendering and UI event routing with explicitly modeled connection values.
+The actual automatic worker runs 32 repetitions of boot discovery, wireless reservation against USB arrival, USB cooldown/retry, asynchronous radio failure, USB-open failure, first-frame timeout, attached AirPlay loss, Receiver startup failure and clock wrap, under both GUI and Headless compilation. The actual USB Class binds before owner subscription in a separate automatic build. Video tests reject readiness after layer/vsync failure even with nonzero decoded counters. Existing manual-mode, trust/storage, manager exclusion, pointer overflow/routing, audio ownership, lifecycle and protocol tests are retained. Two syntax checks compile the manager without LVGL headers. [Launcher verification](mobility-cockpit-v4.md#evidence) adds actual LVGL rendering and UI event routing with modeled connection values.
 
 Host ASan/UBSan, LVGL rendering and GUI/Headless cross-builds are separate evidence. This change's exact CI revision and images are recorded in its verification report. Physical D213 startup, display, USB/radio reconnection, persistence, audio and touch remain `NOT_RUN` until a matching image is tested.
 

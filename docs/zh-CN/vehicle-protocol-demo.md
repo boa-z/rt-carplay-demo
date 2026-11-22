@@ -1,4 +1,4 @@
-[English](vehicle-protocol-demo.md) | [简体中文](vehicle-protocol-demo.zh-CN.md)
+[English](../vehicle-protocol-demo.md) | [简体中文](vehicle-protocol-demo.md)
 
 # D213 Vehicle State 协议实验入口
 
@@ -36,19 +36,19 @@ Linux/WSL 执行 make -C application/rt-thread/rtcarplay check-vehicle-protocol-
 
 ## 当前验收与手动互操作记录
 
-当前目标不要求完整官方 Ultra。上文为历史里程碑，验收以[当前状态表](ultra-development.zh-CN.md#当前范围与验收)为准。历史真实手机证据确认 Vehicle State 提供/启用、两条通道连接，以及一条请求被处理并有响应入队，但未识别请求方法。用户随后已确认 Fusion 视觉效果，以及最新全屏、设置持久化和自动跳转正常。这些 UI 确认不能证明 Vehicle State 读写/订阅验收通过。
+当前验收范围见[状态表](ultra-development.md#当前范围与验收)。历史真实手机证据确认 Vehicle State 提供和启用、两条通道连接、一条请求被处理并有响应入队，请求方法及读写和订阅验收仍待确认。
 
 现有固件已经打印 `vehicle method unknown/config/read/register/write/control` 请求/响应累计计数，以及 `vehicle last` 的方法/通道/结果/有效性。应使用当前镜像诊断，不能将历史单条请求推断为特定命令。本次记录无需新增测试代码或自动连接开发板。
 
 1. 尽可能从清单记录安装的产物名、源码版本和镜像 SHA256，记录手机型号/iOS 及有线或无线连接方式。分享日志前移除身份地址、名称和配对材料。
 2. 手机连接前执行 `carplay_status` 并保存基线，检查首行 running/stopped。快照由所有者发布，判断前应留出刷新时间。
-3. 用户在开发板上正常连接手机，连接后再次执行 `carplay_status`。保存 offered、enabled、Normal/HIGH 状态、各方法计数、最后方法字段、订阅/通知数及传输错误/计数。模拟器运行数秒后再采一次。只在同一模型生命周期内比较增量：应用重启会清零，认证/会话重置保留累计诊断。
-4. 如果手机发出 register 且订阅数非零，在 RPM 变化时比较后续通知与传输计数。响应/通知本地序列化和 queued 增长是不同观察，均不能单独证明手机收到或呈现。手机没有请求的方法记录 NOT_RUN，不能构造手机成功结果。
+3. 用户在开发板上正常连接手机，连接后再次执行 `carplay_status`。保存 `offered`、`enabled`、Normal/HIGH 状态、各方法计数、最后方法字段、订阅/通知数及传输错误/计数。模拟器运行数秒后再采一次。只在同一模型生命周期内比较增量：应用重启会清零，认证/会话重置保留累计诊断。
+4. 如果手机发出 register 且订阅数非零，在 RPM 变化时比较后续通知与传输计数。响应/通知本地序列化和 `queued` 增长是不同观察，均不能单独证明手机收到或呈现。手机没有请求的方法记录 NOT_RUN。
 5. 用户手动断连/重连时再次记录基线和状态，检查订阅清除及重新协商，不假定累计计数清零。分别检查 Classic 视频/音频和本地仪表。另一连接方式可用时独立重复，不能从一种连接方式推导另一种通过。
 
 | 观察 | 能证明的范围 |
 | --- | --- |
-| offered=1、enabled=1 且通道连接 | 有限的 Vehicle State 协商与传输观察，不代表 UI Sync 或官方产品能力。 |
+| `offered=1 enabled=1` 且通道连接 | 有限的 Vehicle State 协商与传输观察，不代表 UI Sync 或官方产品能力。 |
 | 某方法请求和响应计数增长 | 该方法在本地完成解析和序列化；写入仍需区分拒绝与实际提交语义。 |
 | register 请求、非零订阅、通知/入队计数变化 | 本地订阅和通知推进；手机收到/显示仍需独立证据。 |
 | write/control 尝试 | 当前三值模型拒绝手机写入且没有声明控制。成功可写/控制行为需另有依据的目录，不是当前模型预期结果。 |

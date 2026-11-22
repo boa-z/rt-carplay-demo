@@ -4,7 +4,7 @@
 
 ## Report and cause
 
-The user reported a known-good cable and router but dark Ethernet LEDs and Launcher showing Cable disconnected. The previous GUI image in [Launcher Ethernet verification](launcher-network-verification.md) had GMAC0 enabled but CLK_OUT2 disabled. After flashing the replacement image below, the user confirmed that Ethernet LEDs illuminate and board Internet access works. In a subsequent test, the user also confirmed that an iPhone can use Internet services through the vehicle network. Both functional results are recorded as user-reported passes; no raw logs, DHCP details, cellular settings or packet captures were supplied.
+The user reported a known-good cable and router but dark Ethernet LEDs and Launcher showing Cable disconnected. The affected GUI image enabled GMAC0 with CLK_OUT2 disabled. After enabling CLK_OUT2, the user confirmed that Ethernet LEDs illuminate and board Internet access works. A later test also confirmed iPhone Internet service through the vehicle network. DHCP, cellular configuration and packet captures remain unrecorded.
 
 The local D213EC-DEMO V4.0 schematic, sheets 1, 2 and 8, identifies U15 as RTL8201F, PE6 as reset, PE10/CLK_OUT2 as EPHY0-25M, and PE3 as MAC0_REFCLK. Sheet 8 connects the 25 MHz reference to the PHY, straps RMII mode and PHY address 1, and selects TXC output. The PHY supplies the separate 50 MHz RMII clock to the MAC. Selecting external RMII clock input alone does not enable the PHY reference output. The existing board sys_clk.c and pinmux.c enable the PE10 reference only when CLK_OUT2 is configured. Hardware documents remain local reference material and are not copied into the public source tree.
 

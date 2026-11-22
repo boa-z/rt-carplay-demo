@@ -1,6 +1,6 @@
-# USB 开发文件传输
+[English](../usb-files.md) | [简体中文](usb-files.md)
 
-[English](../usb-files.md)
+# USB 开发文件传输
 
 `RTCARPLAY_USB_FILE_SYNC` 在 CarPlay 应用层组合 CherryUSB 已有的 ADB 类、sync 文件服务、演示描述符和 RT-Thread DFS 适配，不启用独立 RT-Thread adbd 包或 shell 服务。电脑仍使用 Android Platform Tools 的 `adb push` 和 `adb pull`。这项文件传输接入没有修改 CherryUSB、rt-carplay 上游源码、RTOS 或 SoC 驱动。
 

@@ -1,4 +1,4 @@
-[English](vehicle-protocol-demo.md) | [简体中文](vehicle-protocol-demo.zh-CN.md)
+[English](vehicle-protocol-demo.md) | [简体中文](zh-CN/vehicle-protocol-demo.md)
 
 # D213 Vehicle State protocol bench
 

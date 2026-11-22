@@ -13,7 +13,7 @@ git fetch upstream master
 
 ## SDK 基线与变基
 
-2026 年 11 月 20 日，本次变基将 SDK 基线从 `4060f85bd27a1eb555952921139b77cc41bdeb4e` 更新为 `90a740fe9c1b663ea52ec3f7e1af35acde200aea`。两个快照均标记为 Luban-Lite v1.3.3，新快照对应匠芯创 Gitee 提交 `4bd5a1300f4793a2188529eebde96f012c2188bb`。构建记录和评审说明使用完整的镜像及 Gitee 提交号标识 SDK 版本。
+Luban-Lite v1.3.3 基线为镜像提交 `90a740fe9c1b663ea52ec3f7e1af35acde200aea`，对应匠芯创 Gitee 提交 `4bd5a1300f4793a2188529eebde96f012c2188bb`。SDK 基线、固件提交和 `rt-carplay` 子模块提交分别标识。
 
 镜像的 `master` 可能被更新为无共同祖先的新根提交。建议在镜像仓库为每个评审过的 SDK 快照保留以 Gitee 提交号标识的固定标签，便于在 `master` 更新后继续获取。获取更新前，记录 CarPlay 分支的 SDK 根提交和两个产品分支的当前提交。用备份引用或标签保留原分支提交，直到完成验证和发布。在区分大小写的文件系统上使用临时检出目录，例如 WSL 的 Linux 文件系统，便于同时检出上游的两个 README 文件，也能避免构建生成的配置和 Bootloader 写入日常工作区。
 
@@ -89,7 +89,7 @@ bash packages/third-party/cherryusb-luban/tests/run_control_probe.sh
 
 ## 视频显示回归
 
-修改视频链路时执行 `make -C application/rt-thread/rtcarplay check-lubanlite-video SDK_ROOT="$PWD"`，覆盖实际 MPP Sink 和宿主 UI 策略，包括 SDK framebuffer 命令 ABI。已确认的命令不匹配和板端验收要求见 [视频交接修复](video-handoff-fix.md)，固件身份及更正后的用户反馈见 [迁移验证报告](repository-migration-verification.md)。
+修改视频链路时执行 `make -C application/rt-thread/rtcarplay check-lubanlite-video SDK_ROOT="$PWD"`，覆盖实际 MPP Sink 和宿主 UI 策略，包括 SDK framebuffer 命令 ABI。还需在[实际面板](single-screen-fusion.md)验证首帧交接、本地界面恢复和触摸。
 
 ## 宿主持有的平台回归测试集
 

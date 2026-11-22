@@ -4,7 +4,7 @@
 
 ## 反馈与原因
 
-用户反馈网线和路由器已确认正常，但网口灯不亮，Launcher 显示 Cable disconnected。[Launcher Ethernet 验证](launcher-network-verification.md)中的上一版 GUI 镜像启用了 GMAC0，却关闭了 CLK_OUT2。刷入下方替换镜像后，用户确认网口灯已亮，车机联网正常。随后用户进一步实测确认，iPhone 可以通过车机网络使用网络服务。这两项功能结果均记录为用户实测通过；尚未提供原始日志、DHCP 详情、蜂窝数据设置或抓包。
+用户反馈网线和路由器已确认正常，但网口灯不亮，Launcher 显示 Cable disconnected。故障 GUI 镜像启用了 GMAC0，CLK_OUT2 处于关闭状态。启用 CLK_OUT2 后，用户确认网口灯已亮，车机联网正常，后续还验证了 iPhone 可经车机网络使用网络服务。DHCP、蜂窝配置和抓包详情尚未记录。
 
 本地 D213EC-DEMO V4.0 原理图第 1、2、8 页标明 U15 为 RTL8201F，PE6 为复位，PE10/CLK_OUT2 为 EPHY0-25M，PE3 为 MAC0_REFCLK。第 8 页将 25 MHz 参考时钟连接到 PHY，通过电阻配置 RMII 模式、PHY 地址 1 和 TXC 输出。PHY 向 MAC 提供另一条 50 MHz RMII 时钟。仅选择外部 RMII 时钟输入不会启用 PHY 参考时钟输出。已有板级 sys_clk.c 和 pinmux.c 只有在配置 CLK_OUT2 时才会启用 PE10 参考时钟。硬件文档保留为本地参考资料，不复制进公开源码树。
 

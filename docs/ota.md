@@ -1,6 +1,6 @@
-# Wired A/B updates
+[English](ota.md) | [简体中文](zh-CN/ota.md)
 
-[中文](zh-CN/ota.md)
+# Wired A/B updates
 
 OTA is application policy built on the existing webclient, mbedTLS and Luban-Lite A/B updater. The portable rt-carplay SDK has no update or UI dependency. The GUI defconfig enables OTA; it does not introduce another firmware profile.
 

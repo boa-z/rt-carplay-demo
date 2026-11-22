@@ -13,7 +13,7 @@ git fetch upstream master
 
 ## SDK baseline and rebase
 
-The November 20, 2026 rebase moved the SDK baseline from `4060f85bd27a1eb555952921139b77cc41bdeb4e` to `90a740fe9c1b663ea52ec3f7e1af35acde200aea`. Both snapshots report Luban-Lite v1.3.3. The newer snapshot corresponds to ArtInChip's Gitee commit `4bd5a1300f4793a2188529eebde96f012c2188bb`. Use the full mirror and Gitee commit IDs to identify the SDK version in build records and review notes.
+The Luban-Lite v1.3.3 baseline is mirror commit `90a740fe9c1b663ea52ec3f7e1af35acde200aea`, corresponding to ArtInChip Gitee commit `4bd5a1300f4793a2188529eebde96f012c2188bb`. Identify the SDK independently of the firmware commit and the `rt-carplay` submodule pin.
 
 The mirror can replace `master` with an unrelated root commit. Keep each reviewed SDK snapshot under an immutable mirror tag keyed by its Gitee commit so collaborators can fetch it after `master` moves. Before fetching, record the SDK root of the current CarPlay branch and both product tips. Keep the old tips under backup refs or tags until verification and publication are complete. Use a disposable checkout on a case-sensitive filesystem, such as the Linux filesystem in WSL. This keeps build-generated configuration and bootloader files out of the active checkout and allows both upstream README paths to be checked out.
 
@@ -89,7 +89,7 @@ The tests compile actual adapter sources with ASan/UBSan. They verify software c
 
 ## Video display regression
 
-Run `make -C application/rt-thread/rtcarplay check-lubanlite-video SDK_ROOT="$PWD"` when changing the video path. This covers the actual MPP sink and host UI policy, including the SDK framebuffer command ABI. See the [video handoff fix](video-handoff-fix.md) for the confirmed command mismatch and the required board acceptance, and the [migration verification report](repository-migration-verification.md) for firmware identities and corrected user feedback.
+Run `make -C application/rt-thread/rtcarplay check-lubanlite-video SDK_ROOT="$PWD"` when changing the video path. This covers the actual MPP sink and host UI policy, including the SDK framebuffer command ABI. Verify first-frame handoff, local UI restoration and touch on the [physical panel](single-screen-fusion.md).
 
 ## Host-owned platform regression suite
 

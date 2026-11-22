@@ -1,6 +1,6 @@
-# 原生 CDC-NCM 有线 CarPlay
-
 [English](../wired-native-ncm.md) | [简体中文](wired-native-ncm.md)
+
+# 原生 CDC-NCM 有线 CarPlay
 
 ## 正式配置
 

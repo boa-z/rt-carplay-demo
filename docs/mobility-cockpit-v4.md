@@ -17,7 +17,7 @@ Removed with the previous demo UI: the standalone vehicle-data page, the vehicle
 
 ## Icons
 
-Every icon is an official [Lucide](https://lucide.dev) glyph, not a hand-drawn vector. `tools/generate_icon_assets.py` rasterises the Lucide font (ISC) into 14 single-colour A8 masks at the design sizes and emits `ui/icons/carplay_icons.c` / `.h`; the page code draws them with `lv_image_set_src()` and recolours them live through the `CARPLAY_STYLE_ICON_*` theme roles, which set `image_recolor` rather than a bitmap per colour. Regenerate with:
+`tools/generate_icon_assets.py` rasterises [Lucide](https://lucide.dev) glyphs (ISC) into single-colour A8 masks at the design sizes and emits `ui/icons/carplay_icons.c` / `.h`. The UI uses `lv_image_set_src()` and recolours the glyphs through the `CARPLAY_STYLE_ICON_*` theme roles via `image_recolor`. Regenerate with:
 
 ```sh
 python -I tools/generate_icon_assets.py <path>/lucide.ttf
@@ -59,7 +59,7 @@ The page reads and controls the existing `carplay_ota_*` service only (`platform
 
 ## Evidence
 
-Host renderings of the actual UI with the real LVGL 9.1 software renderer at 1024×600 are checked in under `tests/launcher_preview/shots-v4/` (dashboard, connectivity, settings, OTA, pairing and the unsupported-audio state, in dark/light and en/zh) and `tests/launcher_preview/shots-v4-fusion/` (strip in provider/unavailable/light/zh states, FULLSCREEN hidden and disconnect).
+Render the current UI using the LVGL 9 software renderer at 1024×600. The launcher preview covers settings and the GNSS editor. The fusion preview covers the instrument strip and full-screen transitions.
 
 ```sh
 cmake -S application/rt-thread/rtcarplay/tests/launcher_preview -B build/launcher-preview -DCMAKE_BUILD_TYPE=Release
@@ -69,4 +69,4 @@ build/launcher-preview/launcher_preview build/launcher-v4-shots
 build/launcher-preview/fusion_preview build/launcher-v4-shots
 ```
 
-These images are Host renderings with modeled connection values. They are not board screenshots, protocol acceptance evidence or proof of real volume/brightness actuation on the panel. Board validation of the PWM backlight, the codec mixer, both projection modes and the OTA flow remains NOT_RUN until the exact image is flashed and observed; see the [V4 evidence checkpoint](evidence/d213-mobility-cockpit-v4-20261116.md).
+These Host renderings use modeled connection and device values. On the board, verify the panel backlight, codec volume, projection modes and OTA results separately with the exact image and corresponding logs.

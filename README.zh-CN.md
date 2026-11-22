@@ -2,13 +2,13 @@
 
 # D213 CarPlay 应用
 
-本应用将独立可移植 rt-carplay SDK 集成到 D213 的 Luban-Lite，使用 RT-Thread 和 1024×600 面板。[V2.1 验证](docs/zh-CN/refactoring-v21-verification.md)记录已完成的软件架构、生命周期基线。[Launcher V2](docs/zh-CN/launcher-v2.md)增加 USB/无线自动发现、GUI/Headless 共用的单会话 Owner 和 LVGL 9 仪表盘。当前源码和镜像的实机验收仍为 NOT_RUN。
+本应用将可移植 rt-carplay SDK 集成到 D213 的 Luban-Lite，使用 RT-Thread 和 1024×600 面板。GUI 和 Headless 共用一个[连接管理器](docs/zh-CN/connection-manager.md)，负责 USB 和无线自动发现。GUI 提供[原生 LVGL 仪表盘和设置](docs/zh-CN/mobility-cockpit-v4.md)。
 
 ## 源码所有权
 
-[Ultra 开发](docs/ultra-development.zh-CN.md)记录 LIVI 源码研究、可移植 SDK 里程碑、统一 CI 产物及独立 L0-L5 验收。当前目标是可移植 Ultra 协议基础与实用的 D213 单屏融合 Demo，完整官方 Ultra 不属于当前验收范围，未实现能力保持不声明。用户已确认上一版本 Fusion 显示效果可以，具体受测镜像及剩余实机检查在开发报告中单独记录。Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI)。
+[Ultra 实验](docs/zh-CN/ultra-development.md)说明可移植协议基础、D213 硬件限制和板端验收条件。Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI)。
 
-统一 D213 配置可包含默认关闭的显式 [SIMULATED 发动机 Vehicle State 协议实验入口](docs/vehicle-protocol-demo.zh-CN.md)，用于后续手机互操作测试。它不会将本地仪表的车速、挡位、电量随意映射成协议特征，也不启用 UI Sync 或官方 Local UI 渲染。
+统一 D213 配置可包含默认关闭的 [SIMULATED 发动机 Vehicle State 协议实验入口](docs/zh-CN/vehicle-protocol-demo.md)，用于手机互操作测试。
 
 | 目录 | 职责 |
 | --- | --- |
@@ -76,7 +76,7 @@ ipheth_status
 
 无线 iAP2 隧道还会更新「设置 → 手机控制」中的「路线引导」卡片。在 iPhone 上开始导航，查看手机提供的目的地、当前道路和剩余距离，再结束路线和断开连接，确认卡片内容清除。`carplay_status` 的 `carplay route_guidance` 行记录各字段是否收到。
 
-「正在播放」和「路线引导」在中英文界面均使用完整的 Noto Sans SC 字符映射。见[字库覆盖与生成方式](ui/fonts/README.md)。
+「正在播放」和「路线引导」在中英文界面均使用完整的 Noto Sans SC 字符映射。见[字库覆盖与生成方式](ui/fonts/README.zh-CN.md)。
 
 ### 模拟定位
 
@@ -127,27 +127,15 @@ packages/third-party/rt-carplay/scripts/fetch-mbedtls.sh
 make -C application/rt-thread/rtcarplay -j8 check
 ```
 
-Host 测试在 ASan/UBSan 下运行实际源码，调度和设备边界使用模型。[Launcher 预览](docs/zh-CN/launcher-v2.md)进一步构建实际 LVGL 并执行 UI 事件。独立 SDK 和 IPHETH 仓库保留各自 Make/CMake/CTest 与双语文档检查。
+Host 测试在 ASan/UBSan 下运行实际源码，调度和设备边界使用模型。[LVGL 预览](docs/zh-CN/mobility-cockpit-v4.md#证据)还会驱动实际 Launcher 界面。每次实机测试独立记录镜像 SHA-256 和源码提交。
 
-| 文档 | 范围 |
+| 领域 | 指南 |
 | --- | --- |
-| [有线启动与配对](docs/zh-CN/wired-startup.md) | CarKit 与网络同时启动、延迟邀请、RSA 优化及实机检查 |
-| [EHCI 完成回收修复](docs/zh-CN/ehci-completion-recovery.md) | 已复现的异步推进回收缺陷、有线死机证据及验证边界 |
-| [有线原生 NCM 集成](docs/zh-CN/wired-native-ncm.md) | 独占网络所有权、模块归属、三款手机验收及回归范围 |
-| [有线视频接收进度优化](docs/zh-CN/wired-video-recovery.md) | RX/TX 锁隔离、lwIP 排队输入及实机性能对比 |
-| [mbedTLS 4.x 评估](docs/zh-CN/mbedtls-upgrade-assessment.md) | MPI 测量证据、迁移成本及性能边界 |
-| [媒体与传输修复](docs/zh-CN/media-transport-repair.md) | 替换的音乐、回声与有线传输修改及验收边界 |
-| [音频恢复](docs/zh-CN/audio-recovery.md) | 通话回声、音乐调度、运行时诊断和实机验收 |
-| [Ethernet 互联网共享](docs/zh-CN/internet-sharing.md) | 可选 IPv4 网关、协议证据、恢复和必需的 iPhone 验收 |
-| [V2 验证](docs/zh-CN/v2-verification.md) | 已验证版本、CI、IMG 校验值和剩余实机验收 |
-| [连接管理器](docs/zh-CN/connection-manager.md) | 仲裁、重试、设置、所有权和 Headless 行为 |
-| [Launcher V2](docs/zh-CN/launcher-v2.md) | 历史 V2 页面集与连接管理器行为；产品界面现为 V4 |
-| [Mobility Cockpit V4](docs/zh-CN/mobility-cockpit-v4.md) | 四个原生页面、主题/语言、真实音量/亮度、投影模式和 OTA 绑定 |
-| [V4 主机证据](docs/evidence/d213-mobility-cockpit-v4-20261116.zh-CN.md) | 当前源码/镜像状态、主机结果和剩余板端检查 |
-| [V2.1 验证](docs/zh-CN/refactoring-v21-verification.md) | 架构、迁移、生命周期、双语审计和 SDK 仓库清理 |
-| [会话快照](docs/zh-CN/session-snapshots.md) | 并发、保留所有权、回调有效期和实际源码回归 |
-| [CI](docs/zh-CN/ci.md) | 上游、工具链、构建打包和证据 |
-| [历史调试](docs/build.md) | 早期调查和开发板反馈，不作为当前构建权威 |
-| [可移植 SDK](../../../packages/third-party/rt-carplay/README.zh-CN.md) | 公共 API、Linux/RT-Thread Port、媒体和音频交接 |
+| 构建与维护 | [固件 CI 与 SDK 变基](docs/zh-CN/ci.md)、[代码格式](docs/zh-CN/code-formatting.md) |
+| 连接 | [连接管理器](docs/zh-CN/connection-manager.md)、[有线启动](docs/zh-CN/wired-startup.md)、[原生 NCM](docs/zh-CN/wired-native-ncm.md)、[会话快照](docs/zh-CN/session-snapshots.md) |
+| 启动器与更新 | [原生界面](docs/zh-CN/mobility-cockpit-v4.md)、[单屏融合](docs/zh-CN/single-screen-fusion.md)、[OTA](docs/zh-CN/ota.md) |
+| 板端诊断 | [音频恢复](docs/zh-CN/audio-recovery.md)、[媒体与传输](docs/zh-CN/media-transport-repair.md)、[Ethernet PHY](docs/zh-CN/ethernet-phy-verification.md)、[互联网共享](docs/zh-CN/internet-sharing.md)、[USB 文件](docs/zh-CN/usb-files.md) |
+| 实验功能 | [D213 Ultra 实验](docs/zh-CN/ultra-development.md)、[Vehicle State 和 UI Sync 工具](docs/zh-CN/vehicle-protocol-demo.md) |
+| 可移植 API | [rt-carplay SDK](../../../packages/third-party/rt-carplay/README.zh-CN.md) |
 
-开发使用现有 `carplay-oss` 和 SDK `main` 分支，采用 boa-z 身份，不创建 PR。旧 SDK 仓库按所有者要求备份并重建，旧 Gitlink、CI 引用需要经过验证的离线备份。当前子模块提交已发布且可获取。
+`docs/` 使用英文指南，简体中文使用 `docs/zh-CN/` 下的同名文件。目录入口使用 `README.md` 和 `README.zh-CN.md`。修改指南时同步更新两种语言。

@@ -6,8 +6,6 @@
 
 本可选 IPv4 网关使用 D213 Ethernet 作为 WAN、既有 CarPlay Wi-Fi AP 作为 LAN，实现位于宿主应用和实际使用的 RT-Thread lwIP 2.1.2 集成层。可移植 rt-carplay SDK、iAP2、Apple Vendor IE、会话仲裁及音视频算法保持不变。Ethernet 和共享直接加入既有 GUI 配置，Headless 继续作为关闭共享的独立兼容回归。Kconfig 开关可以独立于 Ethernet 关闭共享。不维护额外的 Internet defconfig，启用功能也不代表通过 iPhone 互操作认证。
 
-已执行检查、固件身份和硬件状态见 [本地验证报告](internet-verification.md)。
-
 | 证据类别 | 结论 |
 | --- | --- |
 | 公开标准 | IPv4 路由、NAPT、DHCP 路由器/DNS 选项和普通 UDP/TCP DNS 提供标准网关路径，见 [RFC 3022](https://www.rfc-editor.org/rfc/rfc3022) 和 [RFC 2132](https://www.rfc-editor.org/rfc/rfc2132)。 |
@@ -88,4 +86,4 @@ sha256sum <flashed-image.img> iphone-wan.pcap
 
 如果手机继续使用蜂窝、拒绝该路由或续期后失败，应先记录 iOS 网络状态和 Beacon/iAP2 抓包，再提出协议修改。新增互联网标志、Networking IE 或 iAP2 消息需要可信规范或可重复设备证据。保持既有 SDK/平台边界，不通过修改音频算法调查路由失败。
 
-固定版本 DiPlay 对照与尚未确认的字段定义见 [Use For Internet iAP2 字段审查](iap2-internet-research.md)。
+手机上 Use For Internet 控件对应的 iAP2 字段仍待确认。

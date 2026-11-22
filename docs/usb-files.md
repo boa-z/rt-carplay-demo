@@ -1,6 +1,6 @@
-# USB development file transfer
+[English](usb-files.md) | [简体中文](zh-CN/usb-files.md)
 
-[中文](zh-CN/usb-files.md)
+# USB development file transfer
 
 `RTCARPLAY_USB_FILE_SYNC` composes CherryUSB's existing ADB class, sync service, demo descriptors and RT-Thread DFS bridge in the CarPlay application. It does not enable the separate RT-Thread adbd package or a shell service. The PC still uses Android Platform Tools `adb push` and `adb pull`. CherryUSB and rt-carplay upstream sources, the RTOS and SoC drivers are unchanged by this file-transfer integration.
 

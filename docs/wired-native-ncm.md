@@ -1,6 +1,6 @@
-# Wired CarPlay over native CDC-NCM
-
 [English](wired-native-ncm.md) | [简体中文](zh-CN/wired-native-ncm.md)
+
+# Wired CarPlay over native CDC-NCM
 
 ## Maintained configuration
 

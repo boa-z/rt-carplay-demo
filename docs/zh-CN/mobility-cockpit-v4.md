@@ -17,7 +17,7 @@ V4 设计包（`Mobility_Cockpit_UI/mobility_cockpit_v4`）在 1024×600 上用�
 
 ## 图标
 
-所有图标均为官方 [Lucide](https://lucide.dev) 字形，而非自绘矢量。`tools/generate_icon_assets.py` 将 Lucide 字体（ISC 许可）按设计尺寸栅格化为 14 个单色 A8 蒙版，生成 `ui/icons/carplay_icons.c` / `.h`；页面用 `lv_image_set_src()` 绘制，并通过 `CARPLAY_STYLE_ICON_*` 主题角色（设置 `image_recolor`，而非每种颜色一张位图）实时着色。重新生成：
+`tools/generate_icon_assets.py` 将 [Lucide](https://lucide.dev) 字形（ISC 许可）按设计尺寸栅格化为单色 A8 蒙版，生成 `ui/icons/carplay_icons.c` / `.h`。界面用 `lv_image_set_src()` 绘制，通过 `CARPLAY_STYLE_ICON_*` 主题角色的 `image_recolor` 着色。重新生成：
 
 ```sh
 python -I tools/generate_icon_assets.py <path>/lucide.ttf
@@ -31,7 +31,7 @@ python -I tools/generate_icon_assets.py <path>/lucide.ttf
 
 `ui/ui_language.c` 维护英中标签对照并支持 `carplay_ui_set_chinese()` 即时切换。中文使用 Noto Sans SC 子集，按 16/18/24/30 四档字号匹配。四个 CJK 字体文件都由 `tools/generate_ui_fonts.py` 按同一符号并集生成，因此不会出现某个字号缺字显示方块的情况。英文使用 `tools/generate_display_fonts.py` 生成的 Inter 子集。
 
-两项偏好通过 `app/launcher_preferences.c` 持久化到 `/data/carplay-ui.bin`。版本 2 记录为 `"CPUI" | 版本 | 存在掩码 | 值 | FNV-1a`，先写临时文件再提升，并保留备份用于恢复。键为 `CARPLAY_PREF_{LANGUAGE,THEME,DISPLAY,WIRELESS,MIC_MUTED,VOLUME,BRIGHTNESS}`。写入失败会在设置页提示，绝不报告为已保存。
+偏好通过 `app/launcher_preferences.c` 持久化到 `/data/carplay-ui.bin`。版本 2 记录布局为 `"CPUI" | version | present mask | values | FNV-1a`，先写临时文件再替换，并保留备份用于恢复。键为 `CARPLAY_PREF_{LANGUAGE,THEME,DISPLAY,WIRELESS,MIC_MUTED,VOLUME,BRIGHTNESS}`。写入失败会在设置页提示。
 
 ## 音量与亮度
 
@@ -59,7 +59,7 @@ python -I tools/generate_icon_assets.py <path>/lucide.ttf
 
 ## 证据
 
-在主机上以真实 LVGL 9.1 软件渲染器生成的实际 UI 1024×600 截图已提交到 `tests/launcher_preview/shots-v4/`（仪表、互联、设置、OTA、配对和不支持音频的状态，覆盖深/浅色与中/英）和 `tests/launcher_preview/shots-v4-fusion/`（融合条 provider/不可用/浅色/中文、全屏隐藏和断开）。
+用 LVGL 9 软件渲染器生成当前 1024×600 界面。启动器预览覆盖设置和 GNSS 编辑页。融合预览覆盖仪表条和全屏切换。
 
 ```sh
 cmake -S application/rt-thread/rtcarplay/tests/launcher_preview -B build/launcher-preview -DCMAKE_BUILD_TYPE=Release
@@ -69,4 +69,4 @@ build/launcher-preview/launcher_preview build/launcher-v4-shots
 build/launcher-preview/fusion_preview build/launcher-v4-shots
 ```
 
-这些是主机渲染图，连接数值为模拟值。它们不是板端截图、协议验收证据，也不证明面板上真实的音量/亮度执行效果。PWM 背光、编解码 Mixer、两种投影模式和 OTA 流程的板端验证，在确切镜像被烧录并观察前始终为 NOT_RUN；参见 [V4 证据检查点](../evidence/d213-mobility-cockpit-v4-20261116.zh-CN.md)。
+Host 渲染使用模拟连接和设备数值。板端应分别验证面板背光、编解码器音量、投影模式和 OTA，并记录确切镜像和对应日志。

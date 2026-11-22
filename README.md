@@ -2,11 +2,11 @@
 
 # D213 CarPlay application
 
-The application integrates the independent portable rt-carplay SDK into Luban-Lite on D213 with RT-Thread and a 1024×600 panel. [V2.1 verification](docs/refactoring-v21-verification.md) records the completed software architecture/lifecycle baseline. [Launcher V2](docs/launcher-v2.md) adds automatic USB/wireless discovery, a single session owner shared by GUI and Headless, and the LVGL 9 dashboard. Current source/image hardware acceptance remains NOT_RUN.
+The application integrates the portable rt-carplay SDK into Luban-Lite on D213 with RT-Thread and a 1024×600 panel. GUI and Headless builds share a single [connection manager](docs/connection-manager.md) for automatic USB and wireless discovery. The GUI adds a [native LVGL dashboard and settings](docs/mobility-cockpit-v4.md).
 
 ## Source ownership
 
-[Ultra development](docs/ultra-development.md) records the LIVI source review, portable SDK milestone, unified CI artifact and separate L0-L5 acceptance. The current goal is portable Ultra protocol foundations and a useful D213 single-screen fusion demo. Complete official Ultra is outside the current acceptance scope; unimplemented features stay absent from capability declarations. The user has confirmed the previous version's Fusion visual result; the exact tested image and remaining device checks are recorded separately in the development report. Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI).
+[Ultra experiments](docs/ultra-development.md) cover the portable protocol foundations, D213 hardware constraints and board acceptance criteria. Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI).
 
 The unified D213 configuration can include an explicit, default-off [SIMULATED engine Vehicle State protocol bench](docs/vehicle-protocol-demo.md) for future phone interoperability tests. It does not expose the local dashboard's speed, gear or battery as guessed protocol characteristics, and does not enable UI Sync or official Local UI rendering.
 
@@ -127,27 +127,15 @@ packages/third-party/rt-carplay/scripts/fetch-mbedtls.sh
 make -C application/rt-thread/rtcarplay -j8 check
 ```
 
-The host suite runs actual sources with ASan/UBSan and modeled scheduling/device boundaries. The [Launcher preview](docs/launcher-v2.md) additionally builds actual LVGL and exercises UI events. The independent SDK and IPHETH repositories retain their own Make/CMake/CTest and bilingual-documentation gates.
+The Host suite runs actual sources with ASan/UBSan and modeled scheduling and device boundaries. The [LVGL preview](docs/mobility-cockpit-v4.md#evidence) also drives the real launcher UI. Record the image SHA-256 and source revision separately for each board result.
 
-| Document | Scope |
+| Area | Guides |
 | --- | --- |
-| [Wired startup and pairing](docs/wired-startup.md) | Concurrent CarKit/network startup, deferred invitation, RSA optimization and board checks |
-| [Native wired NCM integration](docs/wired-native-ncm.md) | Exclusive network ownership, module boundaries, three-phone acceptance and regression limits |
-| [EHCI completion recovery](docs/ehci-completion-recovery.md) | Reproduced async-advance reclamation defect, wired crash evidence and validation limits |
-| [Wired video receive progress](docs/wired-video-recovery.md) | RX/TX lock isolation, queued lwIP input and board performance comparison |
-| [mbedTLS 4.x assessment](docs/mbedtls-upgrade-assessment.md) | Measured MPI evidence, migration costs and performance limits |
-| [Media and transport repair](docs/media-transport-repair.md) | Replacement music, echo and wired transport changes; acceptance boundaries |
-| [Audio recovery](docs/audio-recovery.md) | Call echo, music scheduling, runtime diagnostics and board acceptance |
-| [Ethernet Internet sharing](docs/internet-sharing.md) | Optional IPv4 gateway, protocol evidence, recovery and required iPhone acceptance |
-| [V2 verification](docs/v2-verification.md) | Verified revisions, CI, IMG checksums and remaining board acceptance |
-| [Connection manager](docs/connection-manager.md) | Arbitration, retry, settings, ownership and Headless behavior |
-| [Launcher V2](docs/launcher-v2.md) | Historical V2 page set and connection-manager behavior; the product UI is now V4 |
-| [Mobility Cockpit V4](docs/mobility-cockpit-v4.md) | Four native pages, theme/language, real volume/brightness, projection modes and OTA binding |
-| [V4 Host evidence](docs/evidence/d213-mobility-cockpit-v4-20261116.md) | Current source/image state, host results and remaining board checks |
-| [V2.1 verification](docs/refactoring-v21-verification.md) | Architecture, migration, lifecycle, bilingual audit and SDK repository cleanup |
-| [Session snapshots](docs/session-snapshots.md) | Concurrency, retained ownership, callback lifetime and actual-source regressions |
-| [CI](docs/ci.md) | Upstream, toolchain, build/package and evidence |
-| [Historical bring-up](docs/build.md) | Earlier investigations and board reports; not the current build authority |
-| [Portable SDK](../../../packages/third-party/rt-carplay/README.md) | Public APIs, Linux/RT-Thread ports, media and audio handoff |
+| Build and maintenance | [Firmware CI and SDK rebase](docs/ci.md), [formatting](docs/code-formatting.md) |
+| Connections | [Connection manager](docs/connection-manager.md), [wired startup](docs/wired-startup.md), [native NCM](docs/wired-native-ncm.md), [session snapshots](docs/session-snapshots.md) |
+| Launcher and updates | [Native UI](docs/mobility-cockpit-v4.md), [single-screen fusion](docs/single-screen-fusion.md), [OTA](docs/ota.md) |
+| Board diagnostics | [Audio recovery](docs/audio-recovery.md), [media and transport](docs/media-transport-repair.md), [Ethernet PHY](docs/ethernet-phy-verification.md), [Internet sharing](docs/internet-sharing.md), [USB files](docs/usb-files.md) |
+| Experiments | [Ultra on D213](docs/ultra-development.md), [Vehicle State and UI Sync tools](docs/vehicle-protocol-demo.md) |
+| Portable API | [rt-carplay SDK](../../../packages/third-party/rt-carplay/README.md) |
 
-Development uses existing `carplay-oss` and SDK `main` branches, with boa-z identity and no PR creation. The prior SDK repository was backed up and re-created at the owner's request; old Gitlinks/CI references require the verified offline backup. Current submodule commits are published and fetchable.
+English guides in `docs/` are the primary documents. Their Simplified Chinese counterparts use the same filename in `docs/zh-CN/`. Directory entry pages use `README.md` and `README.zh-CN.md`. Update both languages together.

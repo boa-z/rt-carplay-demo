@@ -4,7 +4,7 @@
 
 ## 职责
 
-`app/connection_manager.c` 拥有应用连接 Worker、Receiver 启停、USB 配对、无线 iAP2 Handoff、阶段发布、配对确认、设备信任记录和音频测试调度，不依赖 LVGL。`ui/lvgl_launcher.c` 拥有展示和指针队列，发送请求并读取调用方自有快照。协议端点拆除保留在独立 SDK Receiver。自动连接开发前，V2.1 已完成软件前置阶段，记录在[验证交接](refactoring-v21-verification.md)。
+`app/connection_manager.c` 拥有应用连接 Worker、Receiver 启停、USB 配对、无线 iAP2 交接、阶段发布、配对确认、设备信任记录和音频测试调度，独立于 LVGL。`ui/lvgl_launcher.c` 拥有展示和指针队列，发送请求并读取调用方自有快照。协议端点拆除归独立 SDK Receiver 所有。
 
 ## 启动与生命周期
 
@@ -51,7 +51,7 @@ make -C application/rt-thread/rtcarplay check-lubanlite-usb
 make -C application/rt-thread/rtcarplay check-lubanlite-video
 ```
 
-实际自动 Worker 在 GUI 和 Headless 两种编译下各执行 32 轮开机发现、无线预留期间 USB 插入、USB 冷却重试、异步无线失败、USB Open 失败、首帧超时、USB 仍插入时 AirPlay 丢线、Receiver 启动失败和时钟回绕。独立自动构建在 Owner 订阅前执行实际 USB Class 绑定。视频测试在图层或 vsync 失败时拒绝就绪，即使解码计数非零。保留原手动模式、Trust/存储、管理器互斥、指针溢出与路由、音频所有权、生命周期和协议测试。另有两种不提供 LVGL 头文件的管理器语法编译。[Launcher 验证](launcher-v2.md)补充实际 LVGL 渲染和 UI 事件路由，连接值明确使用模型。
+实际自动 Worker 在 GUI 和 Headless 两种编译下各执行 32 轮开机发现、无线预留期间 USB 插入、USB 冷却重试、异步无线失败、USB Open 失败、首帧超时、USB 仍插入时 AirPlay 丢线、Receiver 启动失败和时钟回绕。独立自动构建在 Owner 订阅前执行实际 USB Class 绑定。视频测试在图层或 vsync 失败时拒绝就绪，即使解码计数非零。保留原手动模式、Trust/存储、管理器互斥、指针溢出与路由、音频所有权、生命周期和协议测试。另有两种不提供 LVGL 头文件的管理器语法编译。[Launcher 验证](mobility-cockpit-v4.md#证据)补充实际 LVGL 渲染和 UI 事件路由，连接值使用模型。
 
 Host ASan/UBSan、LVGL 渲染与 GUI/Headless 交叉编译属于独立证据。本次准确 CI 版本和镜像记录在验证报告。D213 启动、显示、USB/无线重连、持久化、音频和触摸在匹配镜像实测前均为 `NOT_RUN`。
 

@@ -6,8 +6,6 @@
 
 This optional IPv4 gateway uses D213 Ethernet as WAN and the existing CarPlay Wi-Fi AP as LAN. It is implemented in the host application and the production RT-Thread lwIP 2.1.2 integration. The portable rt-carplay SDK, iAP2, Apple vendor IE, session arbitration and audio/video algorithms are unchanged. Ethernet and sharing are added directly to the existing GUI configuration; Headless remains a separate compatibility regression with sharing disabled. The Kconfig switch can disable sharing independently of Ethernet. No additional Internet defconfig is maintained, and enabling the feature is not an iPhone interoperability certification.
 
-See the [local verification report](internet-verification.md) for executed checks, firmware identities and hardware status.
-
 | Evidence class | Finding |
 | --- | --- |
 | Public standards | IPv4 routing, NAPT, DHCP router/DNS options and normal DNS over UDP/TCP provide a standard gateway path. See [RFC 3022](https://www.rfc-editor.org/rfc/rfc3022) and [RFC 2132](https://www.rfc-editor.org/rfc/rfc2132). |
@@ -88,4 +86,4 @@ sha256sum <flashed-image.img> iphone-wan.pcap
 
 If the phone keeps using cellular, rejects the route or fails after renewal, record the iOS network state and beacon/iAP2 captures before proposing a protocol change. An authenticated specification or reproducible device evidence is required before adding an Internet flag, Networking IE or new iAP2 message. Retain the existing SDK/platform boundary and do not change audio algorithms to investigate a routing failure.
 
-See the [Use For Internet iAP2 field audit](iap2-internet-research.md) for the pinned DiPlay comparison and the unresolved field definition.
+The iAP2 field that drives the phone's Use For Internet control remains unconfirmed.

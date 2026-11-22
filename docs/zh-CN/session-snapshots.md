@@ -76,4 +76,4 @@ USB 应用操作与全部 Shell 命令共享一个非阻塞原子调用门。争
 
 `check-usb-iap2-worker` 提取实际链路类型、重置／清理、Worker、调用门及公开／Shell 包装函数，链接真实 SDK iAP2 Session，仅模拟线程调度、Provider 释放和阻塞命令 I/O。ASan/UBSan 覆盖创建／启动回滚、安装失败后的清理所有权、初始化／线程创建期间拔线、首次调度前停止、等待自身、超时保留流、真实竞争 pthread 被全部包装函数拒绝、错误路径释放调用门，以及 32 轮重启。不覆盖真实 Lockdown 信任过程或物理 USB 调度。
 
-这些测试不代表实机配对、重连或播放通过。[V2.1 验证交接](refactoring-v21-verification.md)记录已完成的软件所有权审查和独立硬件限制。自动连接与 Launcher V2 仍是后续应用工作。
+[连接管理器指南](connection-manager.md)说明当前自动连接流程。手机配对、重连和播放需在实机分别验证。

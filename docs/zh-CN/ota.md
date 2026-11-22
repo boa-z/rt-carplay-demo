@@ -1,6 +1,6 @@
-# 有线 A/B 更新
+[English](../ota.md) | [简体中文](ota.md)
 
-[English](../ota.md)
+# 有线 A/B 更新
 
 OTA 策略属于应用层，复用现有 webclient、mbedTLS 和 Luban-Lite A/B 更新器；可移植 rt-carplay SDK 不依赖更新或 UI。GUI Defconfig 启用 OTA，不新增固件方案。
 
