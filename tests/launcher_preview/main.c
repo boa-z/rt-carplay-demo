@@ -11,6 +11,13 @@ static uint8_t pixels[1024 * 600 * 4];
 static demo_status_t model;
 static unsigned preview_ms = 183000;
 
+const carplay_build_info_t carplay_build_info = {
+    .sdk_version = "1.3.3",
+    .rtcarplay_version = RTCP_VERSION_STRING,
+    .commit = "0123456789abcdef0123456789abcdef01234567-dirty",
+    .time_utc = "2026-11-21T16:42:19Z",
+};
+
 /* ---- modeled hosts ---- */
 static bool volume_supported = true;
 static unsigned model_volume = 60;
@@ -315,6 +322,16 @@ static void click_caption(lv_obj_t *page, const char *caption)
     lv_obj_send_event(owning_card(label), LV_EVENT_CLICKED, NULL);
 }
 
+static void assert_settings_page(settings_page_t expected)
+{
+    for (unsigned index = 0; index < SETTINGS_PAGE_COUNT; ++index)
+    {
+        bool selected = index == (unsigned)expected;
+        assert(lv_obj_has_flag(settings_pages[index], LV_OBJ_FLAG_HIDDEN) == !selected);
+        assert(lv_obj_get_scroll_dir(settings_pages[index]) == LV_DIR_VER);
+    }
+}
+
 /* The back control is the first clickable child the header creates. */
 static void click_back(lv_obj_t *page)
 {
@@ -383,11 +400,15 @@ int main(int argc, char **argv)
     assert(!lv_obj_has_flag(pages[PAGE_DASHBOARD], LV_OBJ_FLAG_HIDDEN));
     click_caption(pages[PAGE_DASHBOARD], "Settings");
     assert(!lv_obj_has_flag(pages[PAGE_SETTINGS], LV_OBJ_FLAG_HIDDEN));
+    assert_settings_page(SETTINGS_DISPLAY);
     update_page(NULL);
     screenshot(argv[1], "03-settings_dark_en");
     assert(!strcmp(lv_label_get_text(volume_value), "60%"));
     assert(!strcmp(lv_label_get_text(brightness_value), "72%"));
 
+    click_caption(pages[PAGE_SETTINGS], "Sound");
+    assert_settings_page(SETTINGS_SOUND);
+    screenshot(argv[1], "03-settings-sound_dark_en");
     lv_slider_set_value(volume_slider, 25, LV_ANIM_OFF);
     lv_obj_send_event(volume_slider, LV_EVENT_VALUE_CHANGED, NULL);
     assert(volume_writes && model_volume == 25);
@@ -402,6 +423,9 @@ int main(int argc, char **argv)
     lv_obj_send_event(volume_slider, LV_EVENT_RELEASED, NULL);
     assert(model_volume == 100 && stored_preferences[CARPLAY_PREF_VOLUME] == 100);
 
+    click_caption(pages[PAGE_SETTINGS], "Display");
+    assert_settings_page(SETTINGS_DISPLAY);
+    assert(!strcmp(lv_label_get_text(volume_value), "100%"));
     lv_slider_set_value(brightness_slider, CARPLAY_BRIGHTNESS_MIN, LV_ANIM_OFF);
     lv_obj_send_event(brightness_slider, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_send_event(brightness_slider, LV_EVENT_RELEASED, NULL);
@@ -419,6 +443,8 @@ int main(int argc, char **argv)
     screenshot(argv[1], "03-settings_light_en");
     lv_obj_send_event(theme_buttons[1], LV_EVENT_CLICKED, NULL);
     assert(carplay_ui_dark());
+    click_caption(pages[PAGE_SETTINGS], "Language");
+    assert_settings_page(SETTINGS_LANGUAGE);
     lv_obj_send_event(language_buttons[0], LV_EVENT_CLICKED, NULL);
     assert(carplay_ui_is_chinese() && stored_preferences[CARPLAY_PREF_LANGUAGE] == 1);
     screenshot(argv[1], "03-settings_dark_zh");
@@ -428,13 +454,39 @@ int main(int argc, char **argv)
     assert(find_caption(pages[PAGE_SETTINGS], "语言"));
     assert(find_caption(pages[PAGE_SETTINGS], "CarPlay 显示"));
     assert(find_caption(pages[PAGE_SETTINGS], "系统更新"));
+    click_caption(pages[PAGE_SETTINGS], "关于");
+    assert_settings_page(SETTINGS_ABOUT);
+    assert(find_caption(settings_pages[SETTINGS_ABOUT], "构建哈希"));
+    assert(find_caption(settings_pages[SETTINGS_ABOUT], "构建时间 (UTC)"));
+    screenshot(argv[1], "03-settings-about_dark_zh");
+    click_caption(pages[PAGE_SETTINGS], "语言");
     lv_obj_send_event(language_buttons[1], LV_EVENT_CLICKED, NULL);
     assert(!carplay_ui_is_chinese());
 
     /* Display mode without the compositor is refused, not faked. */
+    click_caption(pages[PAGE_SETTINGS], "Display");
     lv_obj_send_event(display_buttons[0], LV_EVENT_CLICKED, NULL);
     assert(strstr(lv_label_get_text(settings_hint), "Not supported"));
     screenshot(argv[1], "03-settings_dark_en");
+
+    click_caption(pages[PAGE_SETTINGS], "About");
+    assert_settings_page(SETTINGS_ABOUT);
+    const char *about_values[] = {
+        carplay_build_info.sdk_version,
+        carplay_build_info.rtcarplay_version,
+        carplay_build_info.commit,
+        carplay_build_info.time_utc,
+    };
+    for (unsigned index = 0; index < sizeof(about_values) / sizeof(about_values[0]); ++index)
+    {
+        lv_obj_t *value = find_caption(settings_pages[SETTINGS_ABOUT], about_values[index]);
+        assert(value);
+        inside(value);
+    }
+    screenshot(argv[1], "03-settings-about_dark_en");
+    carplay_launcher_open_display_settings();
+    assert_settings_page(SETTINGS_DISPLAY);
+    click_caption(pages[PAGE_SETTINGS], "About");
 
     /* OTA page: real state strings, no progress without a real percentage. */
     click_caption(pages[PAGE_SETTINGS], "System update");
@@ -494,6 +546,9 @@ int main(int argc, char **argv)
     carplay_ui_set_chinese(true);
     screenshot(argv[1], "04-ota_dark_zh");
     click_back(pages[PAGE_OTA]);
+    assert(!lv_obj_has_flag(pages[PAGE_SETTINGS], LV_OBJ_FLAG_HIDDEN));
+    assert_settings_page(SETTINGS_ABOUT);
+    click_back(pages[PAGE_SETTINGS]);
     screenshot(argv[1], "01-dashboard_dark_zh");
     assert(find_caption(pages[PAGE_DASHBOARD], "仪表"));
     assert(find_caption(pages[PAGE_DASHBOARD], "当前速度"));

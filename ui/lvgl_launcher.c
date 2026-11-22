@@ -22,6 +22,7 @@
 #include "icons/carplay_icons.h"
 #include "audio_volume_lubanlite.h"
 #include "backlight_lubanlite.h"
+#include "carplay_build_info.h"
 #define lv_label_set_text     carplay_ui_set_text
 #define lv_label_set_text_fmt carplay_ui_set_text_fmt
 #define TR                    carplay_ui_translate
@@ -50,6 +51,22 @@ typedef enum
     PAGE_COUNT
 } page_t;
 
+typedef enum
+{
+    SETTINGS_DISPLAY,
+    SETTINGS_SOUND,
+    SETTINGS_LANGUAGE,
+    SETTINGS_ABOUT,
+    SETTINGS_PAGE_COUNT
+} settings_page_t;
+
+enum
+{
+    SETTINGS_DETAIL_WIDTH = 632,
+    SETTINGS_DETAIL_HEIGHT = 386,
+    SETTINGS_SIDEBAR_WIDTH = 252
+};
+
 static rt_mutex_t pointer_lock;
 typedef struct
 {
@@ -75,6 +92,9 @@ static lv_obj_t *conn_dot, *conn_state, *conn_action;
 static lv_obj_t *volume_value, *volume_slider, *brightness_value, *brightness_slider;
 static lv_obj_t *theme_buttons[3], *language_buttons[2], *display_buttons[2];
 static lv_obj_t *display_note, *settings_hint;
+static lv_obj_t *settings_pages[SETTINGS_PAGE_COUNT];
+static lv_obj_t *settings_tabs[SETTINGS_PAGE_COUNT];
+static lv_obj_t *settings_captions[SETTINGS_PAGE_COUNT];
 static bool volume_dragging, brightness_dragging;
 static unsigned theme_choice, display_choice;
 
@@ -467,11 +487,11 @@ static void build_dashboard(lv_obj_t *parent)
 }
 
 /* Header shared by the three inner pages. */
-static void build_header(lv_obj_t *parent, const char *title)
+static void build_header(lv_obj_t *parent, const char *title, lv_event_cb_t go_back)
 {
     lv_obj_t *back = panel(parent, 54, 42, 44, 44, 13, CARPLAY_STYLE_CARD_ALT);
     lv_obj_add_flag(back, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(back, open_dashboard, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(back, go_back, LV_EVENT_CLICKED, NULL);
     icon_mask(parent, &carplay_icon_arrow_left_22, 65, 53, CARPLAY_STYLE_ICON_TEXT);
     text(parent, title, 64, 88, 700, &carplay_ui_34, CARPLAY_STYLE_TEXT);
 }
@@ -496,7 +516,7 @@ static void connect_action(lv_event_t *event)
 
 static void build_connectivity(lv_obj_t *parent)
 {
-    build_header(parent, "Connectivity");
+    build_header(parent, "Connectivity", open_dashboard);
 
     panel(parent, 64, 153, 896, 310, 24, CARPLAY_STYLE_CARD);
     panel(parent, 96, 183, 84, 84, 20, CARPLAY_STYLE_TILE);
@@ -543,7 +563,7 @@ static void volume_event(lv_event_t *event)
         return;
     }
     unsigned value = (unsigned)lv_slider_get_value(volume_slider);
-    if (code == LV_EVENT_RELEASED)
+    if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST)
         volume_dragging = false;
     if (code != LV_EVENT_VALUE_CHANGED && code != LV_EVENT_RELEASED)
         return;
@@ -569,7 +589,7 @@ static void brightness_event(lv_event_t *event)
         return;
     }
     unsigned value = (unsigned)lv_slider_get_value(brightness_slider);
-    if (code == LV_EVENT_RELEASED)
+    if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST)
         brightness_dragging = false;
     if (code != LV_EVENT_VALUE_CHANGED && code != LV_EVENT_RELEASED)
         return;
@@ -662,18 +682,16 @@ static void build_slider_card(lv_obj_t *parent, int y, const char *title, icon_a
                               unsigned minimum, unsigned maximum,
                               lv_event_cb_t callback, const char *hint)
 {
-    panel(parent, 64, y, 438, 177, 21, CARPLAY_STYLE_CARD);
-    icon_mask(parent, icon, 87, y + 23, CARPLAY_STYLE_ICON_ACCENT);
-    text(parent, title, 132, y + 30, 300, &carplay_ui_21, CARPLAY_STYLE_TEXT);
-    /* The reference prints the bare percentage right-anchored at x = 466
-     * (text-anchor="end"); the card title names the quantity. Keeping the
-     * value to numerals + "%" means no locale can overflow this slot. */
-    *value_out = text(parent, "", 330, y + 33, 136, &carplay_ui_18, CARPLAY_STYLE_TEXT);
+    lv_obj_t *card = panel(parent, 0, y, SETTINGS_DETAIL_WIDTH - 4, 144, 16,
+                           CARPLAY_STYLE_CARD);
+    icon_mask(card, icon, 23, 16, CARPLAY_STYLE_ICON_ACCENT);
+    text(card, title, 68, 19, 380, &carplay_ui_21, CARPLAY_STYLE_TEXT);
+    *value_out = text(card, "", 460, 20, 142, &carplay_ui_18, CARPLAY_STYLE_TEXT);
     lv_obj_set_style_text_align(*value_out, LV_TEXT_ALIGN_RIGHT, 0);
 
-    lv_obj_t *slider = lv_slider_create(parent);
-    lv_obj_set_pos(slider, 95, y + 84);
-    lv_obj_set_size(slider, 367, 20);
+    lv_obj_t *slider = lv_slider_create(card);
+    lv_obj_set_pos(slider, 28, 65);
+    lv_obj_set_size(slider, 568, 20);
     lv_slider_set_range(slider, (int32_t)minimum, (int32_t)maximum);
     lv_obj_set_style_pad_top(slider, 6, LV_PART_MAIN);
     lv_obj_set_style_pad_bottom(slider, 6, LV_PART_MAIN);
@@ -689,65 +707,157 @@ static void build_slider_card(lv_obj_t *parent, int y, const char *title, icon_a
     lv_obj_add_event_cb(slider, callback, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_add_event_cb(slider, callback, LV_EVENT_PRESSED, NULL);
     lv_obj_add_event_cb(slider, callback, LV_EVENT_RELEASED, NULL);
+    lv_obj_add_event_cb(slider, callback, LV_EVENT_PRESS_LOST, NULL);
     *slider_out = slider;
 
-    text(parent, hint, 93, y + 137, 380, &carplay_ui_14, CARPLAY_STYLE_MUTED);
+    text(card, hint, 24, 107, 580, &carplay_ui_14, CARPLAY_STYLE_MUTED);
+}
+
+static void show_settings_page(settings_page_t target)
+{
+    for (unsigned index = 0; index < SETTINGS_PAGE_COUNT; ++index)
+    {
+        bool selected = index == (unsigned)target;
+        if (selected)
+            lv_obj_remove_flag(settings_pages[index], LV_OBJ_FLAG_HIDDEN);
+        else
+            lv_obj_add_flag(settings_pages[index], LV_OBJ_FLAG_HIDDEN);
+        carplay_ui_style(settings_tabs[index], selected ? CARPLAY_STYLE_ACCENT_CARD
+                                                        : CARPLAY_STYLE_CARD_ALT);
+        carplay_ui_style(settings_captions[index], selected ? CARPLAY_STYLE_ACCENT_TEXT
+                                                            : CARPLAY_STYLE_TEXT);
+    }
+}
+
+static void select_settings_page(lv_event_t *event)
+{
+    settings_status("", false);
+    show_settings_page((settings_page_t)(uintptr_t)lv_event_get_user_data(event));
+}
+
+static lv_obj_t *settings_nav_row(lv_obj_t *sidebar, const char *caption, icon_asset_t icon,
+                                  unsigned index, lv_event_cb_t callback)
+{
+    lv_obj_t *row = panel(sidebar, 10, 10 + 72 * (int)index, SETTINGS_SIDEBAR_WIDTH - 22,
+                          60, 12, CARPLAY_STYLE_CARD_ALT);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(row, callback, LV_EVENT_CLICKED, (void *)(uintptr_t)index);
+    lv_obj_t *image = icon_mask(row, icon, 16, 0, CARPLAY_STYLE_ICON_ACCENT);
+    lv_obj_align(image, LV_ALIGN_LEFT_MID, 16, 0);
+    lv_obj_t *label = text(row, caption, 54, 0, 144, &carplay_ui_18, CARPLAY_STYLE_TEXT);
+    lv_obj_align(label, LV_ALIGN_LEFT_MID, 54, 0);
+    return row;
+}
+
+static void build_display_settings(lv_obj_t *parent)
+{
+    build_slider_card(parent, 0, "Display brightness", &carplay_icon_sun_29,
+                      &brightness_value, &brightness_slider, CARPLAY_PREF_BRIGHTNESS_MIN,
+                      CARPLAY_PREF_BRIGHTNESS_MAX, brightness_event, "Adjust panel backlight");
+
+    lv_obj_t *appearance = panel(parent, 0, 156, SETTINGS_DETAIL_WIDTH - 4, 90, 16,
+                                 CARPLAY_STYLE_CARD);
+    text(appearance, "Appearance", 24, 34, 230, &carplay_ui_21, CARPLAY_STYLE_TEXT);
+    panel(appearance, 301, 17, 304, 56, 11, CARPLAY_STYLE_SEGMENT);
+    theme_buttons[0] = segment(appearance, "Light", 303, 20, 100, 50, select_theme, (void *)0,
+                               &carplay_ui_15);
+    theme_buttons[1] = segment(appearance, "Dark", 403, 20, 100, 50, select_theme, (void *)1,
+                               &carplay_ui_15);
+    theme_buttons[2] = segment(appearance, "Auto", 503, 20, 100, 50, select_theme, (void *)2,
+                               &carplay_ui_15);
+    lv_obj_add_state(theme_buttons[2], LV_STATE_DISABLED);
+
+    lv_obj_t *display = panel(parent, 0, 258, SETTINGS_DETAIL_WIDTH - 4, 116, 16,
+                              CARPLAY_STYLE_CARD);
+    text(display, "CarPlay display", 24, 34, 230, &carplay_ui_21, CARPLAY_STYLE_TEXT);
+    panel(display, 301, 17, 304, 56, 11, CARPLAY_STYLE_SEGMENT);
+    display_buttons[0] = segment(display, "Fullscreen", 303, 20, 150, 50, select_display,
+                                 (void *)0, &carplay_ui_15);
+    display_buttons[1] = segment(display, "Fusion", 453, 20, 150, 50, select_display,
+                                 (void *)1, &carplay_ui_15);
+    display_note = text(display, "", 24, 82, 580, &carplay_ui_14, CARPLAY_STYLE_FAINT);
+}
+
+static void build_language_settings(lv_obj_t *parent)
+{
+    lv_obj_t *card = panel(parent, 0, 0, SETTINGS_DETAIL_WIDTH - 4, 90, 16,
+                           CARPLAY_STYLE_CARD);
+    text(card, "Language", 24, 34, 230, &carplay_ui_21, CARPLAY_STYLE_TEXT);
+    panel(card, 301, 17, 304, 56, 11, CARPLAY_STYLE_SEGMENT);
+    language_buttons[0] = segment(card, "简体中文", 303, 20, 150, 50, select_language,
+                                  (void *)1, &carplay_ui_15);
+    language_buttons[1] = segment(card, "English", 453, 20, 150, 50, select_language,
+                                  (void *)0, &carplay_ui_15);
+}
+
+static void build_about(lv_obj_t *parent)
+{
+    const struct
+    {
+        const char *caption;
+        const char *value;
+    } items[] = {
+        { "Luban-Lite SDK", carplay_build_info.sdk_version },
+        { "rt-carplay", carplay_build_info.rtcarplay_version },
+        { "Build hash", carplay_build_info.commit },
+        { "Build time (UTC)", carplay_build_info.time_utc },
+    };
+    lv_obj_t *card = panel(parent, 0, 0, SETTINGS_DETAIL_WIDTH - 4, 348, 16,
+                           CARPLAY_STYLE_CARD);
+    for (unsigned index = 0; index < sizeof(items) / sizeof(items[0]); ++index)
+    {
+        int y = 12 + 84 * (int)index;
+        if (index)
+            divider(card, 24, y - 3, 580, 1);
+        text(card, items[index].caption, 24, y + 9, 580, &carplay_ui_18, CARPLAY_STYLE_MUTED);
+        lv_obj_t *value = text(card, items[index].value, 24, y + 37, 580,
+                               &carplay_ui_17, CARPLAY_STYLE_TEXT);
+        lv_label_set_long_mode(value, LV_LABEL_LONG_WRAP);
+    }
 }
 
 static void build_settings(lv_obj_t *parent)
 {
-    build_header(parent, "Settings");
+    static const struct
+    {
+        const char *caption;
+        icon_asset_t icon;
+    } tabs[SETTINGS_PAGE_COUNT] = {
+        [SETTINGS_DISPLAY] = { "Display", &carplay_icon_sun_29 },
+        [SETTINGS_SOUND] = { "Sound", &carplay_icon_volume_29 },
+        [SETTINGS_LANGUAGE] = { "Language", &carplay_icon_settings_24 },
+        [SETTINGS_ABOUT] = { "About", &carplay_icon_info_26 },
+    };
+    build_header(parent, "Settings", open_dashboard);
+    lv_obj_t *sidebar = panel(parent, 54, 146, SETTINGS_SIDEBAR_WIDTH, SETTINGS_DETAIL_HEIGHT,
+                              18, CARPLAY_STYLE_CARD);
+    lv_obj_add_flag(sidebar, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(sidebar, LV_DIR_VER);
+    for (unsigned index = 0; index < SETTINGS_PAGE_COUNT; ++index)
+    {
+        settings_tabs[index] = settings_nav_row(sidebar, tabs[index].caption, tabs[index].icon,
+                                                index, select_settings_page);
+        settings_captions[index] = lv_obj_get_child(settings_tabs[index], 1);
+        lv_obj_t *page = lv_obj_create(parent);
+        lv_obj_remove_style_all(page);
+        lv_obj_set_pos(page, 338, 146);
+        lv_obj_set_size(page, SETTINGS_DETAIL_WIDTH, SETTINGS_DETAIL_HEIGHT);
+        lv_obj_set_scroll_dir(page, LV_DIR_VER);
+        lv_obj_set_scrollbar_mode(page, LV_SCROLLBAR_MODE_AUTO);
+        settings_pages[index] = page;
+    }
+    lv_obj_t *update = settings_nav_row(sidebar, "System update", &carplay_icon_download_26,
+                                        SETTINGS_PAGE_COUNT, open_ota);
+    icon_mask(update, &carplay_icon_chevron_right_23, 196, 19, CARPLAY_STYLE_ICON_MUTED);
 
-    build_slider_card(parent, 149, "Media volume", &carplay_icon_volume_29, &volume_value,
-                      &volume_slider, 0, CARPLAY_PREF_VOLUME_MAX, volume_event,
+    build_display_settings(settings_pages[SETTINGS_DISPLAY]);
+    build_slider_card(settings_pages[SETTINGS_SOUND], 0, "Media volume", &carplay_icon_volume_29,
+                      &volume_value, &volume_slider, 0, CARPLAY_PREF_VOLUME_MAX, volume_event,
                       "Adjust local audio output");
-    build_slider_card(parent, 345, "Display brightness", &carplay_icon_sun_29,
-                      &brightness_value, &brightness_slider, CARPLAY_PREF_BRIGHTNESS_MIN,
-                      CARPLAY_PREF_BRIGHTNESS_MAX, brightness_event,
-                      "Adjust panel backlight");
-
-    /* Appearance */
-    panel(parent, 520, 149, 440, 90, 17, CARPLAY_STYLE_CARD);
-    text(parent, "Appearance", 540, 163, 120, &carplay_ui_18, CARPLAY_STYLE_TEXT);
-    panel(parent, 664, 162, 273, 55, 11, CARPLAY_STYLE_SEGMENT);
-    theme_buttons[0] = segment(parent, "Light", 666, 164, 89, 50, select_theme, (void *)0,
-                               &carplay_ui_15);
-    theme_buttons[1] = segment(parent, "Dark", 755, 164, 89, 50, select_theme, (void *)1,
-                               &carplay_ui_15);
-    theme_buttons[2] = segment(parent, "Auto", 844, 164, 89, 50, select_theme, (void *)2,
-                               &carplay_ui_15);
-    lv_obj_add_state(theme_buttons[2], LV_STATE_DISABLED);
-
-    /* Language */
-    panel(parent, 520, 249, 440, 90, 17, CARPLAY_STYLE_CARD);
-    text(parent, "Language", 540, 264, 140, &carplay_ui_18, CARPLAY_STYLE_TEXT);
-    panel(parent, 687, 262, 250, 55, 11, CARPLAY_STYLE_SEGMENT);
-    language_buttons[0] = segment(parent, "简体中文", 689, 264, 123, 50, select_language,
-                                  (void *)1, &carplay_ui_15);
-    language_buttons[1] = segment(parent, "English", 812, 264, 123, 50, select_language,
-                                  (void *)0, &carplay_ui_15);
-
-    /* CarPlay display */
-    panel(parent, 520, 349, 440, 101, 17, CARPLAY_STYLE_CARD);
-    text(parent, "CarPlay display", 539, 362, 150, &carplay_ui_18, CARPLAY_STYLE_TEXT);
-    panel(parent, 684, 361, 252, 53, 11, CARPLAY_STYLE_SEGMENT);
-    display_buttons[0] = segment(parent, "Fullscreen", 686, 363, 124, 49, select_display,
-                                 (void *)0, &carplay_ui_15);
-    display_buttons[1] = segment(parent, "Fusion", 810, 363, 124, 49, select_display,
-                                 (void *)1, &carplay_ui_15);
-    display_note = text(parent, "", 539, 424, 400, &carplay_ui_14, CARPLAY_STYLE_FAINT);
-
-    /* OTA entry: children sit inside the clickable row so the whole card,
-     * label included, routes to the page. */
-    lv_obj_t *ota_row = panel(parent, 520, 461, 440, 61, 15, CARPLAY_STYLE_ACCENT_CARD);
-    lv_obj_add_flag(ota_row, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(ota_row, open_ota, LV_EVENT_CLICKED, NULL);
-    icon_mask(ota_row, &carplay_icon_download_26, 18, 17, CARPLAY_STYLE_ICON_ACCENT);
-    text(ota_row, "System update", 60, 25, 300, &carplay_ui_18, CARPLAY_STYLE_TEXT);
-    icon_mask(ota_row, &carplay_icon_chevron_right_23, 394, 19, CARPLAY_STYLE_ICON_TEXT);
-
-    settings_hint = text(parent, "Changes apply immediately and survive reboot", 64, 545,
-                         720, &carplay_ui_14, CARPLAY_STYLE_FAINT);
+    build_language_settings(settings_pages[SETTINGS_LANGUAGE]);
+    build_about(settings_pages[SETTINGS_ABOUT]);
+    settings_hint = text(parent, "", 338, 548, 632, &carplay_ui_14, CARPLAY_STYLE_FAINT);
+    show_settings_page(SETTINGS_DISPLAY);
 }
 
 /* ---------------- OTA ---------------- */
@@ -879,7 +989,7 @@ static void ota_update(void)
 
 static void build_ota(lv_obj_t *parent)
 {
-    build_header(parent, "System update");
+    build_header(parent, "System update", open_settings);
 
     panel(parent, 64, 153, 896, 282, 22, CARPLAY_STYLE_CARD);
     panel(parent, 93, 181, 76, 76, 19, CARPLAY_STYLE_TILE);
@@ -1291,6 +1401,8 @@ void carplay_launcher_open_display_settings(void)
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
     carplay_fusion_ui_show_launcher();
 #endif
+    if (settings_pages[SETTINGS_DISPLAY])
+        show_settings_page(SETTINGS_DISPLAY);
     show_page(PAGE_SETTINGS);
 }
 

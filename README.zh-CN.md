@@ -66,7 +66,7 @@ ipheth_status
 
 设置保存在 RAM，重启复位。关闭无线后 USB 仍启用。配对和信任记录独立持久化。手动调试前禁用两个自动选项，再使用 `carplay_start wired` 或 `carplay_start`，不要与活动管理器混用手动生命周期命令。
 
-Settings → FIRMWARE & UPDATES 显示当前版本、源码提交和 A/B 槽位。检查更新通过有线以太网读取包含版本、完整提交、板型、包大小及 SHA256 的严格清单。不同提交会作为预览版本提供，其中也可能包含较旧提交。安装需要确认该确切目标并断开 CarPlay；工作线程将完整包暂存到 `/data`，校验存储内容后写入非活动槽位并重启。控制台 `carplay_ota status`、`carplay_ota check`、`carplay_ota install` 共用同一个任务入口。详见 [OTA 更新策略与验证](docs/zh-CN/ota.md)。
+设置 → 关于显示 Luban-Lite SDK 版本、rt-carplay SDK 版本、固件提交和 UTC 构建时间。设置 → 系统更新显示当前固件版本、源码提交和 A/B 槽位。检查更新通过有线以太网读取包含版本、完整提交、板型、包大小及 SHA256 的严格清单。不同提交会作为预览版本提供，其中也可能包含较旧提交。安装需要确认该确切目标并断开 CarPlay。工作线程将完整包暂存到 `/data`，校验存储内容后写入非活动槽位并重启。控制台 `carplay_ota status`、`carplay_ota check`、`carplay_ota install` 共用同一个任务入口。详见 [OTA 更新策略与验证](docs/zh-CN/ota.md)。
 
 ## 应用配置
 

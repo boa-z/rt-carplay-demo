@@ -210,14 +210,25 @@ def build_commit():
 
 # The values are passed unquoted and stringified in C: quoted definitions do
 # not survive SCons' command-line splitting on every host.
+commit = build_commit()
 cppdefines = ['MBEDTLS_CHACHA20_C', 'MBEDTLS_CHACHAPOLY_C',
               'MBEDTLS_HKDF_C',
               'RTCARPLAY_FW_VERSION=%s' % firmware_version(),
-              'RTCARPLAY_BUILD_COMMIT=%s' % build_commit()]
+              'RTCARPLAY_BUILD_COMMIT=%s' % commit]
 
 group = DefineGroup('Applications', src, depend=[''], CPPPATH=cpppath,
                     LOCAL_CCFLAGS=ccflags,
                     CPPDEFINES=cppdefines)
+
+if GetDepend('RTCARPLAY_DEMO_LAUNCHER'):
+    import time
+    epoch = os.environ.get('SOURCE_DATE_EPOCH')
+    build_time = time.gmtime(int(epoch)) if epoch is not None else time.gmtime()
+    timestamp = time.strftime('%Y-%m-%dT%H:%M:%SZ', build_time)
+    build_info_group = DefineGroup('CarPlay build info', Glob('platform/carplay_build_info.c'),
+                                   depend=[''], LOCAL_CPPPATH=[os.path.join(repo, 'include')],
+                                   LOCAL_CPPDEFINES=['RTCARPLAY_BUILD_TIME_UTC=%s' % timestamp])
+    group = group + build_info_group
 
 app_sconscript = os.path.join(repo, 'SConscript')
 if not os.path.isfile(app_sconscript):
