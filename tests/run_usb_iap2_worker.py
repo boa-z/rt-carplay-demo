@@ -9,6 +9,7 @@ import tempfile
 
 root = Path(__file__).resolve().parents[1]
 rtcp = Path(os.environ.get("RTCP_ROOT", root.parents[2] / "packages/third-party/rt-carplay"))
+build = Path(os.environ.get("RTCP_BUILD", rtcp / "build"))
 text = (root / "app/carplay_usb_cmd.c").read_text(encoding="utf-8")
 
 
@@ -262,7 +263,7 @@ with tempfile.TemporaryDirectory(prefix="usb-iap2-worker-") as directory:
     (path / "test.c").write_text(source, encoding="utf-8")
     include = [rtcp / part for part in ("include", "core/iap2/include", "core/usb/include")]
     include += [root / "app", root / "tests/support/rtthread_app"]
-    libraries = [rtcp / "build/librtcp_core.a", rtcp / "build/mbedtls/libmbedcrypto.a"]
+    libraries = [build / "librtcp_core.a", build / "mbedtls/libmbedcrypto.a"]
     subprocess.run([os.environ.get("CC", "cc"), "-std=c11", "-Wall", "-Wextra", "-Werror", "-pthread",
                     "-fsanitize=address,undefined", "-fno-pie", "-no-pie",
                     *["-I" + str(item) for item in include], str(path / "test.c"),

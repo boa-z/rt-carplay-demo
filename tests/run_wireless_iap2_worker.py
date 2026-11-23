@@ -3,30 +3,12 @@
 """Actual wireless owner/session code with modeled Bluetooth and scheduling."""
 from pathlib import Path
 import os
-import re
 import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[1]
 rtcp = Path(os.environ.get("RTCP_ROOT", root.parents[2] / "packages/third-party/rt-carplay"))
-text = (root / "app/iap2_link_lubanlite.c").read_text(encoding="utf-8")
-
-
-def function(signature):
-    start = text.index(signature)
-    end = text.index("{", start) + 1
-    depth = 1
-    while depth:
-        depth += (text[end] == "{") - (text[end] == "}")
-        end += 1
-    return text[start:end]
-
-
-owner = text[re.search(r"typedef\s+struct\s*\{", text).start():text.index("/* ------------------------------------------------------------------ */")]
-# MFi probing is a hardware boundary. Everything from state publication,
-# actual iAP2 callbacks/configuration/session through start/stop is retained.
-owner = owner.replace(function("static const struct rtcp_mfi *link_mfi(void)"),
-                      "static const struct rtcp_mfi *link_mfi(void);")
+build = Path(os.environ.get("RTCP_BUILD", rtcp / "build"))
 source = r'''
 #define _POSIX_C_SOURCE 200809L
 #include <assert.h>
@@ -37,31 +19,19 @@ source = r'''
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "rtthread.h"
-#include "iap2_link_lubanlite.h"
-#include "carplay_app.h"
-#include "carplay_mfi_provider.h"
-#include "gnss_demo.h"
 #include "iap2_session.h"
-#include "launcher_preferences.h"
-#include "rtcp_lubanlite.h"
-#include "rtcp_rtthread.h"
-#include "rtcp/rtcp.h"
-#define IAP2_LOG(...) rt_kprintf(__VA_ARGS__)
-#define IAP2_LINK_UUID "00000000-deca-fade-deca-deafdecacaff"
-#define IAP2_LINK_RX_MS 100
-#define IAP2_LINK_RX_BYTES 1024U
-#define IAP2_LINK_STACK_BYTES (12U * 1024U)
-#define IAP2_LINK_PRIORITY 20U
-#define IAP2_LINK_TICK 20U
+#define RTCARPLAY_MFI 1
+#define RTCARPLAY_MFI_I2C_BUS "test"
+#define RTCARPLAY_MFI_I2C_ADDR 0x11
 #define RTCARPLAY_IAP2_MODEL "public-fixture"
 #define RTCARPLAY_IAP2_FIRMWARE_VERSION "test"
 #define RTCARPLAY_IAP2_HARDWARE_VERSION "test"
-#define IAP2_LINK_MANUFACTURER "test"
-#define IAP2_LINK_LANGUAGE "en"
-'''
-source += owner
-source += r'''
+static unsigned test_location_requested(const iap2_session_t *);
+static bool test_send_location(iap2_session_t *, const char *, size_t, uint64_t);
+#define iap2_session_location_requested test_location_requested
+#define iap2_session_send_location test_send_location
+#include "iap2_link_lubanlite.c"
+
 static unsigned location_request, simulated_writes;
 static uint64_t simulated_now = 100;
 static char last_rmc[RTCP_LOCATION_NMEA_MAX + 1U];
@@ -86,11 +56,6 @@ static bool test_send_location(iap2_session_t *session, const char *sentence, si
     ++simulated_writes;
     return true;
 }
-#define iap2_session_location_requested test_location_requested
-#define iap2_session_send_location test_send_location
-'''
-source += text[text.index("bool carplay_iap2_tunnel_bytes("):]
-source += r'''
 struct test_thread { void (*entry)(void *); void *argument; };
 static rt_thread_t pending, current;
 static bool receiver_up = true, claimed, fail_create, fail_startup, drain_on_wait = true;
@@ -110,10 +75,15 @@ int rt_kprintf(const char *format, ...) {
     }
     return 0;
 }
-static const struct rtcp_mfi *link_mfi(void) {
+int rtcp_mfi_lubanlite_start(const char *bus, uint8_t address) {
+    assert(!strcmp(bus, RTCARPLAY_MFI_I2C_BUS) && address == RTCARPLAY_MFI_I2C_ADDR);
     ++probes;
     if (stop_in_probe) carplay_iap2_request_stop();
-    return &provider;
+    return RTCP_OK;
+}
+const struct rtcp_mfi *rtcp_mfi_lubanlite(void) { return &provider; }
+const struct rtcp_mfi *rtcp_mfi_lubanlite_lazy(const char *bus, uint8_t address) {
+    (void)bus; (void)address; assert(false); return NULL;
 }
 int carplay_mfi_provider_install(const struct rtcp_mfi *mfi) {
     assert(mfi == &provider && s_link.running); ++installs;
@@ -382,11 +352,13 @@ int main(void) {
 with tempfile.TemporaryDirectory(prefix="wireless-iap2-worker-") as directory:
     path = Path(directory)
     (path / "test.c").write_text(source, encoding="utf-8")
-    includes = [rtcp / part for part in ("include", "core/iap2/include", "port/rtthread/include")]
+    includes = [rtcp / part for part in ("include", "core/iap2/include", "core/airplay/include",
+                                        "port/rtthread/include", "third_party/mbedtls/include")]
     includes += [root / part for part in ("app", "platform", "tests/support/rtthread_app")]
-    libraries = [rtcp / "build/librtcp_core.a", rtcp / "build/mbedtls/libmbedcrypto.a"]
+    libraries = [build / "librtcp_core.a", build / "mbedtls/libmbedcrypto.a"]
     subprocess.run([os.environ.get("CC", "cc"), "-std=c11", "-Wall", "-Wextra", "-Werror",
                     "-fsanitize=address,undefined", "-fno-pie", "-no-pie", "-pthread",
+                    "-ffunction-sections", "-fdata-sections", "-Wno-unused-function", "-Wl,--gc-sections",
                     *["-I" + str(item) for item in includes], str(path / "test.c"), str(root / "app/gnss_demo.c"),
                     *map(str, libraries), "-lm", "-o", str(path / "test")], check=True)
     subprocess.run([str(path / "test")], check=True, timeout=30)

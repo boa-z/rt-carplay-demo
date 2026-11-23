@@ -27,10 +27,10 @@ LDLIBS := $(AUDIO_LIBS) -lm
 CPPFLAGS += $(addprefix -I$(RTCP_ROOT)/,include core core/mfi core/iap2/include core/airplay/include core/crypto/include core/media/include core/input/include core/discovery/include core/usb/include core/audio/include port/rtthread/include third_party/ed25519 port/linux/include third_party/mbedtls/include config) -Iapp -Iplatform
 CPPFLAGS += -DRTCP_AUDIO_CODECS -DMBEDTLS_CONFIG_FILE='"mbedtls_rtcp_host.h"'
 BOARD_BINS := $(addprefix $(BUILD)/,test_audio_capture test_audio_input test_audio_input_aec test_audio_sink test_pairing_files test_rtthread_app)
-export RTCP_ROOT
+export RTCP_ROOT RTCP_BUILD
 $(BUILD):
 	@mkdir -p $@
-.PHONY: sdk-libraries check
+.PHONY: sdk-libraries check check-docs
 sdk-libraries:
 	$(MAKE) -C $(RTCP_ROOT) BUILD="$(RTCP_BUILD)" $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS)
 $(BOARD_BINS): | sdk-libraries $(BUILD)
@@ -38,6 +38,9 @@ $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS): sdk-libraries
 check: $(BOARD_BINS) check-auto-connections check-internet-share check-udp-burst check-usb-file-sync check-ota check-native-ncm check-vehicle-protocol-demo check-launcher-preferences
 	@set -e; for t in $(BOARD_BINS); do ./$$t; done
 	$(MAKE) check-lubanlite-video check-lubanlite-touch check-lubanlite-demo check-lubanlite-bonds check-lubanlite-usb check-lubanlite-handoff check-lubanlite-reconnect check-lubanlite-capabilities check-wired-identity check-wired-trace check-iap2-endpoints check-usb-iap2-worker check-wireless-iap2-worker
+
+check-docs:
+	python3 "$(RTCP_ROOT)/scripts/check-docs.py" --root .
 
 .PHONY: check-launcher-preferences
 check-launcher-preferences: | $(BUILD)
@@ -248,7 +251,9 @@ $(BUILD)/test_audio_input_aec: tests/unit/test_audio_input.c platform/audio_inpu
 	$(CC) $(CFLAGS) $(CPPFLAGS) -DRTCARPLAY_MIC_AEC -DRTCARPLAY_MIC_AEC_DELAY_MS=0 -Itests/support/lubanlite_audio -Iplatform -o $@ $< tests/support/lubanlite_audio/rtthread_host.c $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(LDLIBS) -lpthread
 
 
+ifneq ($(MAKECMDGOALS),check-docs)
 -include $(wildcard $(BUILD)/*.d)
+endif
 
 .PHONY: check-usb-iap2-worker
 check-usb-iap2-worker: sdk-libraries

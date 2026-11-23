@@ -550,8 +550,11 @@ static void test_phone_artwork(void)
     rtcp_now_playing_details_t update = { .item.title = "First title" };
     metadata.on_now_playing_details(&update, NULL);
     update = (rtcp_now_playing_details_t){
-        .has_artwork_transfer_id = true, .artwork_transfer_id = 130,
-        .has_artwork = true, .artwork = cover, .artwork_length = sizeof(cover),
+        .has_artwork_transfer_id = true,
+        .artwork_transfer_id = 130,
+        .has_artwork = true,
+        .artwork = cover,
+        .artwork_length = sizeof(cover),
     };
     metadata.on_now_playing_details(&update, NULL);
     carplay_phone_media_t media;
@@ -569,7 +572,9 @@ static void test_phone_artwork(void)
     assert(carplay_app_phone_artwork(revision, copy, sizeof(copy)) == sizeof(cover));
     assert(!memcmp(cover, copy, sizeof(cover)));
     update = (rtcp_now_playing_details_t){
-        .has_artwork_transfer_id = true, .artwork_transfer_id = 131, .has_artwork = true,
+        .has_artwork_transfer_id = true,
+        .artwork_transfer_id = 131,
+        .has_artwork = true,
     };
     metadata.on_now_playing_details(&update, NULL);
     assert(carplay_app_phone_media(&media) && !media.track.artwork_revision);

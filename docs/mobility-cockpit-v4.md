@@ -71,6 +71,16 @@ Open **Settings → Phone Controls** to see Now Playing, route guidance and phon
 
 **Implemented / Host Tested.** The integration and LVGL preview exercise field clearing and artwork fallback. iAP2 title and playback updates preserve the current cover when they omit artwork. A new transfer can clear the previous cover until its replacement arrives. **Hardware Pending.** On D213, connect an iPhone over USB and then wirelessly. Verify that the cover stays visible through title and playback updates and changes when the phone sends a replacement. Start and cancel a route with upcoming turns and lane guidance. Check phone status during charging and a call, verify local time and the selected clock mode, then disconnect and reconnect. Session data should clear on disconnect and return as updates arrive. The board RTC should keep running.
 
+### Clock and location simulation
+
+In **Settings → Date & time**, **Sync with iPhone** accepts `DeviceTimeUpdate` from USB or wireless, stores UTC in the board RTC and applies the reported offset for display. **Manual** ignores incoming updates until automatic mode is selected again. Reconnect if the phone only supplies a time sample at session startup.
+
+For a bench without GNSS hardware, open **Settings → GNSS simulation** before connecting wirelessly. Select **Fixed point** or **A to B**, enter signed decimal coordinates and a speed from 1 to 300 km/h for motion. `carplay_gnss` reports offered formats, the phone subscription and queued/failed samples. The generator stops new fixes when switched off. The phone decides whether to use the accessory's location.
+
+### D213 board keys
+
+The default D213 board maps K4 to Back, K5 to Home, K6 to Siri and K7 to Play/Pause. `carplay_board_keys` reports ADC readings and the decoded key. `carplay_siri` and `carplay_phone_key` let you check the corresponding phone actions independently of the ADC adapter.
+
 ## Screen recovery
 
 The D213 video queue accepts or drops entire H.264 access units. The decoder can continue while the display engine latches a submitted frame. The sink retains the current scanout, one submitted frame awaiting a display interrupt, and the newest decoded frame awaiting submission. A newer decoded frame can replace the unsent frame. The previous scanout returns to MPP only after the display fence, and stopping or rebuilding the decoder still requires a layer-disable fence. On overflow, the sink discards queued pictures, retains the latest queued SPS/PPS, and reserves room for the next access unit that starts with the first slice of an IDR picture. The receiver requests a MainScreen keyframe over the encrypted event channel. A complete IDR refreshes the decoder after a queue gap. Decoder errors and changed stream configuration still require a rebuild.
