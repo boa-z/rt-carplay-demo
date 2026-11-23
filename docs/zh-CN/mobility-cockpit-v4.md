@@ -37,6 +37,8 @@ python -I tools/generate_icon_assets.py <path>/lucide.ttf
 
 进入 **设置 → 蓝牙**，输入 1–28 个可打印 ASCII 字符并点击 **应用**。重启开发板后，控制器的经典蓝牙本地名称和发现 EIR 生效。默认名称为 `rt-carplay`。蓝牙地址、配对记录、Wi-Fi 网络名称和 Bonjour 名称各自沿用原有值。检查串口中的 `Bluetooth local name`，并用手机扫描确认。已有配对的手机可能继续显示缓存名称。
 
+如果 iPhone 能列出接收端但连不上，请在点击设备名之前和之后各执行一次 `carplay_bt status`。接收端在空闲时每 10 秒检查一次 Page Scan 和 Inquiry Scan，控制器检查失败后每 2 秒重试，期间维持 RFCOMM 监听。检查串口中的 `READY radio recovered`，以及后续的 `BR incoming connection`、`incoming Classic page`、ACL、配对和 RFCOMM 事件。如果未出现 `BR incoming connection`，说明这次日志未捕获到入站 HCI 事件。分别验证保留配对记录重连和首次配对。
+
 ## 音量与亮度
 
 两个控件都绑定真实后端；后端缺失时控件被禁用，数值位显示"不支持"，提示行显示"此设备不支持"，不会模拟数值。数值位沿用参考设计的裸百分比（卡片标题已说明是什么量），因此任何语言都不会溢出；OTA 状态行同样采用缩短的文案。

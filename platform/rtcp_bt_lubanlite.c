@@ -964,15 +964,14 @@ static int publish_service(void)
     int err = bt_br_set_connectable(true, ready_connection_request);
     if (err != 0 && err != -EALREADY)
     {
-        s_stop = true;
-        return RTCP_EIO;
+        RTCP_LOGE(BT_TAG, "enable Classic page scan failed rc=%d", err);
+        return err;
     }
     err = bt_br_set_discoverable(true, false);
     if (err != 0 && err != -EALREADY)
     {
-        s_stop = true;
-        (void)bt_br_set_connectable(false, NULL);
-        return RTCP_EIO;
+        RTCP_LOGE(BT_TAG, "enable Classic inquiry scan failed rc=%d", err);
+        return err;
     }
     return RTCP_OK;
 }
@@ -1024,6 +1023,8 @@ static int verify_ready_radio(void)
     }
     rt_base_t flags = rt_hw_interrupt_disable();
     s_pair.radio_error = error;
+    if (error)
+        s_pair.scan_known = false;
     rt_hw_interrupt_enable(flags);
     if (error)
         RTCP_LOGE(BT_TAG, "READY radio verification failed rc=%d", error);
@@ -1115,13 +1116,18 @@ int rtcp_bt_lubanlite_reconnect_tick(bool allowed)
     bt_conn_foreach(BT_CONN_TYPE_BR, count_active_acl, &active);
     if (active || s_pair.kind)
         return RTCP_OK;
-    if ((uint32_t)(now - s_radio_checked) >= 10000U)
+    uint32_t radio_interval = s_pair.radio_error ? 2000U : 10000U;
+    if ((uint32_t)(now - s_radio_checked) >= radio_interval)
     {
-        s_radio_checked = now;
-        if (verify_ready_radio() != RTCP_OK)
-            return RTCP_EIO;
+        bool recovering = s_pair.radio_error != 0;
+        int result = verify_ready_radio();
+        s_radio_checked = rt_tick_get_millisecond();
+        if (result != RTCP_OK)
+            return RTCP_OK;
+        if (recovering)
+            RTCP_LOGI(BT_TAG, "READY radio recovered scan=0x%02x", s_pair.scan_enable);
     }
-    if ((int32_t)(now - s_reconnect_next) < 0)
+    if (s_pair.radio_error || (int32_t)(now - s_reconnect_next) < 0)
         return RTCP_OK;
     if (s_stop)
         return RTCP_OK;
@@ -1165,8 +1171,9 @@ static int publish_ready_service(void)
     if (result != RTCP_OK)
     {
         s_stop = true;
+        (void)bt_br_set_discoverable(false, false);
         (void)bt_br_set_connectable(false, NULL);
-        return result;
+        return result == RTCP_ESTATE ? result : RTCP_EIO;
     }
     uint8_t address[6];
     if (rtcp_bt_lubanlite_local_bdaddr(address) == RTCP_OK)

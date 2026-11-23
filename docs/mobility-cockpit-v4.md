@@ -37,6 +37,8 @@ Preferences persist through `app/launcher_preferences.c` in `/data/carplay-ui.bi
 
 Open **Settings → Bluetooth**, enter a name with 1–28 printable ASCII characters and tap **Apply**. Restart the board to update the controller's Classic local name and discovery EIR. The default is `rt-carplay`. The Bluetooth address, pairing records, Wi-Fi network name and Bonjour name retain their existing values. Check the log for `Bluetooth local name` and scan from the phone. A phone with a saved bond can continue to display its cached label.
 
+If the iPhone lists the receiver but cannot connect, capture `carplay_bt status` before and after tapping the name. An idle receiver verifies page and inquiry scan every 10 seconds and retries a failed controller check after 2 seconds without stopping the listener. Look for `READY radio recovered`, then `BR incoming connection`, `incoming Classic page`, ACL, pairing and RFCOMM events. An attempt with no `BR incoming connection` has no incoming HCI event in the capture. Repeat with a retained bond and with a fresh pair.
+
 ## Volume and brightness
 
 Both controls are bound to real backends and are disabled when the backend is absent: the value slot reads "Not supported", the hint row reads "Not supported on this device". Neither slider simulates a value. The slider value is the bare percentage used by the reference design (the card title names the quantity), so no language can overflow that slot; the OTA state line uses shortened copy for the same reason.

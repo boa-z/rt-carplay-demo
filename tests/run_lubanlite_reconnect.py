@@ -96,7 +96,11 @@ static int bt_br_set_connectable(bool enabled,
     host_scan=hardware_scan=enabled ? 2 : 0; return 0;
 }
 static int bt_br_set_discoverable(bool enabled, bool limited) {
-    assert(enabled && !limited);
+    assert(!limited);
+    if (!enabled) {
+        if (write_error) return write_error;
+        host_scan&=~1U; hardware_scan&=~1U; return 0;
+    }
     if (host_scan&1) return -EALREADY;
     if (write_error) return write_error;
     host_scan=hardware_scan=3; return 0;
@@ -170,6 +174,18 @@ int main(void) {
     assert(!publish_ready_service() && hardware_scan==3 && reads==2); /* stale host flags */
     hardware_scan=0; now=10000;
     assert(!rtcp_bt_lubanlite_reconnect_tick(true) && hardware_scan==3); /* idle repair */
+
+    reset(); assert(!publish_ready_service());
+    now=10000; read_error=-EIO;
+    assert(!rtcp_bt_lubanlite_reconnect_tick(true) && !s_stop);
+    assert(!s_pair.scan_known && s_pair.radio_error==-EIO && reads==2 && hardware_scan==3);
+    now=11999; read_error=0; hardware_scan=0;
+    assert(!rtcp_bt_lubanlite_reconnect_tick(true) && reads==2);
+    now=12000; write_error=-EIO;
+    assert(!rtcp_bt_lubanlite_reconnect_tick(true) && !s_stop && !s_pair.scan_known);
+    now=14000; write_error=0;
+    assert(!rtcp_bt_lubanlite_reconnect_tick(true) && s_pair.scan_known && !s_pair.radio_error);
+    assert(hardware_scan==3 && reads==unrefs);
 
     reset(); read_error=-EIO;
     assert(publish_ready_service()==RTCP_EIO && s_stop && !s_pair.scan_known && reads==unrefs);
