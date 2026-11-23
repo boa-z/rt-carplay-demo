@@ -18,7 +18,7 @@ check-native-ncm: | $(BUILD)
 check-usb-file-sync: | $(BUILD)
 	$(CC) $(CFLAGS) -Itests/usb_file_sync -I$(CHERRYUSB_ROOT)/common -I$(CHERRYUSB_ROOT)/class/adb tests/usb_file_sync/test_sync.c $(CHERRYUSB_ROOT)/class/adb/usbd_adb_sync.c -o $(BUILD)/test_usb_file_sync
 	$(BUILD)/test_usb_file_sync
-RTCP_BUILD := $(RTCP_ROOT)/build
+RTCP_BUILD ?= $(RTCP_ROOT)/build
 LIB := $(RTCP_BUILD)/librtcp_core.a
 PORT_LINUX_LIB := $(RTCP_BUILD)/librtcp_port_linux.a
 MBEDTLS_LIB := $(RTCP_BUILD)/mbedtls/libmbedcrypto.a
@@ -32,7 +32,7 @@ $(BUILD):
 	@mkdir -p $@
 .PHONY: sdk-libraries check
 sdk-libraries:
-	$(MAKE) -C $(RTCP_ROOT) $(patsubst $(RTCP_ROOT)/%,%,$(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS))
+	$(MAKE) -C $(RTCP_ROOT) BUILD="$(RTCP_BUILD)" $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS)
 $(BOARD_BINS): | sdk-libraries $(BUILD)
 $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS): sdk-libraries
 check: $(BOARD_BINS) check-auto-connections check-internet-share check-udp-burst check-usb-file-sync check-ota check-native-ncm check-vehicle-protocol-demo check-launcher-preferences
@@ -111,7 +111,7 @@ check-vehicle-protocol-demo: $(BUILD)/test_rtthread_app
 	$(CC) $(CFLAGS) $(CPPFLAGS) -Itests/support/rtthread_app -Iplatform \
 	  -DRTCARPLAY_VEHICLE_PROTOCOL_DEMO -DRTCARPLAY_SINGLE_SCREEN_FUSION \
 	  -Wno-unused-function -ffunction-sections -fdata-sections tests/unit/test_rtthread_app.c \
-	  app/vehicle_protocol_demo.c $(BUILD)/rtthread-app/os.o $(BUILD)/rtthread-app/net.o \
+	  app/vehicle_protocol_demo.c app/fusion_display.c $(BUILD)/rtthread-app/os.o $(BUILD)/rtthread-app/net.o \
 	  $(LIB) $(MBEDTLS_LIB) $(LDLIBS) -pthread -Wl,--gc-sections -o $(BUILD)/test_rtthread_app_vehicle
 	$(BUILD)/test_rtthread_app_vehicle
 	$(CC) $(CFLAGS) $(CPPFLAGS) tests/unit/test_vehicle_protocol_demo.c \
@@ -122,9 +122,10 @@ check-vehicle-protocol-demo: $(BUILD)/test_rtthread_app
 # Actual video sink with a bounded MPP model and the SDK's public headers.
 .PHONY: check-fusion-display check-lubanlite-video
 check-fusion-display: | $(BUILD)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -DRTCARPLAY_SINGLE_SCREEN_FUSION -Itests/support/lubanlite_video \
+	$(CC) $(CFLAGS) $(CPPFLAGS) -DRTCARPLAY_SINGLE_SCREEN_FUSION -Itests/support/lubanlite_video -Iui \
 	  -I$(SDK_ROOT)/packages/artinchip/mpp/include -I$(SDK_ROOT)/bsp/artinchip/include/uapi \
-	  tests/unit/test_fusion_display.c $(RTCP_ROOT)/core/media/display.c -o $(BUILD)/test_fusion_display
+	  tests/unit/test_fusion_display.c app/fusion_display.c ui/video_layer_policy.c \
+	  $(RTCP_ROOT)/core/media/display.c -o $(BUILD)/test_fusion_display
 	$(BUILD)/test_fusion_display
 
 check-lubanlite-video: check-fusion-display

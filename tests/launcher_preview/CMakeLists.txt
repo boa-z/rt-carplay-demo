@@ -8,6 +8,7 @@ set(LV_CONF_BUILD_DISABLE_THORVG_INTERNAL ON CACHE BOOL "" FORCE)
 add_subdirectory("${SDK_ROOT}/packages/artinchip/lvgl-ui/lvgl_v9/lvgl" lvgl)
 
 set(UI_SOURCES
+    ../../app/gnss_demo.c
     ../../ui/ui_language.c
     ../../ui/carplay_ui_theme.c
     ../../ui/icons/carplay_icons.c
@@ -29,7 +30,7 @@ set(UI_SOURCES
 
 # Actual V4 pages with modeled connection, audio, backlight and OTA owners.
 add_executable(launcher_preview main.c)
-target_sources(launcher_preview PRIVATE ${UI_SOURCES} ../../app/gnss_demo.c)
+target_sources(launcher_preview PRIVATE ${UI_SOURCES})
 target_include_directories(launcher_preview PRIVATE
     ../../ui ../support/lubanlite_demo ../../app ../../platform
     "${SDK_ROOT}/packages/third-party/rt-carplay/include"

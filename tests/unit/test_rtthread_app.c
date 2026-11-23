@@ -40,6 +40,21 @@ static pthread_barrier_t snapshot_barrier;
 static atomic_bool release_snapshot = ATOMIC_VAR_INIT(false);
 static unsigned snapshot_waits;
 
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+static pthread_mutex_t irq_lock = PTHREAD_MUTEX_INITIALIZER;
+
+rt_base_t rt_hw_interrupt_disable(void)
+{
+    assert(pthread_mutex_lock(&irq_lock) == 0);
+    return 0;
+}
+
+void rt_hw_interrupt_enable(rt_base_t level)
+{
+    assert(level == 0 && pthread_mutex_unlock(&irq_lock) == 0);
+}
+#endif
+
 static void *hold_snapshot(void *unused)
 {
     (void)unused;

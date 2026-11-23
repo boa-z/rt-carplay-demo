@@ -4,8 +4,15 @@
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
-#include "../../app/fusion_display.c"
-#include "../../ui/video_layer_policy.c"
+#include <aic_common.h>
+#include <rtthread.h>
+#include <rtdevice.h>
+#include <string.h>
+#include "artinchip_fb.h"
+#include "fusion_display.h"
+#include "rtcp/input.h"
+#include "rtcp/rtcp.h"
+#include "video_layer_policy.h"
 
 static unsigned critical_depth, writes;
 static bool missing, fail_layer, fail_alpha, fail_vsync;
