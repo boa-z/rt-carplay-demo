@@ -20,7 +20,7 @@ static carplay_gnss_config_t config = {
     .revision = 1
 };
 static atomic_flag config_lock = ATOMIC_FLAG_INIT;
-static atomic_uint status_flags, gga_queued, rmc_queued, failed;
+static atomic_uint status_flags, gga_queued, rmc_queued, pascd_queued, failed;
 
 bool carplay_gnss_get_config(carplay_gnss_config_t *out)
 {
@@ -206,23 +206,25 @@ void carplay_gnss_publish_status(const carplay_gnss_status_t *status)
 {
     atomic_store(&gga_queued, status->gga_queued);
     atomic_store(&rmc_queued, status->rmc_queued);
+    atomic_store(&pascd_queued, status->pascd_queued);
     atomic_store(&failed, status->failed);
-    atomic_store(&status_flags, status->requested | (status->tunnel ? 4U : 0U) |
-                                    (status->advertised ? 8U : 0U) | (status->fixture_clock ? 16U : 0U) |
-                                    ((unsigned)status->motion << 5));
+    atomic_store(&status_flags, status->requested | (status->tunnel ? 8U : 0U) |
+                                    (status->advertised ? 16U : 0U) | (status->fixture_clock ? 32U : 0U) |
+                                    ((unsigned)status->motion << 6));
 }
 
 void carplay_gnss_get_status(carplay_gnss_status_t *out)
 {
     unsigned flags = atomic_load(&status_flags);
     *out = (carplay_gnss_status_t){
-        .tunnel = (flags & 4U) != 0,
-        .advertised = (flags & 8U) != 0,
-        .fixture_clock = (flags & 16U) != 0,
-        .motion = (carplay_gnss_motion_t)(flags >> 5),
-        .requested = flags & (RTCP_LOCATION_GGA | RTCP_LOCATION_RMC),
+        .tunnel = (flags & 8U) != 0,
+        .advertised = (flags & 16U) != 0,
+        .fixture_clock = (flags & 32U) != 0,
+        .motion = (carplay_gnss_motion_t)(flags >> 6),
+        .requested = flags & (RTCP_LOCATION_GGA | RTCP_LOCATION_RMC | RTCP_LOCATION_PASCD),
         .gga_queued = atomic_load(&gga_queued),
         .rmc_queued = atomic_load(&rmc_queued),
+        .pascd_queued = atomic_load(&pascd_queued),
         .failed = atomic_load(&failed),
     };
 }

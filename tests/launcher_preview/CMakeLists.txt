@@ -36,7 +36,7 @@ target_include_directories(launcher_preview PRIVATE
     "${SDK_ROOT}/packages/third-party/rt-carplay/include"
     "${SDK_ROOT}/packages/third-party/rt-carplay/core/airplay/include")
 target_compile_definitions(launcher_preview PRIVATE
-    RTCARPLAY_INTERNET_SHARE RTCARPLAY_MICROPHONE RTCARPLAY_IAP2
+    RTCARPLAY_INTERNET_SHARE RTCARPLAY_MICROPHONE RTCARPLAY_IAP2 RT_USING_RTC
     LPKG_RT_CARPLAY_LUBANLITE_WIFI RTCARPLAY_OTA
     LPKG_BT_DEVICE_NAME_DYNAMIC CARPLAY_PREFERENCES_EXTERNAL_PROVIDER)
 target_compile_options(launcher_preview PRIVATE -Wall -Wextra -Werror)

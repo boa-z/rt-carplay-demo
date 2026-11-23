@@ -36,6 +36,10 @@ static char stored_bt_name[CARPLAY_BT_NAME_MAX + 1] = CARPLAY_BT_NAME_DEFAULT;
 static bool preferences_error;
 static rtcp_appearance_setting_t model_phone_appearance;
 static carplay_phone_media_t model_phone_media;
+static bool clock_received;
+static bool clock_automatic = true;
+static int clock_offset;
+static time_t rtc_seconds = 1795279339;
 
 void carplay_app_set_phone_appearance(rtcp_appearance_setting_t appearance)
 {
@@ -49,6 +53,152 @@ bool carplay_app_phone_media(carplay_phone_media_t *media)
 {
     *media = model_phone_media;
     return true;
+}
+
+size_t carplay_app_phone_artwork(uint32_t revision, uint8_t *buffer, size_t capacity)
+{
+    static const uint8_t png[] = {
+        0x89,
+        0x50,
+        0x4e,
+        0x47,
+        0x0d,
+        0x0a,
+        0x1a,
+        0x0a,
+        0x00,
+        0x00,
+        0x00,
+        0x0d,
+        0x49,
+        0x48,
+        0x44,
+        0x52,
+        0x00,
+        0x00,
+        0x00,
+        0x20,
+        0x00,
+        0x00,
+        0x00,
+        0x20,
+        0x08,
+        0x02,
+        0x00,
+        0x00,
+        0x00,
+        0xfc,
+        0x18,
+        0xed,
+        0xa3,
+        0x00,
+        0x00,
+        0x00,
+        0x2a,
+        0x49,
+        0x44,
+        0x41,
+        0x54,
+        0x78,
+        0x9c,
+        0x63,
+        0x30,
+        0xae,
+        0xd8,
+        0x43,
+        0x53,
+        0xc4,
+        0x30,
+        0x6a,
+        0xc1,
+        0xa8,
+        0x05,
+        0xa3,
+        0x16,
+        0x8c,
+        0x5a,
+        0x30,
+        0x6a,
+        0xc1,
+        0xa8,
+        0x05,
+        0xa3,
+        0x16,
+        0x8c,
+        0x5a,
+        0x30,
+        0x6a,
+        0xc1,
+        0xa8,
+        0x05,
+        0xa3,
+        0x16,
+        0x0c,
+        0x15,
+        0x0b,
+        0x00,
+        0xa6,
+        0x2f,
+        0x9c,
+        0x4c,
+        0xbb,
+        0x5b,
+        0xd5,
+        0xf9,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x49,
+        0x45,
+        0x4e,
+        0x44,
+        0xae,
+        0x42,
+        0x60,
+        0x82,
+    };
+    if (capacity < sizeof(png) || (revision != 1 && revision != 2))
+        return 0;
+    memcpy(buffer, png, sizeof(png));
+    if (revision == 2)
+        buffer[16] = 1;
+    return sizeof(png);
+}
+
+int carplay_app_clock_offset_minutes(void)
+{
+    return clock_offset;
+}
+bool carplay_app_clock_is_automatic(void)
+{
+    return clock_automatic;
+}
+bool carplay_app_phone_clock_received(void)
+{
+    return clock_received;
+}
+int carplay_app_set_clock_automatic(bool automatic)
+{
+    clock_automatic = automatic;
+    return 0;
+}
+int carplay_app_set_local_clock(int64_t local_seconds, int offset_minutes)
+{
+    rtc_seconds = (time_t)(local_seconds - offset_minutes * 60);
+    clock_offset = offset_minutes;
+    return 0;
+}
+rt_device_t rt_device_find(const char *name)
+{
+    return !strcmp(name, "rtc") ? &rtc_seconds : NULL;
+}
+int rt_device_control(rt_device_t device, int command, void *argument)
+{
+    if (device != &rtc_seconds || command != RT_DEVICE_CTRL_RTC_GET_TIME)
+        return -1;
+    *(time_t *)argument = rtc_seconds;
+    return RT_EOK;
 }
 
 uint32_t rt_tick_get_millisecond(void)
@@ -554,7 +704,27 @@ int main(int argc, char **argv)
     assert_settings_page(SETTINGS_PHONE);
     lv_obj_send_event(phone_appearance_buttons[RTCP_APPEARANCE_LIGHT], LV_EVENT_CLICKED, NULL);
     assert(model_phone_appearance == RTCP_APPEARANCE_LIGHT && carplay_ui_dark());
-    model_phone_media = (carplay_phone_media_t){ .title = "Test Track", .artist = "Test Artist", .has_playing = true, .playing = true, .route_destination = "Central Station", .route_road = "Main Street", .route_remaining = "2 km" };
+    model_phone_media = (carplay_phone_media_t){
+        .track = { .title = "Test Track", .artist = "Test Artist", .has_playing = true, .playing = true, .has_duration = true, .has_elapsed = true, .duration_ms = 180000, .elapsed_ms = 90000, .artwork_revision = 1 },
+        .route_destination = "Central Station",
+        .route_road = "Main Street",
+        .route_remaining = "2 km",
+        .route_turn_distance = "400 m",
+        .maneuvers = { { .index = 7, .present = true, .instruction = "Turn right", .distance = "400 m" },
+                       { .index = 3, .present = true, .instruction = "Keep left" } },
+        .lane_count = 2,
+        .lanes = { { .angle = -90 }, { .angle = 90, .highlighted = true } },
+        .has_battery = true,
+        .battery = 75,
+        .has_charging = true,
+        .charging = 1,
+        .has_signal = true,
+        .signal = 3,
+        .carrier = "Preview Wireless",
+        .has_call = true,
+        .call = 4,
+    };
+    clock_received = true;
     update_page(NULL);
     assert(!strcmp(lv_label_get_text(phone_title), "Test Track"));
     assert(!strcmp(lv_label_get_text(phone_artist), "Test Artist"));
@@ -563,11 +733,31 @@ int main(int argc, char **argv)
     assert(!strcmp(lv_label_get_text(phone_road), "Main Street"));
     assert(!strcmp(lv_label_get_text(phone_remaining), "2 km"));
     assert(find_caption(settings_pages[SETTINGS_PHONE], "路线引导"));
-    model_phone_media = (carplay_phone_media_t){ .title = "龘\U00020087 Live", .artist = "麤樂隊", .route_destination = "龘龍站" };
+    assert(lv_bar_get_value(phone_progress) == 500);
+    assert(!lv_obj_has_flag(phone_cover, LV_OBJ_FLAG_HIDDEN));
+    assert(!lv_obj_has_flag(phone_lane_strip, LV_OBJ_FLAG_HIDDEN));
+    assert(!strcmp(lv_label_get_text(phone_turn_distance), "400 m"));
+    assert(strstr(lv_label_get_text(phone_maneuvers[0]), "Turn right"));
+    assert(strstr(lv_label_get_text(phone_maneuvers[1]), "Keep left"));
+    assert(strstr(lv_label_get_text(phone_power), "75%"));
+    assert(strstr(lv_label_get_text(phone_cellular), "Preview Wireless"));
+    assert(!strcmp(lv_label_get_text(phone_call), TR("Call active")));
+    assert(!strcmp(lv_label_get_text(phone_clock), "2026-11-21 16:42:19  UTC+00:00"));
+    assert(!strcmp(lv_label_get_text(phone_clock_mode), TR("iPhone time received")));
+    screenshot(argv[1], "03-settings-phone_dark_zh");
+    lv_obj_t *phone_page = settings_pages[SETTINGS_PHONE];
+    lv_obj_scroll_to_y(phone_page, lv_obj_get_scroll_y(phone_page) + lv_obj_get_scroll_bottom(phone_page), LV_ANIM_OFF);
+    assert(lv_obj_get_scroll_y(phone_page) > 0 && lv_obj_get_scroll_bottom(phone_page) == 0);
+    screenshot(argv[1], "03-settings-phone-status_dark_zh");
+    model_phone_media = (carplay_phone_media_t){
+        .track = { .title = "龘\U00020087 Live", .artist = "麤樂隊", .artwork_revision = 2 },
+        .route_destination = "龘龍站",
+    };
     update_page(NULL);
     assert(!strcmp(lv_label_get_text(phone_title), "龘\U00020087 Live"));
     assert(lv_obj_get_style_text_font(phone_title, 0) == &carplay_cjk_full_18);
     assert(lv_obj_get_style_text_font(phone_destination, 0) == &carplay_cjk_full_18);
+    assert(lv_obj_has_flag(phone_cover, LV_OBJ_FLAG_HIDDEN));
     lv_font_glyph_dsc_t glyph;
     assert(lv_font_get_glyph_dsc(&carplay_cjk_full_18, &glyph, 0x9f98, 0) && !glyph.is_placeholder);
     assert(lv_font_get_glyph_dsc(&carplay_cjk_full_18, &glyph, 0x20087, 0) && !glyph.is_placeholder);
@@ -584,12 +774,15 @@ int main(int argc, char **argv)
     assert(lv_obj_get_style_text_font(phone_artist, 0) == &carplay_cjk_full_18);
     carplay_ui_set_chinese(true);
     update_page(NULL);
-    screenshot(argv[1], "03-settings-phone_dark_zh");
     memset(&model_phone_media, 0, sizeof(model_phone_media));
+    clock_received = false;
     update_page(NULL);
     assert(!strcmp(lv_label_get_text(phone_title), "-") && !*lv_label_get_text(phone_playback));
     assert(!strcmp(lv_label_get_text(phone_destination), "-") && !*lv_label_get_text(phone_road) &&
            !*lv_label_get_text(phone_remaining));
+    assert(lv_obj_has_flag(phone_lane_strip, LV_OBJ_FLAG_HIDDEN));
+    assert(!strcmp(lv_label_get_text(phone_power), TR("Battery unavailable")));
+    assert(!strcmp(lv_label_get_text(phone_clock_mode), TR("Waiting for iPhone time")));
     lv_obj_scroll_to_view(settings_tabs[SETTINGS_GNSS], LV_ANIM_OFF);
     click_caption(pages[PAGE_SETTINGS], "模拟定位");
     assert_settings_page(SETTINGS_GNSS);

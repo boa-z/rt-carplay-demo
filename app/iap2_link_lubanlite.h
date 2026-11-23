@@ -56,17 +56,19 @@ void carplay_iap2_get_status(carplay_iap2_status_t *status);
 
 #include <stddef.h>
 #include <stdint.h>
+#include "iap2_session.h"
 #include "rtcp/media.h"
 #include "rtcp/device_time.h"
 #include "rtcp/navigation.h"
 
 typedef struct
 {
-    rtcp_now_playing_cb_t on_now_playing;
-    rtcp_route_guidance_cb_t on_route_guidance;
     rtcp_device_time_cb_t on_device_time;
     void *context;
+    void (*configure_metadata)(iap2_session_config_t *);
 } carplay_iap2_tunnel_callbacks_t;
+/* Configure optional Classic metadata for a newly created runtime link. */
+void carplay_app_configure_classic_metadata(iap2_session_config_t *config);
 /* Invoked exclusively by the RTSP owner; independent from the RFCOMM pump. */
 bool carplay_iap2_tunnel_bytes(const uint8_t *, size_t, void *);
 bool carplay_iap2_tunnel_tick(void *);

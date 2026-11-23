@@ -126,8 +126,13 @@ static lv_obj_t *fps_buttons[2];
 static lv_obj_t *bluetooth_name, *bluetooth_keyboard;
 #endif
 static lv_obj_t *phone_appearance_buttons[3];
-static lv_obj_t *phone_title, *phone_artist, *phone_playback;
-static lv_obj_t *phone_road, *phone_destination, *phone_remaining, *phone_route_caption;
+static lv_obj_t *phone_title, *phone_artist, *phone_playback, *phone_progress, *phone_position;
+static lv_obj_t *phone_cover, *phone_cover_placeholder;
+static lv_obj_t *phone_media_caption, *phone_status_caption;
+static lv_obj_t *phone_road, *phone_destination, *phone_remaining, *phone_route_caption, *phone_turn_distance;
+static lv_obj_t *phone_maneuvers[CARPLAY_PHONE_MANEUVER_ROWS], *phone_lane_strip;
+static lv_obj_t *phone_lanes[8];
+static lv_obj_t *phone_power, *phone_cellular, *phone_call, *phone_clock, *phone_clock_mode;
 LV_FONT_DECLARE(carplay_cjk_full_18);
 #if defined(RTCARPLAY_IAP2)
 static lv_obj_t *gnss_latitude, *gnss_longitude, *gnss_keyboard, *gnss_state, *gnss_counts;
@@ -972,7 +977,68 @@ static void build_about(lv_obj_t *parent)
 
 static void build_phone_settings(lv_obj_t *parent)
 {
-    lv_obj_t *appearance = panel(parent, 0, 0, SETTINGS_DETAIL_WIDTH - 4, 102, 16, CARPLAY_STYLE_CARD);
+    lv_obj_t *media = panel(parent, 0, 0, SETTINGS_DETAIL_WIDTH - 4, 148, 16, CARPLAY_STYLE_CARD);
+    lv_obj_t *cover = panel(media, 20, 26, 96, 96, 10, CARPLAY_STYLE_SEGMENT);
+    lv_obj_set_style_clip_corner(cover, true, 0);
+    phone_cover_placeholder = lv_label_create(cover);
+    lv_label_set_text(phone_cover_placeholder, LV_SYMBOL_AUDIO);
+    lv_obj_center(phone_cover_placeholder);
+    phone_cover = lv_image_create(cover);
+    lv_obj_center(phone_cover);
+    lv_obj_add_flag(phone_cover, LV_OBJ_FLAG_HIDDEN);
+    phone_media_caption = text(media, "", 134, 13, 220, &carplay_cjk_full_18, CARPLAY_STYLE_MUTED);
+    phone_playback = text(media, "", 414, 13, 188, &carplay_cjk_full_18, CARPLAY_STYLE_MUTED);
+    lv_obj_set_style_text_align(phone_playback, LV_TEXT_ALIGN_RIGHT, 0);
+    phone_title = text(media, "-", 134, 44, 468, &carplay_cjk_full_18, CARPLAY_STYLE_TEXT);
+    phone_artist = text(media, "", 134, 72, 468, &carplay_cjk_full_18, CARPLAY_STYLE_MUTED);
+    lv_label_set_long_mode(phone_title, LV_LABEL_LONG_DOT);
+    lv_label_set_long_mode(phone_artist, LV_LABEL_LONG_DOT);
+    phone_progress = lv_bar_create(media);
+    lv_obj_set_pos(phone_progress, 134, 104);
+    lv_obj_set_size(phone_progress, 468, 5);
+    lv_obj_remove_flag(phone_progress, LV_OBJ_FLAG_CLICKABLE);
+    carplay_ui_style_part(phone_progress, CARPLAY_STYLE_BAR_BG, LV_PART_MAIN);
+    carplay_ui_style_part(phone_progress, CARPLAY_STYLE_BAR_FILL, LV_PART_INDICATOR);
+    lv_bar_set_range(phone_progress, 0, 1000);
+    phone_position = text(media, "", 134, 116, 468, &carplay_ui_15, CARPLAY_STYLE_MUTED);
+
+    lv_obj_t *route = panel(parent, 0, 160, SETTINGS_DETAIL_WIDTH - 4, 244, 16, CARPLAY_STYLE_CARD);
+    phone_route_caption = text(route, "", 24, 12, 300, &carplay_cjk_full_18, CARPLAY_STYLE_MUTED);
+    phone_remaining = text(route, "", 411, 12, 192, &carplay_cjk_full_18, CARPLAY_STYLE_MUTED);
+    lv_obj_set_style_text_align(phone_remaining, LV_TEXT_ALIGN_RIGHT, 0);
+    phone_destination = text(route, "-", 24, 41, 579, &carplay_cjk_full_18, CARPLAY_STYLE_TEXT);
+    phone_road = text(route, "", 24, 71, 405, &carplay_cjk_full_18, CARPLAY_STYLE_MUTED);
+    phone_turn_distance = text(route, "", 436, 71, 167, &carplay_cjk_full_18, CARPLAY_STYLE_ACCENT_TEXT);
+    lv_obj_set_style_text_align(phone_turn_distance, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_label_set_long_mode(phone_remaining, LV_LABEL_LONG_DOT);
+    lv_label_set_long_mode(phone_destination, LV_LABEL_LONG_DOT);
+    lv_label_set_long_mode(phone_road, LV_LABEL_LONG_DOT);
+    lv_label_set_long_mode(phone_turn_distance, LV_LABEL_LONG_DOT);
+    divider(route, 24, 101, 579, 1);
+    for (unsigned row = 0; row < CARPLAY_PHONE_MANEUVER_ROWS; ++row)
+    {
+        phone_maneuvers[row] = text(route, "", 24, 110 + 24 * (int)row, 579,
+                                    &carplay_cjk_full_18, CARPLAY_STYLE_TEXT);
+        lv_label_set_long_mode(phone_maneuvers[row], LV_LABEL_LONG_DOT);
+    }
+    phone_lane_strip = panel(route, 24, 190, 579, 35, 8, CARPLAY_STYLE_SEGMENT);
+    for (unsigned lane = 0; lane < sizeof(phone_lanes) / sizeof(phone_lanes[0]); ++lane)
+        phone_lanes[lane] = text(phone_lane_strip, "", 13 + 69 * (int)lane, 6, 67,
+                                 LV_FONT_DEFAULT, CARPLAY_STYLE_MUTED);
+
+    lv_obj_t *status = panel(parent, 0, 416, SETTINGS_DETAIL_WIDTH - 4, 155, 16, CARPLAY_STYLE_CARD);
+    phone_status_caption = text(status, "", 24, 12, 579, &carplay_cjk_full_18, CARPLAY_STYLE_MUTED);
+    phone_power = text(status, "", 24, 42, 265, &carplay_cjk_full_18, CARPLAY_STYLE_TEXT);
+    phone_cellular = text(status, "", 302, 42, 301, &carplay_cjk_full_18, CARPLAY_STYLE_TEXT);
+    phone_call = text(status, "", 24, 72, 579, &carplay_cjk_full_18, CARPLAY_STYLE_TEXT);
+    lv_label_set_long_mode(phone_power, LV_LABEL_LONG_DOT);
+    lv_label_set_long_mode(phone_cellular, LV_LABEL_LONG_DOT);
+    divider(status, 24, 102, 579, 1);
+    phone_clock = text(status, "", 24, 115, 325, &carplay_ui_18, CARPLAY_STYLE_TEXT);
+    phone_clock_mode = text(status, "", 349, 115, 254, &carplay_cjk_full_18, CARPLAY_STYLE_MUTED);
+    lv_obj_set_style_text_align(phone_clock_mode, LV_TEXT_ALIGN_RIGHT, 0);
+
+    lv_obj_t *appearance = panel(parent, 0, 583, SETTINGS_DETAIL_WIDTH - 4, 102, 16, CARPLAY_STYLE_CARD);
     text(appearance, "Phone appearance", 24, 30, 255, &carplay_ui_21, CARPLAY_STYLE_TEXT);
     text(appearance, "Auto uses daylight on this board", 24, 69, 550, &carplay_ui_14, CARPLAY_STYLE_FAINT);
     const char *choices[] = { "Auto", "Light", "Dark" };
@@ -981,23 +1047,6 @@ static void build_phone_settings(lv_obj_t *parent)
                                                   100, 50, select_phone_appearance, (void *)(uintptr_t)index,
                                                   &carplay_ui_15);
     apply_segments(phone_appearance_buttons, 3, carplay_app_phone_appearance());
-
-    lv_obj_t *media = panel(parent, 0, 114, SETTINGS_DETAIL_WIDTH - 4, 122, 16, CARPLAY_STYLE_CARD);
-    text(media, "Now Playing", 24, 12, 370, &carplay_ui_18, CARPLAY_STYLE_MUTED);
-    phone_playback = text(media, "", 417, 12, 185, &carplay_cjk_full_18, CARPLAY_STYLE_MUTED);
-    phone_title = text(media, "-", 24, 42, 580, &carplay_cjk_full_18, CARPLAY_STYLE_TEXT);
-    phone_artist = text(media, "", 24, 79, 580, &carplay_cjk_full_18, CARPLAY_STYLE_MUTED);
-    lv_label_set_long_mode(phone_title, LV_LABEL_LONG_DOT);
-    lv_label_set_long_mode(phone_artist, LV_LABEL_LONG_DOT);
-
-    lv_obj_t *route = panel(parent, 0, 248, SETTINGS_DETAIL_WIDTH - 4, 126, 16, CARPLAY_STYLE_CARD);
-    phone_route_caption = text(route, "", 24, 12, 370, &carplay_cjk_full_18, CARPLAY_STYLE_MUTED);
-    phone_remaining = text(route, "", 417, 12, 185, &carplay_cjk_full_18, CARPLAY_STYLE_MUTED);
-    phone_destination = text(route, "-", 24, 42, 580, &carplay_cjk_full_18, CARPLAY_STYLE_TEXT);
-    phone_road = text(route, "", 24, 79, 580, &carplay_cjk_full_18, CARPLAY_STYLE_MUTED);
-    lv_label_set_long_mode(phone_remaining, LV_LABEL_LONG_DOT);
-    lv_label_set_long_mode(phone_destination, LV_LABEL_LONG_DOT);
-    lv_label_set_long_mode(phone_road, LV_LABEL_LONG_DOT);
 }
 
 #if defined(RTCARPLAY_IAP2)
@@ -1192,8 +1241,9 @@ static void update_gnss_settings(void)
 #if defined(RT_USING_RTC)
 static bool read_local_clock(struct tm *value)
 {
-    time_t utc = time(NULL);
-    if (utc <= 0)
+    rt_device_t device = rt_device_find("rtc");
+    time_t utc = 0;
+    if (!device || rt_device_control(device, RT_DEVICE_CTRL_RTC_GET_TIME, &utc) != RT_EOK || utc <= 0)
         return false;
     int64_t local = (int64_t)utc + carplay_app_clock_offset_minutes() * 60L;
     time_t seconds = (time_t)local;
@@ -1207,18 +1257,24 @@ static void format_clock_zone(char *out, size_t size)
     snprintf(out, size, "%c%02d:%02d", offset < 0 ? '-' : '+', minutes / 60, minutes % 60);
 }
 
-static void update_clock_settings(void)
+static void format_local_clock(char *timestamp, size_t size)
 {
     struct tm local;
-    char timestamp[64] = "--";
+    snprintf(timestamp, size, "--");
     if (read_local_clock(&local))
     {
         char zone[12];
         format_clock_zone(zone, sizeof(zone));
-        size_t used = strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", &local);
+        size_t used = strftime(timestamp, size, "%Y-%m-%d %H:%M:%S", &local);
         if (used)
-            snprintf(timestamp + used, sizeof(timestamp) - used, "  UTC%s", zone);
+            snprintf(timestamp + used, size - used, "  UTC%s", zone);
     }
+}
+
+static void update_clock_settings(void)
+{
+    char timestamp[64];
+    format_local_clock(timestamp, sizeof(timestamp));
     set_phone_text(clock_current, timestamp);
 }
 
@@ -1875,6 +1931,183 @@ static void update_connectivity(const demo_status_t *status, bool have_status)
 #endif
 }
 
+#if LV_USE_LODEPNG || (LV_USE_TJPGD && LV_USE_FS_MEMFS && LV_FS_MEMFS_LETTER)
+static bool cover_dimensions(const uint8_t *bytes, size_t size, uint32_t *width, uint32_t *height)
+{
+#if LV_USE_LODEPNG
+    if (size >= 33 && !memcmp(bytes, "\x89PNG\r\n\x1a\n\0\0\0\rIHDR", 16))
+    {
+        *width = ((uint32_t)bytes[16] << 24) | ((uint32_t)bytes[17] << 16) | ((uint32_t)bytes[18] << 8) | bytes[19];
+        *height = ((uint32_t)bytes[20] << 24) | ((uint32_t)bytes[21] << 16) | ((uint32_t)bytes[22] << 8) | bytes[23];
+        return true;
+    }
+#endif
+#if LV_USE_TJPGD && LV_USE_FS_MEMFS && LV_FS_MEMFS_LETTER
+    if (size >= 4 && bytes[0] == 0xff && bytes[1] == 0xd8)
+    {
+        size_t offset = 2;
+        while (size - offset >= 4 && bytes[offset++] == 0xff)
+        {
+            while (offset < size && bytes[offset] == 0xff)
+                ++offset;
+            if (size - offset < 3)
+                return false;
+            uint8_t marker = bytes[offset++];
+            if (marker == 0xd9 || marker == 0xda)
+                return false;
+            size_t length = ((size_t)bytes[offset] << 8) | bytes[offset + 1];
+            if (length < 2 || length > size - offset)
+                return false;
+            if (marker == 0xc0 && length >= 8)
+            {
+                *height = ((uint32_t)bytes[offset + 3] << 8) | bytes[offset + 4];
+                *width = ((uint32_t)bytes[offset + 5] << 8) | bytes[offset + 6];
+                return true;
+            }
+            offset += length;
+        }
+    }
+#endif
+    return false;
+}
+
+static void update_phone_cover(uint32_t revision)
+{
+    static _Alignas(4) uint8_t bytes[CARPLAY_PHONE_ARTWORK_MAX];
+    static lv_image_dsc_t descriptor;
+    static uint32_t shown;
+    if (revision == shown)
+        return;
+    lv_image_cache_drop(&descriptor);
+    lv_obj_add_flag(phone_cover, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(phone_cover_placeholder, LV_OBJ_FLAG_HIDDEN);
+    shown = 0;
+    if (!revision)
+        return;
+
+    size_t size = carplay_app_phone_artwork(revision, bytes, sizeof(bytes));
+    if (!size)
+        return;
+    shown = revision;
+    uint32_t width, height;
+    /* Bound the decoded working set before calling a compressed image decoder. */
+    if (!cover_dimensions(bytes, size, &width, &height) || !width || !height || width > 384 || height > 384)
+        return;
+    descriptor = (lv_image_dsc_t){
+        .header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_RAW, .w = width, .h = height },
+        .data_size = (uint32_t)size,
+        .data = bytes,
+    };
+    lv_image_decoder_dsc_t decoded;
+    if (lv_image_decoder_open(&decoded, &descriptor, NULL) != LV_RESULT_OK)
+        return;
+    lv_image_decoder_close(&decoded);
+    lv_image_set_src(phone_cover, &descriptor);
+    uint32_t longest = width > height ? width : height;
+    lv_image_set_scale(phone_cover, longest > 96 ? 96U * LV_SCALE_NONE / longest : LV_SCALE_NONE);
+    lv_obj_remove_flag(phone_cover, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(phone_cover_placeholder, LV_OBJ_FLAG_HIDDEN);
+}
+#endif
+
+static void format_elapsed(char *text, size_t size, bool valid, uint32_t milliseconds)
+{
+    unsigned seconds = milliseconds / 1000U;
+    if (!valid)
+        snprintf(text, size, "--:--");
+    else if (seconds >= 3600)
+        snprintf(text, size, "%u:%02u:%02u", seconds / 3600U, seconds / 60U % 60U, seconds % 60U);
+    else
+        snprintf(text, size, "%u:%02u", seconds / 60U, seconds % 60U);
+}
+
+static void update_phone_settings(void)
+{
+    carplay_phone_media_t media;
+    if (!carplay_app_phone_media(&media))
+        return;
+    const carplay_phone_track_t *track = &media.track;
+    char detail[300];
+    set_phone_text(phone_title, track->title[0] ? track->title : "-");
+    snprintf(detail, sizeof(detail), "%s%s%s", track->artist,
+             track->artist[0] && track->album[0] ? " / " : "", track->album);
+    set_phone_text(phone_artist, detail);
+    set_phone_text(phone_playback, track->has_playing ? TR(track->playing ? "Playing" : "Not playing") : "");
+    uint32_t duration = track->duration_ms;
+    uint32_t elapsed = track->has_duration && track->elapsed_ms > duration ? duration : track->elapsed_ms;
+    lv_bar_set_value(phone_progress, track->has_duration && track->has_elapsed && duration ? (int32_t)((uint64_t)elapsed * 1000U / duration) : 0, LV_ANIM_OFF);
+    char position[16], length[16];
+    format_elapsed(position, sizeof(position), track->has_elapsed, elapsed);
+    format_elapsed(length, sizeof(length), track->has_duration, duration);
+    snprintf(detail, sizeof(detail), "%s / %s", position, length);
+    set_phone_text(phone_position, track->has_elapsed || track->has_duration ? detail : "");
+#if LV_USE_LODEPNG || (LV_USE_TJPGD && LV_USE_FS_MEMFS && LV_FS_MEMFS_LETTER)
+    update_phone_cover(track->artwork_revision);
+#endif
+
+    set_phone_text(phone_media_caption, TR("Now Playing"));
+    set_phone_text(phone_route_caption, TR("Route guidance"));
+    set_phone_text(phone_status_caption, TR("Phone status"));
+    set_phone_text(phone_destination, media.route_destination[0] ? media.route_destination : "-");
+    set_phone_text(phone_road, media.route_road);
+    set_phone_text(phone_remaining, media.route_remaining);
+    set_phone_text(phone_turn_distance, media.route_turn_distance);
+    for (unsigned row = 0; row < CARPLAY_PHONE_MANEUVER_ROWS; ++row)
+    {
+        const carplay_phone_maneuver_t *maneuver = &media.maneuvers[row];
+        snprintf(detail, sizeof(detail), "%u. %s%s%s", row + 1,
+                 maneuver->instruction[0] ? maneuver->instruction : TR("Upcoming turn"),
+                 maneuver->distance[0] ? "  /  " : "", maneuver->distance);
+        set_phone_text(phone_maneuvers[row], maneuver->present ? detail : "");
+    }
+    if (media.lane_count)
+        lv_obj_remove_flag(phone_lane_strip, LV_OBJ_FLAG_HIDDEN);
+    else
+        lv_obj_add_flag(phone_lane_strip, LV_OBJ_FLAG_HIDDEN);
+    for (size_t lane = 0; lane < sizeof(phone_lanes) / sizeof(phone_lanes[0]); ++lane)
+    {
+        int angle = media.lanes[lane].angle;
+        const char *arrow = angle < -15 ? LV_SYMBOL_LEFT : angle > 15 ? LV_SYMBOL_RIGHT
+                                                                      : LV_SYMBOL_UP;
+        snprintf(detail, sizeof(detail), "%s %d", arrow, angle);
+        set_phone_text(phone_lanes[lane], lane < media.lane_count ? detail : "");
+        lv_obj_set_style_text_color(phone_lanes[lane],
+                                    lv_color_hex(carplay_ui_color(media.lanes[lane].highlighted ? CARPLAY_UI_ACCENT : CARPLAY_UI_MUTED)), 0);
+    }
+
+    static const char * const charging[] = { "Not charging", "Charging", "Charged" };
+    const char *power = media.has_charging && media.charging < 3 ? TR(charging[media.charging]) : media.has_external_power && media.external_power ? TR("External power")
+                                                                                                                                                   : "";
+    char battery[20] = "";
+    if (media.has_battery && media.battery <= 100)
+        snprintf(battery, sizeof(battery), "%u%%", (unsigned)media.battery);
+    snprintf(detail, sizeof(detail), "%s%s%s", battery, battery[0] && power[0] ? "  /  " : "", power);
+    set_phone_text(phone_power, detail[0] ? detail : TR("Battery unavailable"));
+    const char *network = media.carrier[0] ? media.carrier : TR("Cellular");
+    if (media.has_airplane && media.airplane)
+        snprintf(detail, sizeof(detail), "%s", TR("Airplane mode"));
+    else if (media.has_signal)
+        snprintf(detail, sizeof(detail), "%s  /  %s %u", network, TR("Signal"), (unsigned)media.signal);
+    else
+        snprintf(detail, sizeof(detail), "%s", media.carrier[0] ? media.carrier : media.has_cellular && !media.cellular ? TR("Cellular not supported")
+                                                                                                                        : TR("Cellular unavailable"));
+    set_phone_text(phone_cellular, detail);
+    static const char * const call_states[] = {
+        "No active call", "Dialing", "Ringing", "Connecting call", "Call active", "Call on hold", "Ending call"
+    };
+    set_phone_text(phone_call, TR(media.has_call && media.call < sizeof(call_states) / sizeof(call_states[0]) ? call_states[media.call] : "Call status unavailable"));
+#if defined(RT_USING_RTC)
+    format_local_clock(detail, sizeof(detail));
+    set_phone_text(phone_clock, detail);
+    const char *clock_source = !carplay_app_clock_is_automatic() ? "Manual clock" : carplay_app_phone_clock_received() ? "iPhone time received"
+                                                                                                                       : "Waiting for iPhone time";
+    set_phone_text(phone_clock_mode, TR(clock_source));
+#else
+    set_phone_text(phone_clock, "--");
+    set_phone_text(phone_clock_mode, TR("Clock unavailable"));
+#endif
+}
+
 static void update_settings_state(void)
 {
     static unsigned last_theme = UINT32_MAX, last_language = UINT32_MAX;
@@ -1891,20 +2124,7 @@ static void update_settings_state(void)
         update_gnss_settings();
 #endif
     if (!lv_obj_has_flag(settings_pages[SETTINGS_PHONE], LV_OBJ_FLAG_HIDDEN))
-    {
-        set_phone_text(phone_route_caption, TR("Route guidance"));
-        carplay_phone_media_t media = { 0 };
-        (void)carplay_app_phone_media(&media);
-        const char *title = media.title[0] ? media.title : "-";
-        set_phone_text(phone_title, title);
-        set_phone_text(phone_artist, media.artist);
-        const char *playback = media.has_playing ? (media.playing ? "Playing" : "Not playing") : "";
-        set_phone_text(phone_playback, TR(playback));
-        const char *destination = media.route_destination[0] ? media.route_destination : "-";
-        set_phone_text(phone_destination, destination);
-        set_phone_text(phone_road, media.route_road);
-        set_phone_text(phone_remaining, media.route_remaining);
-    }
+        update_phone_settings();
 
     (void)have;
     if (last_theme != theme_choice)

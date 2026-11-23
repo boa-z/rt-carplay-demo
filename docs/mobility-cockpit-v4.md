@@ -61,6 +61,14 @@ The Settings page writes the display mode through `carplay_connection_set_displa
 
 The page reads and controls the existing `carplay_ota_*` service only (`platform/ota_lubanlite.c`). It shows the firmware-provided installed version and slot, and the service's checking/up-to-date/available/downloading/applying/rebooting/failed states with progress when known. Check and install are queued, never waited on inside the LVGL task, and Install asks for confirmation with the target version. When the build has no OTA service, or the device has no network, the controls are disabled and the backend line says unavailable. No endpoint, partition or signature check is invented, and no UI timer fabricates a successful flash.
 
+## Phone Controls
+
+Wired USB iAP2 and wireless AirPlay iAP2 use the same subscriptions for Now Playing, route guidance and iPhone status. `carplay_classic_diag on` enables serial diagnostics for either transport.
+
+Open **Settings → Phone Controls** to see Now Playing, route guidance and phone status. Now Playing displays the received track, artist, album, playback state, elapsed time and duration. The D213 Demo accepts AirPlay PNG and baseline JPEG artwork up to 96 KiB and 384×384 pixels. When a cover is unavailable it displays a music icon. The navigation card shows the reported destination, current road, remaining distance, next-turn distance, up to three announced maneuvers in order and up to eight lane indicators. The status card displays the reported battery, charging, cellular and call information when present. It shows local board RTC time and distinguishes manual mode, waiting for iPhone time and receipt of a phone time sample. **Settings → Date & time** controls how the board clock is set.
+
+**Implemented / Host Tested.** The integration and LVGL preview exercise these display paths with modeled values, including field clearing and artwork fallback. **Hardware Pending.** On D213, connect an iPhone over USB and then wirelessly. Change tracks, pause playback, and check received artwork and progress. Start and cancel a route with upcoming turns and lane guidance. Check phone status during charging and a call, verify local time and the selected clock mode, then disconnect and reconnect. Session data should clear on disconnect and return as updates arrive. The board RTC should keep running.
+
 ## Evidence
 
 Render the current UI using the LVGL 9 software renderer at 1024×600. The launcher preview covers settings and the GNSS editor. The fusion preview covers the instrument strip and full-screen transitions.

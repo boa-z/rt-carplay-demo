@@ -16,4 +16,8 @@
 #define LV_USE_FONT_COMPRESSED 1
 #define LV_THEME_DEFAULT_DARK  1
 #define LV_USE_THORVG_INTERNAL 0
+#define LV_USE_LODEPNG         1
+#define LV_USE_TJPGD           1
+#define LV_USE_FS_MEMFS        1
+#define LV_FS_MEMFS_LETTER     'M'
 #endif

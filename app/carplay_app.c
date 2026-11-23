@@ -64,11 +64,36 @@
 #include "fusion_display.h"
 #endif
 
-#if defined(RTCARPLAY_IAP2)
+#if defined(RTCARPLAY_IAP2) || defined(RTCARPLAY_USB_HOST)
 #include "iap2_link_lubanlite.h"
 #endif
 
 #define APP_LOG(fmt, ...) rt_kprintf("[carplay] " fmt "\n", ##__VA_ARGS__)
+
+static atomic_bool s_classic_diagnostics;
+
+static void on_classic_playback(const rtcp_now_playing_details_t *update, void *context)
+{
+    (void)context;
+    if (!atomic_load(&s_classic_diagnostics))
+        return;
+    APP_LOG("classic playback clear=%u duration=%u/%u elapsed=%u/%u artwork=%u/%u transfer=%u",
+            (unsigned)update->invalidated, (unsigned)update->has_duration, (unsigned)update->duration_ms,
+            (unsigned)update->has_elapsed, (unsigned)update->elapsed_ms,
+            (unsigned)update->has_artwork, (unsigned)update->artwork_length, (unsigned)update->has_artwork_transfer_id);
+}
+
+static int cmd_carplay_classic_diag(int argc, char **argv)
+{
+    if (argc == 2 && (!strcmp(argv[1], "on") || !strcmp(argv[1], "off")))
+        atomic_store(&s_classic_diagnostics, !strcmp(argv[1], "on"));
+    else if (argc != 1)
+        return RTCP_EINVAL;
+    APP_LOG("classic diagnostics %s",
+            atomic_load(&s_classic_diagnostics) ? "on" : "off");
+    return RTCP_OK;
+}
+MSH_CMD_EXPORT_ALIAS(cmd_carplay_classic_diag, carplay_classic_diag, Toggle Classic metadata diagnostics);
 
 #if defined(RTCARPLAY_DEMO_LAUNCHER)
 static const rtcp_oem_icon_t demo_oem_icon = {
@@ -83,6 +108,7 @@ static const rtcp_oem_icon_t demo_oem_icon = {
 static rtcp_device_time_t s_pending_phone_time;
 static atomic_int s_phone_clock_offset = ATOMIC_VAR_INIT(INT_MIN);
 static atomic_bool s_clock_automatic = ATOMIC_VAR_INIT(true);
+static atomic_bool s_phone_clock_received;
 static struct rt_mutex s_clock_lock;
 
 static int init_clock_lock(void)
@@ -95,6 +121,15 @@ void carplay_app_on_device_time(const rtcp_device_time_t *update, void *context)
 {
     (void)context;
     rt_base_t irq = rt_hw_interrupt_disable();
+    if (!update)
+    {
+        s_pending_phone_time = (rtcp_device_time_t){ 0 };
+        atomic_store(&s_phone_clock_received, false);
+        rt_hw_interrupt_enable(irq);
+        return;
+    }
+    if (update->has_unix_seconds)
+        atomic_store(&s_phone_clock_received, true);
     if (!atomic_load(&s_clock_automatic))
     {
         rt_hw_interrupt_enable(irq);
@@ -116,6 +151,11 @@ void carplay_app_on_device_time(const rtcp_device_time_t *update, void *context)
         s_pending_phone_time.daylight_saving_offset_minutes = update->daylight_saving_offset_minutes;
     }
     rt_hw_interrupt_enable(irq);
+}
+
+bool carplay_app_phone_clock_received(void)
+{
+    return atomic_load(&s_phone_clock_received);
 }
 
 int carplay_app_clock_offset_minutes(void)
@@ -432,6 +472,14 @@ typedef struct
     carplay_phone_action_t phone_action_pending;
     int phone_appearance_sent;
     carplay_phone_media_t phone_media;
+    carplay_phone_track_t iap2_track;
+    size_t phone_artwork_size;
+#if defined(RTCARPLAY_IAP2) || defined(RTCARPLAY_USB_HOST)
+    carplay_phone_maneuver_t maneuver_cache[8];
+    unsigned maneuver_slot;
+    bool has_lane_index, has_lane_payload, lanes_hidden;
+    uint16_t lane_index, lane_payload_index;
+#endif
 #if defined(RTCARPLAY_IAP2)
     carplay_iap2_tunnel_callbacks_t tunnel_callbacks;
 #endif
@@ -462,6 +510,10 @@ typedef struct
 } app_state_t;
 
 static app_state_t s_app;
+#if defined(RTCARPLAY_DEMO_LAUNCHER)
+static uint8_t s_phone_artwork[CARPLAY_PHONE_ARTWORK_MAX];
+static uint32_t s_artwork_revision;
+#endif
 /* Publication flags must survive reset of the per-session data. Lifecycle
  * entry is nonblocking: concurrent/reentrant start/stop returns ESTATE. */
 static atomic_flag s_lifecycle_call = ATOMIC_FLAG_INIT;
@@ -807,46 +859,286 @@ static void on_volume(float volume_db, void *context)
 }
 #endif
 
-static void on_now_playing(const rtcp_now_playing_t *update, void *context)
+static void copy_phone_text(char *destination, size_t size, const char *text)
+{
+    if (text)
+        rt_snprintf(destination, size, "%s", text);
+}
+
+static void update_phone_track(carplay_phone_track_t *track, const rtcp_now_playing_details_t *update)
+{
+    if (update->invalidated)
+    {
+        *track = (carplay_phone_track_t){ 0 };
+        return;
+    }
+    if (update->item.title && strcmp(track->title, update->item.title))
+    {
+        track->has_duration = false;
+        track->has_elapsed = false;
+        track->artwork_revision = 0;
+    }
+    copy_phone_text(track->title, sizeof(track->title), update->item.title);
+    copy_phone_text(track->artist, sizeof(track->artist), update->item.artist);
+    copy_phone_text(track->album, sizeof(track->album), update->item.album);
+    if (update->item.has_playing)
+    {
+        track->has_playing = true;
+        track->playing = update->item.playing;
+    }
+    if (update->has_duration)
+    {
+        track->has_duration = true;
+        track->duration_ms = update->duration_ms;
+    }
+    if (update->has_elapsed)
+    {
+        track->has_elapsed = true;
+        track->elapsed_ms = update->elapsed_ms;
+    }
+}
+
+static void on_airplay_metadata(const rtcp_now_playing_details_t *update, void *context)
 {
     app_state_t *app = context;
-    if (rt_mutex_take(app->lock, RT_WAITING_FOREVER) != RT_EOK)
+    on_classic_playback(update, context);
+    if (!app->lock || rt_mutex_take(app->lock, RT_WAITING_FOREVER) != RT_EOK)
         return;
-    if (update->title)
-        rt_snprintf(app->phone_media.title, sizeof(app->phone_media.title), "%s", update->title);
-    if (update->artist)
-        rt_snprintf(app->phone_media.artist, sizeof(app->phone_media.artist), "%s", update->artist);
-    if (update->has_playing)
+    carplay_phone_track_t *track = &app->phone_media.track;
+    update_phone_track(track, update);
+#if defined(RTCARPLAY_DEMO_LAUNCHER)
+    if (update->has_artwork)
     {
-        app->phone_media.has_playing = true;
-        app->phone_media.playing = update->playing;
+        if (update->artwork && update->artwork_length && update->artwork_length <= sizeof(s_phone_artwork))
+        {
+            if (!track->artwork_revision || app->phone_artwork_size != update->artwork_length ||
+                memcmp(s_phone_artwork, update->artwork, update->artwork_length))
+            {
+                memcpy(s_phone_artwork, update->artwork, update->artwork_length);
+                app->phone_artwork_size = update->artwork_length;
+                if (++s_artwork_revision == 0)
+                    ++s_artwork_revision;
+                track->artwork_revision = s_artwork_revision;
+            }
+        }
+        else
+        {
+            track->artwork_revision = 0;
+        }
     }
+#endif
+    if (!track->artwork_revision)
+        app->phone_artwork_size = 0;
     (void)rt_mutex_release(app->lock);
 }
 
-#if defined(RTCARPLAY_IAP2)
-static void on_route_guidance(const rtcp_route_guidance_t *update, void *context)
+static void clear_phone_media(app_state_t *app)
 {
-    app_state_t *app = context;
-    if (rt_mutex_take(app->lock, RT_WAITING_FOREVER) != RT_EOK)
+    memset(&app->phone_media, 0, sizeof(app->phone_media));
+    app->iap2_track = (carplay_phone_track_t){ 0 };
+    app->phone_artwork_size = 0;
+#ifdef RT_USING_RTC
+    atomic_store(&s_phone_clock_received, false);
+#endif
+#if defined(RTCARPLAY_IAP2) || defined(RTCARPLAY_USB_HOST)
+    memset(app->maneuver_cache, 0, sizeof(app->maneuver_cache));
+    app->maneuver_slot = 0;
+    app->has_lane_index = app->has_lane_payload = app->lanes_hidden = false;
+#endif
+}
+
+#if defined(RTCARPLAY_IAP2) || defined(RTCARPLAY_USB_HOST)
+static bool phone_metadata_enter(void)
+{
+    if (!snapshot_enter())
+        return false;
+    if (s_receiver_running && !s_receiver_shutting_down && s_app.lock &&
+        rt_mutex_take(s_app.lock, RT_WAITING_FOREVER) == RT_EOK)
+        return true;
+    snapshot_leave();
+    return false;
+}
+
+static void phone_metadata_leave(void)
+{
+    (void)rt_mutex_release(s_app.lock);
+    snapshot_leave();
+}
+
+static void on_iap2_playback(const rtcp_now_playing_details_t *update, void *context)
+{
+    on_classic_playback(update, context);
+    if (!phone_metadata_enter())
         return;
-    carplay_phone_media_t *media = &app->phone_media;
-    if (update->has_state && update->state == 0U)
+    update_phone_track(&s_app.iap2_track, update);
+    phone_metadata_leave();
+}
+
+static void on_classic_phone(const rtcp_phone_status_t *update, void *context)
+{
+    (void)context;
+    if (atomic_load(&s_classic_diagnostics))
+        APP_LOG("classic phone kind=%u", (unsigned)update->kind);
+    if (!phone_metadata_enter())
+        return;
+    carplay_phone_media_t *media = &s_app.phone_media;
+    switch (update->kind)
     {
-        media->route_road[0] = '\0';
-        media->route_destination[0] = '\0';
-        media->route_remaining[0] = '\0';
+    case RTCP_PHONE_STATUS_INVALIDATED:
+        media->has_battery = media->has_charging = media->has_signal = media->has_airplane = false;
+        media->has_call = media->has_external_power = media->has_cellular = false;
+        media->carrier[0] = '\0';
+        break;
+    case RTCP_PHONE_STATUS_POWER:
+        if (update->data.power.has_battery_level)
+        {
+            media->has_battery = true;
+            media->battery = update->data.power.battery_level;
+        }
+        if (update->data.power.has_charging_state)
+        {
+            media->has_charging = true;
+            media->charging = update->data.power.charging_state;
+        }
+        if (update->data.power.has_external_charger)
+        {
+            media->has_external_power = true;
+            media->external_power = update->data.power.external_charger;
+        }
+        break;
+    case RTCP_PHONE_STATUS_CELLULAR:
+        copy_phone_text(media->carrier, sizeof(media->carrier), update->data.cellular.carrier);
+        if (update->data.cellular.signal_strength)
+        {
+            media->has_signal = update->data.cellular.signal_strength_count > 0;
+            if (media->has_signal)
+                media->signal = update->data.cellular.signal_strength[0];
+        }
+        if (update->data.cellular.has_airplane_mode)
+        {
+            media->has_airplane = true;
+            media->airplane = update->data.cellular.airplane_mode;
+        }
+        if (update->data.cellular.has_cellular_supported)
+        {
+            media->has_cellular = true;
+            media->cellular = update->data.cellular.cellular_supported;
+        }
+        break;
+    case RTCP_PHONE_STATUS_CALL:
+        if (update->data.call.has_status)
+        {
+            media->has_call = true;
+            media->call = update->data.call.status;
+        }
+        break;
+    }
+    phone_metadata_leave();
+}
+
+static void on_classic_route(const rtcp_route_details_t *update, void *context)
+{
+    (void)context;
+    if (atomic_load(&s_classic_diagnostics))
+        APP_LOG("classic route clear=%u order=%u lanes=%u",
+                (unsigned)update->invalidated, (unsigned)update->maneuver_index_count, (unsigned)update->lane_count);
+    if (!phone_metadata_enter())
+        return;
+    carplay_phone_media_t *media = &s_app.phone_media;
+    if (update->invalidated)
+    {
+        media->route_road[0] = media->route_destination[0] = media->route_remaining[0] = media->route_turn_distance[0] = '\0';
+        memset(media->maneuvers, 0, sizeof(media->maneuvers));
+        memset(s_app.maneuver_cache, 0, sizeof(s_app.maneuver_cache));
+        s_app.maneuver_slot = 0;
+        media->lane_count = 0;
+        s_app.has_lane_index = s_app.has_lane_payload = s_app.lanes_hidden = false;
     }
     else
     {
-        if (update->road)
-            rt_snprintf(media->route_road, sizeof(media->route_road), "%s", update->road);
-        if (update->destination)
-            rt_snprintf(media->route_destination, sizeof(media->route_destination), "%s", update->destination);
-        if (update->distance_remaining)
-            rt_snprintf(media->route_remaining, sizeof(media->route_remaining), "%s", update->distance_remaining);
+        copy_phone_text(media->route_road, sizeof(media->route_road), update->guidance.road);
+        copy_phone_text(media->route_destination, sizeof(media->route_destination), update->guidance.destination);
+        copy_phone_text(media->route_remaining, sizeof(media->route_remaining), update->guidance.distance_remaining);
+        copy_phone_text(media->route_turn_distance, sizeof(media->route_turn_distance), update->guidance.distance_to_maneuver);
+        if (update->maneuver_indices)
+        {
+            memset(media->maneuvers, 0, sizeof(media->maneuvers));
+            for (size_t row = 0; row < CARPLAY_PHONE_MANEUVER_ROWS && row < update->maneuver_index_count; ++row)
+            {
+                media->maneuvers[row].present = true;
+                media->maneuvers[row].index = update->maneuver_indices[row];
+            }
+        }
+        if (update->has_lane_index)
+        {
+            s_app.has_lane_index = true;
+            s_app.lane_index = update->lane_index;
+        }
+        if (update->has_lanes_shown)
+        {
+            s_app.lanes_hidden = !update->lanes_shown;
+            if (s_app.lanes_hidden)
+            {
+                media->lane_count = 0;
+                s_app.has_lane_payload = false;
+            }
+        }
     }
-    (void)rt_mutex_release(app->lock);
+    phone_metadata_leave();
+}
+
+static void on_classic_maneuver(const rtcp_route_maneuver_t *update, void *context)
+{
+    (void)context;
+    if (atomic_load(&s_classic_diagnostics))
+        APP_LOG("classic maneuver index=%u", (unsigned)update->index);
+    if (!phone_metadata_enter())
+        return;
+    const unsigned capacity = sizeof(s_app.maneuver_cache) / sizeof(s_app.maneuver_cache[0]);
+    unsigned slot = 0;
+    while (slot < capacity && (!s_app.maneuver_cache[slot].present || s_app.maneuver_cache[slot].index != update->index))
+        ++slot;
+    if (slot == capacity)
+    {
+        slot = s_app.maneuver_slot++ % capacity;
+        s_app.maneuver_cache[slot] = (carplay_phone_maneuver_t){ .present = true, .index = update->index };
+    }
+    carplay_phone_maneuver_t *maneuver = &s_app.maneuver_cache[slot];
+    copy_phone_text(maneuver->instruction, sizeof(maneuver->instruction),
+                    update->description ? update->description : update->road_after);
+    copy_phone_text(maneuver->distance, sizeof(maneuver->distance), update->distance);
+    phone_metadata_leave();
+}
+
+static void on_classic_lanes(const rtcp_lane_guidance_t *update, void *context)
+{
+    (void)context;
+    if (atomic_load(&s_classic_diagnostics))
+        APP_LOG("classic lanes index=%u count=%u", (unsigned)update->index, (unsigned)update->lane_count);
+    if (!update->lanes || !phone_metadata_enter())
+        return;
+    s_app.has_lane_payload = true;
+    s_app.lane_payload_index = update->index;
+    carplay_phone_media_t *media = &s_app.phone_media;
+    const size_t capacity = sizeof(media->lanes) / sizeof(media->lanes[0]);
+    media->lane_count = update->lane_count < capacity ? update->lane_count : capacity;
+    for (size_t lane = 0; lane < media->lane_count; ++lane)
+    {
+        const rtcp_lane_t *source = &update->lanes[lane];
+        media->lanes[lane].highlighted = source->has_highlight_angle;
+        media->lanes[lane].angle = source->has_highlight_angle ? source->highlight_angle : source->angle_count ? source->angles[0]
+                                                                                                               : 0;
+    }
+    phone_metadata_leave();
+}
+
+void carplay_app_configure_classic_metadata(iap2_session_config_t *config)
+{
+    config->on_phone_status = on_classic_phone;
+    config->on_now_playing_details = on_iap2_playback;
+    config->on_route_details = on_classic_route;
+    config->on_route_maneuver = on_classic_maneuver;
+    config->on_lane_guidance = on_classic_lanes;
 }
 #endif
 
@@ -895,7 +1187,7 @@ static void on_event_state(bool connected, void *context)
         app->phone_action_pending = 0;
         app->siri_pending = false;
         app->projection_pending = 0;
-        memset(&app->phone_media, 0, sizeof(app->phone_media));
+        clear_phone_media(app);
         (void)rt_mutex_release(app->lock);
     }
     APP_LOG("event channel %s", connected ? "connected" : "closed");
@@ -1447,6 +1739,7 @@ static void poll_thread(void *argument)
         {
             rtcp_receiver_diagnostics_t diagnostics;
             (void)rtcp_receiver_get_diagnostics(app->receiver, &diagnostics);
+            bool previously_connected = app->receiver_state.transport_connected;
             (void)rtcp_receiver_get_state(app->receiver, &app->receiver_state);
             app->projection_owner = rtcp_receiver_get_projection_owner(app->receiver);
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
@@ -1456,8 +1749,8 @@ static void poll_thread(void *argument)
                 app->projection_pause_waiting = false;
             }
 #endif
-            if (!app->receiver_state.transport_connected)
-                memset(&app->phone_media, 0, sizeof(app->phone_media));
+            if (previously_connected && !app->receiver_state.transport_connected)
+                clear_phone_media(app);
             app->screen_stats = diagnostics.screen;
             app->audio_stats = diagnostics.audio;
             app->timing_stats = diagnostics.timing;
@@ -2009,12 +2302,11 @@ static int carplay_app_start_owned(const carplay_app_config_t *config)
 #if defined(RTCARPLAY_IAP2)
     if (!app->wired)
     {
-        app->tunnel_callbacks.on_now_playing = on_now_playing;
-        app->tunnel_callbacks.on_route_guidance = on_route_guidance;
 #ifdef RT_USING_RTC
         app->tunnel_callbacks.on_device_time = carplay_app_on_device_time;
 #endif
         app->tunnel_callbacks.context = app;
+        app->tunnel_callbacks.configure_metadata = carplay_app_configure_classic_metadata;
         receiver_config.iap2.context = &app->tunnel_callbacks;
         receiver_config.iap2.on_bytes = carplay_iap2_tunnel_bytes;
         receiver_config.iap2.on_tick = carplay_iap2_tunnel_tick;
@@ -2038,7 +2330,7 @@ static int carplay_app_start_owned(const carplay_app_config_t *config)
 #endif
     result = rtcp_receiver_create(&receiver_config, &app->receiver);
     if (result == RTCP_OK)
-        (void)rtcp_receiver_set_now_playing_callback(app->receiver, on_now_playing, app);
+        (void)rtcp_receiver_set_now_playing_details_callback(app->receiver, on_airplay_metadata, app);
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
     if (result == RTCP_OK)
         (void)rtcp_receiver_set_host_ui_callback(app->receiver, on_host_ui, app);
@@ -2589,10 +2881,11 @@ static int carplay_status_owned(int argc, char **argv)
         queued = s_app.touch_queued;
         full = s_app.touch_queue_full;
         projection_owner = s_app.projection_owner;
-        media_title = s_app.phone_media.title[0] != '\0';
-        media_artist = s_app.phone_media.artist[0] != '\0';
-        media_state = s_app.phone_media.has_playing;
-        playing = s_app.phone_media.playing;
+        const carplay_phone_track_t *track = s_app.phone_media.track.title[0] ? &s_app.phone_media.track : &s_app.iap2_track;
+        media_title = track->title[0] != '\0';
+        media_artist = track->artist[0] != '\0';
+        media_state = track->has_playing;
+        playing = track->playing;
         route_road = s_app.phone_media.route_road[0] != '\0';
         route_destination = s_app.phone_media.route_destination[0] != '\0';
         route_remaining = s_app.phone_media.route_remaining[0] != '\0';
@@ -3149,18 +3442,76 @@ int carplay_app_phone_action(carplay_phone_action_t action)
 
 bool carplay_app_phone_media(carplay_phone_media_t *media)
 {
-    if (!media || !snapshot_enter())
+    if (!media)
         return false;
-    bool available = false;
-    if (s_receiver_running && !s_receiver_shutting_down && s_app.lock &&
-        rt_mutex_take(s_app.lock, RT_WAITING_NO) == RT_EOK)
+    *media = (carplay_phone_media_t){ 0 };
+    if (!snapshot_enter())
+        return true;
+    bool available = true;
+    if (s_receiver_running && !s_receiver_shutting_down && s_app.lock)
     {
-        *media = s_app.phone_media;
-        available = true;
-        (void)rt_mutex_release(s_app.lock);
+        available = rt_mutex_take(s_app.lock, RT_WAITING_NO) == RT_EOK;
+        if (available)
+        {
+            *media = s_app.phone_media;
+            if (!media->track.title[0] && s_app.iap2_track.title[0])
+                media->track = s_app.iap2_track;
+            else if (media->track.title[0] && !strcmp(media->track.title, s_app.iap2_track.title) &&
+                     !strcmp(media->track.artist, s_app.iap2_track.artist))
+            {
+                if (!media->track.has_duration)
+                {
+                    media->track.has_duration = s_app.iap2_track.has_duration;
+                    media->track.duration_ms = s_app.iap2_track.duration_ms;
+                }
+                if (!media->track.has_elapsed)
+                {
+                    media->track.has_elapsed = s_app.iap2_track.has_elapsed;
+                    media->track.elapsed_ms = s_app.iap2_track.elapsed_ms;
+                }
+            }
+#if defined(RTCARPLAY_IAP2) || defined(RTCARPLAY_USB_HOST)
+            for (size_t row = 0; row < CARPLAY_PHONE_MANEUVER_ROWS && media->maneuvers[row].present; ++row)
+                for (size_t slot = 0; slot < sizeof(s_app.maneuver_cache) / sizeof(s_app.maneuver_cache[0]); ++slot)
+                    if (s_app.maneuver_cache[slot].present && s_app.maneuver_cache[slot].index == media->maneuvers[row].index)
+                    {
+                        media->maneuvers[row] = s_app.maneuver_cache[slot];
+                        break;
+                    }
+            if (s_app.lanes_hidden ||
+                (s_app.has_lane_index && (!s_app.has_lane_payload || s_app.lane_payload_index != s_app.lane_index)))
+                media->lane_count = 0;
+#endif
+            (void)rt_mutex_release(s_app.lock);
+        }
     }
     snapshot_leave();
     return available;
+}
+
+size_t carplay_app_phone_artwork(uint32_t revision, uint8_t *buffer, size_t capacity)
+{
+    size_t size = 0;
+#if defined(RTCARPLAY_DEMO_LAUNCHER)
+    if (!revision || !buffer || !snapshot_enter())
+        return 0;
+    if (s_receiver_running && !s_receiver_shutting_down && s_app.lock &&
+        rt_mutex_take(s_app.lock, RT_WAITING_NO) == RT_EOK)
+    {
+        if (revision == s_app.phone_media.track.artwork_revision && s_app.phone_artwork_size <= capacity)
+        {
+            size = s_app.phone_artwork_size;
+            memcpy(buffer, s_phone_artwork, size);
+        }
+        (void)rt_mutex_release(s_app.lock);
+    }
+    snapshot_leave();
+#else
+    (void)revision;
+    (void)buffer;
+    (void)capacity;
+#endif
+    return size;
 }
 static int cmd_carplay_siri(int argc, char **argv)
 {

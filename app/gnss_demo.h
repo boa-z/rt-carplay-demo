@@ -37,7 +37,7 @@ typedef struct
 {
     bool tunnel, advertised, fixture_clock;
     carplay_gnss_motion_t motion;
-    unsigned requested, gga_queued, rmc_queued, failed;
+    unsigned requested, gga_queued, rmc_queued, pascd_queued, failed;
 } carplay_gnss_status_t;
 
 bool carplay_gnss_get_config(carplay_gnss_config_t *);

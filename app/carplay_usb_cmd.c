@@ -34,6 +34,7 @@
 #include <stdatomic.h>
 
 #include "carplay_app.h"
+#include "iap2_link_lubanlite.h"
 #include "carplay_usb.h"
 #include "usb_pair_cache.h"
 #include "rtcp/plist.h"
@@ -1107,6 +1108,7 @@ static int cmd_iap2(void)
     config.on_event = iap2_usb_event;
 #ifdef RT_USING_RTC
     config.on_device_time = carplay_app_on_device_time;
+    config.notify_device_time_invalidation = true;
 #endif
 #ifdef RTCARPLAY_WIRED_PROTOCOL_TRACE
     config.observe_message = iap2_usb_observe;
@@ -1115,6 +1117,7 @@ static int cmd_iap2(void)
     config.transport = IAP2_SESSION_TRANSPORT_WIRED_USB;
     config.car_play_interface_number = (uint8_t)interface_number;
 
+    carplay_app_configure_classic_metadata(&config);
     s_iap2_usb.session = iap2_session_create(&config);
     if (s_iap2_usb.session == NULL)
     {

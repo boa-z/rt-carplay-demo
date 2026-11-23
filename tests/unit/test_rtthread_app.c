@@ -14,7 +14,8 @@
 #ifndef TEST_LEGACY_WIRED_IDENTITY
 #define RTCARPLAY_NATIVE_NCM 1
 #endif
-#define RTCARPLAY_BT 1
+#define RTCARPLAY_BT       1
+#define RTCARPLAY_USB_HOST 1
 #include "../../app/carplay_app.c"
 #include "../../app/pairing_files.c"
 
@@ -496,8 +497,58 @@ static void test_viewport_metadata(void)
     free(app);
 }
 #endif
+static void test_phone_media(void)
+{
+    for (unsigned wireless = 0; wireless < 2; ++wireless)
+    {
+        iap2_session_config_t metadata = { .airplay_tunnel = wireless != 0 };
+        carplay_app_configure_classic_metadata(&metadata);
+        assert(metadata.on_now_playing_details && metadata.on_phone_status);
+        assert(metadata.on_route_details && metadata.on_route_maneuver && metadata.on_lane_guidance);
+        rtcp_phone_status_t status = {
+            .kind = RTCP_PHONE_STATUS_POWER,
+            .data.power = { .has_battery_level = true, .battery_level = 75 },
+        };
+        metadata.on_phone_status(&status, NULL);
+        carplay_phone_media_t snapshot;
+        assert(carplay_app_phone_media(&snapshot) && snapshot.has_battery && snapshot.battery == 75);
+        status.kind = RTCP_PHONE_STATUS_INVALIDATED;
+        metadata.on_phone_status(&status, NULL);
+        assert(carplay_app_phone_media(&snapshot) && !snapshot.has_battery);
+    }
+    rtcp_now_playing_details_t track = {
+        .item = { .title = "First track", .artist = "First artist" },
+        .has_duration = true,
+        .duration_ms = 180000,
+    };
+    on_airplay_metadata(&track, &s_app);
+    rtcp_now_playing_details_t progress = { .has_elapsed = true, .elapsed_ms = 90000 };
+    on_airplay_metadata(&progress, &s_app);
+    carplay_phone_media_t media;
+    assert(carplay_app_phone_media(&media));
+    assert(!strcmp(media.track.title, "First track"));
+    assert(media.track.has_duration && media.track.duration_ms == 180000);
+    assert(media.track.has_elapsed && media.track.elapsed_ms == 90000);
+
+    track = (rtcp_now_playing_details_t){ .item = { .title = "Second track", .artist = "" } };
+    on_airplay_metadata(&track, &s_app);
+    assert(carplay_app_phone_media(&media));
+    assert(!strcmp(media.track.title, "Second track") && !*media.track.artist);
+    assert(!media.track.has_duration && !media.track.has_elapsed);
+
+    on_event_state(false, &s_app);
+    assert(carplay_app_phone_media(&media) && !*media.track.title);
+}
+
 int main(void)
 {
+    char *enable_diag[] = { "carplay_classic_diag", "on" };
+    char *disable_diag[] = { "carplay_classic_diag", "off" };
+    assert(!atomic_load(&s_classic_diagnostics));
+    assert(cmd_carplay_classic_diag(2, enable_diag) == RTCP_OK);
+    assert(atomic_load(&s_classic_diagnostics));
+    assert(cmd_carplay_classic_diag(2, disable_diag) == RTCP_OK);
+    assert(!atomic_load(&s_classic_diagnostics));
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
     test_viewport_metadata();
 #endif
@@ -545,6 +596,8 @@ int main(void)
     {
         assert(carplay_app_start(&config) == RTCP_OK);
         assert(carplay_app_is_running() && pending && live_mutexes == 1);
+        if (cycle == 0)
+            test_phone_media();
 #ifdef RTCARPLAY_NATIVE_NCM
         char expected_id[18];
         snprintf(expected_id, sizeof(expected_id), "%02X:%02X:%02X:%02X:%02X:%02X",

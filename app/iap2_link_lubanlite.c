@@ -329,18 +329,6 @@ static const struct rtcp_mfi *link_mfi(void)
     return NULL;
 }
 
-static void link_now_playing(const rtcp_now_playing_t *update, void *context)
-{
-    const iap2_link_t *link = context;
-    link->tunnel_callbacks->on_now_playing(update, link->tunnel_callbacks->context);
-}
-
-static void link_route_guidance(const rtcp_route_guidance_t *update, void *context)
-{
-    const iap2_link_t *link = context;
-    link->tunnel_callbacks->on_route_guidance(update, link->tunnel_callbacks->context);
-}
-
 static void link_device_time(const rtcp_device_time_t *update, void *context)
 {
     const iap2_link_t *link = context;
@@ -393,14 +381,16 @@ static int link_session_create(iap2_link_t *link, const struct rtcp_mfi *mfi)
     {
         carplay_gnss_config_t gnss;
         config.identity.provide_location = carplay_gnss_get_config(&gnss) && gnss.enabled;
+        config.identity.provide_vehicle_speed = config.identity.provide_location;
     }
-    if (link->tunnel_callbacks && link->tunnel_callbacks->on_now_playing)
-        config.on_now_playing = link_now_playing;
-    if (link->tunnel_callbacks && link->tunnel_callbacks->on_route_guidance)
-        config.on_route_guidance = link_route_guidance;
     if (config.airplay_tunnel && link->tunnel_callbacks && link->tunnel_callbacks->on_device_time)
+    {
         config.on_device_time = link_device_time;
+        config.notify_device_time_invalidation = true;
+    }
 
+    if (config.airplay_tunnel && link->tunnel_callbacks && link->tunnel_callbacks->configure_metadata)
+        link->tunnel_callbacks->configure_metadata(&config);
     link->session = iap2_session_create(&config);
     if (config.airplay_tunnel && link->session)
     {
@@ -1169,6 +1159,7 @@ static void tunnel_send_gnss(uint64_t now)
     if (requested != s_gnss.requested)
     {
         s_gnss.requested = requested;
+        s_gnss_next_ms = now;
         carplay_gnss_publish_status(&s_gnss);
     }
     carplay_gnss_config_t gnss;
@@ -1183,13 +1174,25 @@ static void tunnel_send_gnss(uint64_t now)
     }
     carplay_gnss_fix_t fix = carplay_gnss_sample(&gnss, now - s_gnss_start_ms);
     s_gnss.motion = fix.motion;
+    if (requested & RTCP_LOCATION_PASCD)
+    {
+        uint32_t speed = fix.motion == CARPLAY_GNSS_MOVING ? (gnss.speed_kmh * 2500U + 4U) / 9U : 0U;
+        rtcp_vehicle_gear_t gear = fix.motion == CARPLAY_GNSS_MOVING ? RTCP_GEAR_DRIVE : RTCP_GEAR_PARK;
+        if (iap2_session_send_vehicle_speed(s_tunnel.session, now, gear, speed, now))
+            ++s_gnss.pascd_queued;
+        else
+            ++s_gnss.failed;
+    }
     time_t seconds = time(NULL);
     s_gnss.fixture_clock = seconds < (time_t)1577836800;
     if (s_gnss.fixture_clock)
         seconds = (time_t)(1767225600U + now / 1000U % 86400U);
     struct tm utc;
     if (!gmtime_r(&seconds, &utc))
+    {
+        carplay_gnss_publish_status(&s_gnss);
         return;
+    }
     char sentence[RTCP_LOCATION_NMEA_MAX + 1U];
     const unsigned kinds[] = { RTCP_LOCATION_GGA, RTCP_LOCATION_RMC };
     unsigned *queued[] = { &s_gnss.gga_queued, &s_gnss.rmc_queued };
@@ -1264,9 +1267,9 @@ static int cmd_carplay_gnss(int argc, char **argv)
                                              : status.motion == CARPLAY_GNSS_ARRIVED ? "arrived"
                                              : status.motion == CARPLAY_GNSS_MOVING  ? "moving"
                                                                                      : "waiting";
-    rt_kprintf("carplay gnss: enabled=%u tunnel=%u offered=%u requested=0x%x gga=%u rmc=%u failed=%u clock=%s motion=%s\n",
+    rt_kprintf("carplay gnss: enabled=%u tunnel=%u offered=%u requested=0x%x gga=%u rmc=%u pascd=%u failed=%u clock=%s motion=%s\n",
                (unsigned)gnss.enabled, (unsigned)status.tunnel, (unsigned)status.advertised,
-               status.requested, status.gga_queued, status.rmc_queued, status.failed,
+               status.requested, status.gga_queued, status.rmc_queued, status.pascd_queued, status.failed,
                status.fixture_clock ? "fixture" : status.gga_queued || status.rmc_queued ? "board"
                                                                                          : "-",
                motion);

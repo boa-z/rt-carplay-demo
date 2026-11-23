@@ -22,6 +22,8 @@
 void carplay_app_on_device_time(const rtcp_device_time_t *update, void *context);
 int carplay_app_clock_offset_minutes(void);
 bool carplay_app_clock_is_automatic(void);
+/** Report whether this session supplied a UTC sample, independently of RTC write success. */
+bool carplay_app_phone_clock_received(void);
 int carplay_app_set_clock_automatic(bool automatic);
 int carplay_app_set_local_clock(int64_t local_seconds, int offset_minutes);
 #endif
@@ -210,12 +212,55 @@ typedef enum
 
 typedef struct
 {
-    char title[129], artist[129];
+    char title[129], artist[129], album[129];
     bool has_playing, playing;
-    char route_road[129], route_destination[129], route_remaining[129];
+    bool has_duration, has_elapsed;
+    uint32_t duration_ms, elapsed_ms;
+    uint32_t artwork_revision;
+} carplay_phone_track_t;
+
+#define CARPLAY_PHONE_MANEUVER_ROWS 3U
+#define CARPLAY_PHONE_ARTWORK_MAX   (96U * 1024U)
+
+typedef struct
+{
+    uint16_t index;
+    bool present;
+    char instruction[129], distance[65];
+} carplay_phone_maneuver_t;
+
+typedef struct
+{
+    carplay_phone_track_t track;
+    char route_road[129], route_destination[129], route_remaining[129], route_turn_distance[129];
+    carplay_phone_maneuver_t maneuvers[CARPLAY_PHONE_MANEUVER_ROWS];
+    size_t lane_count;
+    struct
+    {
+        int16_t angle;
+        bool highlighted;
+    } lanes[8];
+    bool has_battery, has_charging, has_signal, has_airplane, airplane, has_call;
+    bool has_external_power, external_power, has_cellular, cellular;
+    uint16_t battery;
+    uint8_t charging, signal, call;
+    char carrier[129];
 } carplay_phone_media_t;
 
 void carplay_app_set_phone_appearance(rtcp_appearance_setting_t);
 rtcp_appearance_setting_t carplay_app_phone_appearance(void);
 int carplay_app_phone_action(carplay_phone_action_t);
-bool carplay_app_phone_media(carplay_phone_media_t *);
+/**
+ * Copy the latest metadata into caller-owned storage from a task context.
+ * @param[out] media Destination snapshot. An inactive receiver yields an empty snapshot.
+ * @return True on success, false for a null destination or mutex contention.
+ */
+bool carplay_app_phone_media(carplay_phone_media_t *media);
+/**
+ * Copy the encoded artwork from a task context without waiting for the receiver.
+ * @param revision Nonzero artwork revision from the snapshot.
+ * @param[out] buffer Caller-owned byte storage.
+ * @param capacity Destination size in bytes.
+ * @return Bytes copied, or zero if the revision is stale, unavailable, or cannot fit.
+ */
+size_t carplay_app_phone_artwork(uint32_t revision, uint8_t *buffer, size_t capacity);
