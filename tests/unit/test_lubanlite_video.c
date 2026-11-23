@@ -15,11 +15,13 @@ static bool pressure;
 static bool reference_mode, reference_active, fail_next;
 static unsigned packet_type;
 static unsigned render_remaining, render_id, returned[16], return_count;
+static long long render_pts;
 static unsigned updates, vsyncs, displayed_id, wake_signals;
 static bool hardware_reads, disable_queued;
 static bool fail_present, fail_vsync, fail_disable, lifecycle, fail_startup, worker_pending;
 static bool hold_worker, self_worker, reader_pending, check_display_reentry;
 static unsigned visible_events, stopped_events, thread_deletes;
+static uint32_t clock_ms;
 static uint8_t packet_data[1024];
 static const uint8_t config[] = { 0, 0, 0, 1, 0x67, 0x42, 0x00, 0x1f, 0x80,
                                   0, 0, 0, 1, 0x68, 0xce, 0x38, 0x80 };
@@ -35,7 +37,7 @@ void rt_hw_interrupt_enable(rt_base_t level)
 }
 uint32_t rt_tick_get_millisecond(void)
 {
-    return 100;
+    return clock_ms;
 }
 int rt_kprintf(const char *fmt, ...)
 {
@@ -211,6 +213,7 @@ int mpp_decoder_get_frame(struct mpp_decoder *d, struct mpp_frame *f)
     --render_remaining;
     memset(f, 0, sizeof(*f));
     f->id = (int)render_id++;
+    f->pts = render_pts;
     f->buf.phy_addr[0] = (unsigned)f->id;
     f->buf.size.width = frame_width;
     f->buf.size.height = frame_height;
@@ -329,8 +332,10 @@ static void reset(void)
     reference_mode = reference_active = fail_next = false;
     render_remaining = return_count = updates = vsyncs = displayed_id = 0;
     render_id = 1;
+    render_pts = 0;
     fail_disable = fail_present = fail_vsync = lifecycle = fail_startup = worker_pending = false;
     visible_events = stopped_events = thread_deletes = 0;
+    clock_ms = 100;
     s_display_observer = NULL;
     s_display_context = NULL;
 }
@@ -467,18 +472,50 @@ int main(int argc, char **argv)
 
     reset(); /* Input loss invalidates only entries following the gap. */
     reference_mode = true;
+    s_sink.have_frame = true;
+    s_sink.held.id = 77;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    rtcp_display_rect_t gap_viewport;
+    (void)carplay_fusion_video_target(s_sink.panel_width, s_sink.panel_height,
+                                      &gap_viewport, &s_sink.fusion_generation);
+#endif
     uint8_t later_idr_slice[] = { 0, 0, 0, 1, 0x65, 0x40, 0x80 };
     carplay_video_sink_frame(true, config, sizeof(config), 0, NULL);
     carplay_video_sink_frame(false, frame, sizeof(frame), 0, NULL);
     carplay_video_sink_frame(false, inter, sizeof(inter), 0, NULL);
-    drop_nal(&s_sink); /* next queued packet belongs after this missing input */
+    assert(!carplay_video_sink_needs_keyframe());
+    drop_nal(&s_sink, "test_gap"); /* next queued packet belongs after this missing input */
+    assert(carplay_video_sink_needs_keyframe());
     carplay_video_sink_frame(false, inter, sizeof(inter), 0, NULL);
     carplay_video_sink_frame(false, later_idr_slice, sizeof(later_idr_slice), 0, NULL);
     carplay_video_sink_frame(false, frame, sizeof(frame), 0, NULL);
     carplay_video_sink_frame(false, inter, sizeof(inter), 0, NULL);
     sink_thread(&s_sink);
-    assert(destroyed == 1 && decoded == 6 && s_sink.waiting_nals == 2);
+    assert(destroyed == 0 && decoded == 5 && s_sink.waiting_nals == 2);
+    assert(s_sink.have_frame && s_sink.held.id == 77 && vsyncs == 0);
     assert(reference_active && s_sink.decode_errors == 0);
+    s_sink.stop = false; /* The Host semaphore ends the worker on an empty queue. */
+    assert(!carplay_video_sink_needs_keyframe());
+
+    reset();
+    carplay_video_sink_frame(true, config, sizeof(config), 0, NULL);
+    carplay_video_sink_frame(false, frame, sizeof(frame), 0, NULL);
+    drop_nal(&s_sink, "first_gap");
+    carplay_video_sink_frame(false, frame, sizeof(frame), 0, NULL);
+    drop_nal(&s_sink, "later_gap");
+    carplay_video_sink_frame(false, frame, sizeof(frame), 0, NULL);
+    sink_thread(&s_sink);
+    assert(destroyed == 0 && decoded == 3);
+
+    reset();
+    uint8_t slices[sizeof(frame) + sizeof(later_idr_slice)];
+    memcpy(slices, frame, sizeof(frame));
+    memcpy(slices + sizeof(frame), later_idr_slice, sizeof(later_idr_slice));
+    for (unsigned index = 0; index < SINK_QUEUE_LENGTH - 1U; ++index)
+        carplay_video_sink_frame(false, slices, sizeof(slices), 0, NULL);
+    assert(s_sink.queue_peak == SINK_QUEUE_LENGTH - 1U && !s_sink.dropped_nals);
+    sink_thread(&s_sink);
+    assert(decoded == 2U * (SINK_QUEUE_LENGTH - 1U));
 
     reset(); /* retry must decode to free slots on this same thread */
     slots = 2;
@@ -488,13 +525,78 @@ int main(int argc, char **argv)
     pump_decoder(&s_sink);
     assert(decoded == 3 && slots == 0 && delays == 1);
 
-    reset(); /* full queue must not admit only half a configuration */
-    for (unsigned i = 0; i < SINK_QUEUE_LENGTH - 1; ++i)
-        carplay_video_sink_frame(false, frame, sizeof(frame), 0, NULL);
+    reset();
+    reference_mode = true;
+    s_sink.have_frame = true;
+    s_sink.held.id = 77;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    (void)carplay_fusion_video_target(s_sink.panel_width, s_sink.panel_height,
+                                      &gap_viewport, &s_sink.fusion_generation);
+#endif
     carplay_video_sink_frame(true, config, sizeof(config), 0, NULL);
-    assert(s_sink.dropped_nals == 1);
+    for (unsigned index = 0; index < SINK_QUEUE_LENGTH - 1U; ++index)
+        carplay_video_sink_frame(false, inter, sizeof(inter), 0, NULL);
+    assert(s_sink.queue_overflows == 1U && s_sink.loss_generation == 1U);
+    assert(s_sink.dropped_nals == SINK_QUEUE_LENGTH - 1U);
+    assert(carplay_video_sink_pending() == 1U);
+    assert(carplay_video_sink_needs_keyframe());
+    carplay_video_sink_frame(false, later_idr_slice, sizeof(later_idr_slice), 0, NULL);
+    assert(s_sink.loss_generation == 1U && carplay_video_sink_pending() == 1U);
+    uint8_t prefixed_idr[6 + sizeof(slices)] = { 0, 0, 0, 1, 0x09, 0x10 };
+    memcpy(prefixed_idr + 6, slices, sizeof(slices));
+    carplay_video_sink_frame(false, prefixed_idr, sizeof(prefixed_idr), 1000000, NULL);
+    carplay_video_sink_frame(false, inter, sizeof(inter), 2000000, NULL);
+    assert(carplay_video_sink_pending() == 3U);
+    clock_ms += 23U;
     sink_thread(&s_sink);
-    assert(destroyed == 0 && decoded == SINK_QUEUE_LENGTH - 1);
+    assert(destroyed == 0 && decoded == 4U && last_config_size == sizeof(config));
+    assert(s_sink.have_frame && s_sink.held.id == 77 && vsyncs == 0U);
+    assert(s_sink.queue_idr_samples == 1U && s_sink.queue_idr_last_ms == 23U);
+    assert(!s_sink.queue_latch_samples);
+    s_sink.stop = false;
+    assert(!carplay_video_sink_needs_keyframe());
+    render_remaining = 1;
+    render_pts = 1000;
+    s_sink.defer_present = true;
+    fail_vsync = true;
+    assert(drain_frames(&s_sink) == 1U && !s_sink.queue_latch_samples);
+    assert(s_sink.held.id == 77 && s_sink.have_pending_scanout);
+    clock_ms += 17U;
+    fail_vsync = false;
+    (void)drain_frames(&s_sink);
+    assert(s_sink.queue_latch_samples == 1U && s_sink.queue_latch_last_ms == 17U);
+
+    reset();
+    for (unsigned index = 0; index < SINK_QUEUE_LENGTH - 1U; ++index)
+        carplay_video_sink_frame(false, inter, sizeof(inter), 0, NULL);
+    carplay_video_sink_frame(true, config, sizeof(config), 0, NULL);
+    assert(carplay_video_sink_pending() == 1U && s_sink.queue_wait_idr);
+    assert(carplay_video_sink_needs_keyframe());
+    carplay_video_sink_frame(false, frame, sizeof(frame), 0, NULL);
+    sink_thread(&s_sink);
+    assert(destroyed == 0 && decoded == 2U && last_config_size == sizeof(config));
+    s_sink.stop = false;
+    assert(!carplay_video_sink_needs_keyframe());
+
+    reset();
+    carplay_video_sink_frame(true, config, sizeof(config), 0, NULL);
+    for (unsigned index = 1; index < SINK_QUEUE_LENGTH - 1U; ++index)
+        carplay_video_sink_frame(false, inter, sizeof(inter), 0, NULL);
+    carplay_video_sink_frame(false, frame, sizeof(frame), 0, NULL);
+    assert(carplay_video_sink_pending() == 2U && !s_sink.queue_wait_idr);
+    sink_thread(&s_sink);
+    assert(decoded == 2U && s_sink.queue_idr_samples == 1U);
+    reset();
+    s_sink.have_frame = true;
+    s_sink.held.id = 77;
+    s_sink.defer_present = true;
+    render_remaining = 2;
+    assert(drain_frames(&s_sink) == 2 && s_sink.skipped_frames == 2);
+    assert(s_sink.held.id == 77 && return_count == 2 && vsyncs == 0);
+    s_sink.defer_present = false;
+    render_remaining = 1;
+    assert(drain_frames(&s_sink) == 1 && return_count == 3 && vsyncs == 1);
+    assert(returned[2] == 77);
     reset(); /* Coalesce decoded backlog, preserve hardware scanout lifetime. */
     s_sink.have_frame = true;
     s_sink.held.id = 99;

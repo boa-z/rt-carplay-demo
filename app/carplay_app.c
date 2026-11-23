@@ -445,6 +445,9 @@ typedef struct
     control_status_t ctrl_status;
 
     carplay_app_screen_cb_t on_screen;
+#if defined(RTCARPLAY_VIDEO)
+    uint64_t screen_keyframe_retry_ms;
+#endif
     void *screen_context;
 
     rtcp_receiver_state_t receiver_state;
@@ -725,7 +728,7 @@ static int on_screen_message(rtcp_video_message_type_t type,
                     (unsigned)annex_b_len);
         }
     }
-    else
+    else if (app->screen_frames == 0U || atomic_load(&s_perf_logging))
     {
         APP_LOG("screen H.264 configuration: %u bytes", (unsigned)annex_b_len);
     }
@@ -1713,6 +1716,22 @@ static void poll_thread(void *argument)
         int vehicle_error = carplay_vehicle_protocol_demo_tick(&app->vehicle_demo, app->os.now_ms());
 #endif
         (void)rtcp_receiver_poll(app->receiver, 10);
+#if defined(RTCARPLAY_VIDEO)
+        if (app->on_screen == carplay_video_sink_frame)
+        {
+            if (!carplay_video_sink_needs_keyframe())
+                app->screen_keyframe_retry_ms = 0;
+            else
+            {
+                uint64_t now = app->os.now_ms();
+                if (now >= app->screen_keyframe_retry_ms)
+                {
+                    app->screen_keyframe_retry_ms = now + 500U;
+                    (void)rtcp_receiver_request_screen_keyframe(app->receiver);
+                }
+            }
+        }
+#endif
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
         if (app->projection_resume_confirmed)
         {

@@ -46,7 +46,7 @@ int main(void)
     carplay_preferences_bt_name(name);
     assert(!strcmp(name, CARPLAY_BT_NAME_DEFAULT));
     assert(carplay_preferences_get(CARPLAY_PREF_VOLUME, 60) == 25);
-    assert(carplay_preferences_get(CARPLAY_PREF_HIGH_FPS, CARPLAY_PREF_HIGH_FPS_DEFAULT) == 1);
+    assert(carplay_preferences_get(CARPLAY_PREF_HIGH_FPS, CARPLAY_PREF_HIGH_FPS_DEFAULT) == 0);
     assert(carplay_preferences_set(CARPLAY_PREF_HIGH_FPS, 2) == -EINVAL);
     assert(carplay_preferences_set(CARPLAY_PREF_HIGH_FPS, 0) == 0);
     assert(carplay_preferences_set_bt_name("") == -EINVAL);

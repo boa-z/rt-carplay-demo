@@ -43,6 +43,9 @@ bool carplay_video_sink_is_running(void);
  * False while stopped/retiring. Host UI handoff is a separate policy result. */
 bool carplay_video_sink_has_presented(void);
 
+/* True after lost input or decoder failure until the stream recovers. */
+bool carplay_video_sink_needs_keyframe(void);
+
 /* NAL units waiting for the decoder.  Useful to pace a file feeder. */
 size_t carplay_video_sink_pending(void);
 

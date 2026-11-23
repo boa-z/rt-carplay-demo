@@ -3,9 +3,8 @@
  * Luban-Lite video sink: MPP H.264 decoder -> DE video layer.
  *
  * The AirPlay poll thread calls carplay_video_sink_frame() with Annex-B
- * access units.  This file splits them into NAL units and copies them into a
- * small FIFO.  A dedicated thread feeds one NAL per decoder packet (the SDK
- * H.264 decoder walks Annex-B start codes inside a packet), pumps the
+ * access units. The FIFO holds complete access units. A dedicated thread
+ * feeds one picture NAL per decoder packet, pumps the
  * decoder and presents the resulting NV12 frames through the "aicfb" video
  * layer.  Only the sink thread touches the decoder and the display.
  *
@@ -34,7 +33,7 @@
 #define TAG "carplay-vid"
 
 #define SINK_QUEUE_LENGTH       16U
-#define SINK_MAX_NAL_BYTES      (512U * 1024U)
+#define SINK_MAX_UNIT_BYTES     (512U * 1024U)
 #define SINK_THREAD_STACK_BYTES (16U * 1024U)
 /* Consume queued video before the priority-15 network producer can fill the
  * FIFO. VE completion and vsync block this thread, allowing reception to run.
@@ -52,7 +51,9 @@ typedef struct
     size_t len;
     uint32_t pts_us;
     uint32_t queued_ms;
+    uint32_t overflow_ms;
     bool configure;
+    bool overflow_idr;
     unsigned loss_generation;
 } nal_entry_t;
 
@@ -76,6 +77,20 @@ typedef struct
     nal_entry_t queue[SINK_QUEUE_LENGTH];
     atomic_uint head;
     atomic_uint tail;
+    bool queue_wait_idr;
+    uint32_t queue_overflow_ms;
+    atomic_uint queue_overflows;
+    atomic_uint queue_discarded;
+    atomic_uint queue_idr_samples;
+    atomic_uint queue_idr_last_ms;
+    atomic_uint queue_idr_max_ms;
+    atomic_uint queue_latch_samples;
+    atomic_uint queue_latch_last_ms;
+    atomic_uint queue_latch_max_ms;
+    bool queue_latch_pending;
+    uint32_t queue_idr_accepted_ms;
+    uint32_t queue_idr_pts_us;
+    unsigned queue_idr_generation;
 
     struct mpp_frame held;
     bool have_frame;
@@ -101,7 +116,9 @@ typedef struct
     atomic_uint repeated_configs;
     atomic_uint waiting_nals;
     atomic_bool wait_idr;
-    bool recovery_pending;
+    atomic_bool recovery_pending;
+    bool reset_pending;
+    bool defer_present;
     atomic_uint queue_peak;
     atomic_uint dequeued;
     atomic_uint_fast64_t queue_wait_ms;
@@ -175,7 +192,7 @@ static int video_set_display_observer_owned(carplay_video_display_cb_t callback,
 
 static const uint8_t *find_start_code(const uint8_t *cursor, const uint8_t *end)
 {
-    while (cursor + 2 < end)
+    while ((size_t)(end - cursor) >= 3U)
     {
         if (cursor[0] == 0x00 && cursor[1] == 0x00 && cursor[2] == 0x01)
         {
@@ -186,7 +203,67 @@ static const uint8_t *find_start_code(const uint8_t *cursor, const uint8_t *end)
     return NULL;
 }
 
-static void drop_nal(video_sink_t *sink)
+static bool is_idr_start(const uint8_t *header, size_t available)
+{
+    /* first_mb_in_slice == 0 has a leading one in its Exp-Golomb code. */
+    return available >= 2U && (header[0] & 31U) == 5U && (header[1] & 0x80U);
+}
+
+static bool unit_starts_idr(const uint8_t *data, size_t len)
+{
+    const uint8_t *end = data + len;
+    const uint8_t *start = find_start_code(data, end);
+    while (start != NULL && (size_t)(end - start) > 3U)
+    {
+        const uint8_t *header = start + 3U;
+        unsigned type = header[0] & 31U;
+        if (type >= 1U && type <= 5U)
+            return is_idr_start(header, (size_t)(end - header));
+        start = find_start_code(header, end);
+    }
+    return false;
+}
+
+/* The producer owns queue admission under the queue mutex. Keep only the
+ * newest queued SPS/PPS when abandoning stale pictures at an overrun. */
+static void start_queue_recovery(video_sink_t *sink, bool incoming_config)
+{
+    nal_entry_t config = { 0 };
+    unsigned discarded = 0;
+    while (sink->tail != sink->head)
+    {
+        nal_entry_t *entry = &sink->queue[sink->tail];
+        if (entry->configure && !incoming_config)
+        {
+            if (config.data != NULL)
+            {
+                free(config.data);
+                ++discarded;
+            }
+            config = *entry;
+        }
+        else
+        {
+            free(entry->data);
+            ++discarded;
+        }
+        sink->tail = (sink->tail + 1U) % SINK_QUEUE_LENGTH;
+    }
+    ++sink->loss_generation;
+    ++sink->queue_overflows;
+    sink->queue_overflow_ms = sink_now_ms();
+    sink->queue_wait_idr = true;
+    sink->queue_discarded += discarded;
+    sink->dropped_nals += discarded;
+    if (config.data != NULL)
+    {
+        config.loss_generation = sink->loss_generation;
+        sink->queue[sink->head] = config;
+        sink->head = (sink->head + 1U) % SINK_QUEUE_LENGTH;
+    }
+}
+
+static void drop_nal(video_sink_t *sink, const char *reason)
 {
     (void)rt_mutex_take(sink->lock, RT_WAITING_FOREVER);
     ++sink->loss_generation;
@@ -194,23 +271,22 @@ static void drop_nal(video_sink_t *sink)
     (void)rt_mutex_release(sink->lock);
     if (sink->dropped_nals == 1U || sink->dropped_nals % 60U == 0U)
     {
-        rt_kprintf("[" TAG "] queue full/alloc failure, dropped=%u\n",
-                   sink->dropped_nals);
+        rt_kprintf("[" TAG "] input dropped reason=%s count=%u\n", reason, sink->dropped_nals);
     }
 }
 
 static bool enqueue_nal(video_sink_t *sink, const uint8_t *data, size_t len,
                         uint32_t pts_us, bool configure)
 {
-    if (len == 0U || len > SINK_MAX_NAL_BYTES)
+    if (len == 0U || len > SINK_MAX_UNIT_BYTES)
     {
-        drop_nal(sink);
+        drop_nal(sink, "invalid_size");
         return false;
     }
     uint8_t *copy = malloc(len);
     if (copy == NULL)
     {
-        drop_nal(sink);
+        drop_nal(sink, "allocation");
         return false;
     }
     memcpy(copy, data, len);
@@ -220,26 +296,38 @@ static bool enqueue_nal(video_sink_t *sink, const uint8_t *data, size_t len,
         free(copy);
         return false;
     }
-    unsigned next = (sink->head + 1U) % SINK_QUEUE_LENGTH;
-    if (next == sink->tail)
+    bool was_empty = sink->head == sink->tail;
+    bool overflow = (sink->head + 1U) % SINK_QUEUE_LENGTH == sink->tail;
+    if (overflow)
+        start_queue_recovery(sink, configure);
+    bool overflow_idr = sink->queue_wait_idr && !configure && unit_starts_idr(data, len);
+    if (sink->queue_wait_idr && !configure && !overflow_idr)
     {
+        ++sink->queue_discarded;
+        ++sink->dropped_nals;
         (void)rt_mutex_release(sink->lock);
         free(copy);
-        drop_nal(sink);
+        if (overflow)
+            rt_kprintf("[" TAG "] input dropped reason=queue_full; prioritizing IDR\n");
         return false;
     }
-    bool was_empty = sink->head == sink->tail;
+    if (overflow_idr)
+        sink->queue_wait_idr = false;
     sink->queue[sink->head].data = copy;
     sink->queue[sink->head].len = len;
     sink->queue[sink->head].pts_us = pts_us;
     sink->queue[sink->head].configure = configure;
+    sink->queue[sink->head].overflow_idr = overflow_idr;
+    sink->queue[sink->head].overflow_ms = sink->queue_overflow_ms;
     sink->queue[sink->head].loss_generation = sink->loss_generation;
     sink->queue[sink->head].queued_ms = sink_now_ms();
-    sink->head = next;
+    sink->head = (sink->head + 1U) % SINK_QUEUE_LENGTH;
     unsigned pending = (sink->head + SINK_QUEUE_LENGTH - sink->tail) % SINK_QUEUE_LENGTH;
     if (pending > sink->queue_peak)
         sink->queue_peak = pending;
     (void)rt_mutex_release(sink->lock);
+    if (overflow)
+        rt_kprintf("[" TAG "] input dropped reason=queue_full; prioritizing IDR\n");
     return was_empty;
 }
 
@@ -285,17 +373,7 @@ static void video_frame_owned(bool configuration, const uint8_t *annex_b,
     if (cursor == NULL)
         return; /* not Annex-B; nothing to feed the decoder */
 
-    bool wake = false;
-    while (cursor < end)
-    {
-        const uint8_t *next = find_start_code(cursor + 3U, end);
-        size_t nal_len = (size_t)((next != NULL ? next : end) - cursor);
-        wake |= enqueue_nal(sink, cursor, nal_len, pts_us, false);
-        if (next == NULL)
-            break;
-        cursor = next;
-    }
-    if (wake)
+    if (enqueue_nal(sink, cursor, (size_t)(end - cursor), pts_us, false))
         (void)rt_sem_release(sink->wake);
 }
 
@@ -412,6 +490,17 @@ static void commit_scanout(video_sink_t *sink, const struct mpp_frame *frame)
     sink->held = *frame;
     sink->have_frame = true;
     ++sink->latched_frames;
+    if (sink->queue_latch_pending && !sink->recovery_pending &&
+        sink->queue_idr_generation == sink->loss_generation &&
+        (uint32_t)((uint32_t)frame->pts - sink->queue_idr_pts_us) < (UINT32_MAX / 2U + 1U))
+    {
+        uint32_t elapsed = sink_now_ms() - sink->queue_idr_accepted_ms;
+        sink->queue_latch_pending = false;
+        sink->queue_latch_last_ms = elapsed;
+        if (elapsed > sink->queue_latch_max_ms)
+            sink->queue_latch_max_ms = elapsed;
+        ++sink->queue_latch_samples;
+    }
     if (!sink->display_reported)
     {
         sink->display_reported = true;
@@ -488,6 +577,13 @@ static unsigned drain_frames(video_sink_t *sink)
     }
     if (have_newest)
     {
+        if (sink->defer_present && !(sink->queue_latch_pending &&
+                                    sink->queue_idr_generation == sink->loss_generation))
+        {
+            (void)mpp_decoder_put_frame(sink->decoder, &newest);
+            ++sink->skipped_frames;
+            return drained;
+        }
         bool presented = present_timed(sink, &newest, true);
         ++sink->frame_count;
         if (presented)
@@ -587,6 +683,7 @@ static void pump_decoder(video_sink_t *sink)
                 }
                 sink->wait_idr = true;
                 sink->recovery_pending = true;
+                sink->reset_pending = true;
             }
             break;
         }
@@ -651,8 +748,9 @@ static bool accept_configuration(video_sink_t *sink, const nal_entry_t *nal)
         memcmp(sink->configuration, nal->data, nal->len) == 0)
     {
         ++sink->repeated_configs;
-        rt_kprintf("[" TAG "] repeated configuration ignored, bytes=%u count=%u\n",
-                   (unsigned)nal->len, sink->repeated_configs);
+        if (sink->repeated_configs == 1U || sink->repeated_configs % 60U == 0U)
+            rt_kprintf("[" TAG "] repeated configuration ignored, bytes=%u count=%u\n",
+                       (unsigned)nal->len, sink->repeated_configs);
         return false;
     }
     uint8_t *copy = malloc(nal->len);
@@ -673,6 +771,7 @@ static bool accept_configuration(video_sink_t *sink, const nal_entry_t *nal)
     {
         /* Delay recreation until IDR, discarding dependent pictures meanwhile. */
         sink->recovery_pending = true;
+        sink->reset_pending = true;
         rt_kprintf("[" TAG "] configuration changed; waiting for IDR\n");
         return false;
     }
@@ -684,44 +783,92 @@ static bool prepare_picture(video_sink_t *sink, const nal_entry_t *nal)
     if (!sink->wait_idr)
         return true;
     const uint8_t *start = find_start_code(nal->data, nal->data + nal->len);
-    unsigned type = start != NULL && start + 3 < nal->data + nal->len
-                        ? start[3] & 31U
-                        : 0U;
-    /* first_mb_in_slice is ue(v): a leading one encodes zero. Never resume
-     * at a later slice of an IDR whose first slice may have been dropped. */
-    bool first_slice = start != NULL && start + 4 < nal->data + nal->len &&
-                       (start[4] & 0x80U) != 0U;
-    if (type != 5U || !first_slice)
+    size_t available = start != NULL ? (size_t)(nal->data + nal->len - start) : 0U;
+    if (available <= 3U || !is_idr_start(start + 3U, available - 3U))
     {
         ++sink->waiting_nals;
         return false;
     }
     if (sink->recovery_pending)
     {
+        /* A newer queue gap already invalidated this recovery point. */
+        if (nal->loss_generation != sink->loss_generation)
+            return false;
         if (sink->configuration == NULL)
         {
             ++sink->waiting_nals;
             return false;
         }
-        if (!recreate_decoder(sink))
-            return false;
-        nal_entry_t config = { .data = sink->configuration,
-                               .len = sink->configuration_len };
-        /* Clear before pumping so any configuration failure re-arms recovery. */
-        sink->recovery_pending = false;
-        if (submit_nal(sink, &config) != 0)
+        if (sink->reset_pending)
         {
-            sink->recovery_pending = true;
-            return false;
+            if (!recreate_decoder(sink))
+                return false;
+            nal_entry_t config = { .data = sink->configuration,
+                                   .len = sink->configuration_len };
+            /* Clear before pumping so any configuration failure re-arms recovery. */
+            sink->recovery_pending = false;
+            if (submit_nal(sink, &config) != 0)
+            {
+                sink->recovery_pending = true;
+                return false;
+            }
+            pump_decoder(sink);
+            if (sink->recovery_pending)
+                return false;
+            sink->reset_pending = false;
         }
-        pump_decoder(sink);
-        if (sink->recovery_pending)
-            return false;
+        /* A queue gap drops whole access units. The intact IDR refreshes
+         * MPP's reference pictures without retiring the current scanout. */
+        sink->recovery_pending = false;
     }
     sink->wait_idr = false;
     rt_kprintf("[" TAG "] IDR accepted; skipped dependent NALs=%u\n",
                sink->waiting_nals);
     return true;
+}
+
+static void decode_unit(video_sink_t *sink, const nal_entry_t *unit)
+{
+    const uint8_t *cursor = unit->data;
+    const uint8_t *end = cursor + unit->len;
+    do
+    {
+        const uint8_t *next = NULL;
+        if (!unit->configure && (size_t)(end - cursor) > 3U)
+            next = find_start_code(cursor + 3U, end);
+        nal_entry_t nal = *unit;
+        nal.data = (uint8_t *)cursor;
+        nal.len = (size_t)((next != NULL ? next : end) - cursor);
+        bool waiting = sink->wait_idr;
+        bool feed = nal.configure ? accept_configuration(sink, &nal)
+                                  : prepare_picture(sink, &nal);
+        if (feed)
+        {
+            if (submit_nal(sink, &nal) != 0)
+            {
+                sink->wait_idr = true;
+                sink->recovery_pending = true;
+                sink->reset_pending = true;
+            }
+            else if (unit->overflow_idr && waiting && !sink->wait_idr &&
+                     unit->loss_generation == sink->loss_generation)
+            {
+                uint32_t now = sink_now_ms();
+                uint32_t elapsed = now - unit->overflow_ms;
+                sink->queue_idr_last_ms = elapsed;
+                if (elapsed > sink->queue_idr_max_ms)
+                    sink->queue_idr_max_ms = elapsed;
+                ++sink->queue_idr_samples;
+                sink->queue_idr_accepted_ms = now;
+                sink->queue_idr_pts_us = unit->pts_us;
+                sink->queue_idr_generation = unit->loss_generation;
+                sink->queue_latch_pending = true;
+            }
+        }
+        if (!sink->recovery_pending)
+            pump_decoder(sink);
+        cursor = next;
+    } while (cursor != NULL && !sink->stop);
 }
 
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
@@ -741,6 +888,7 @@ static void apply_display_mode(video_sink_t *sink)
 static void sink_thread(void *argument)
 {
     video_sink_t *sink = argument;
+    unsigned backlog_units = 0;
     sink->thread_running = true;
     rt_kprintf("[" TAG "] decoder running\n");
 
@@ -759,24 +907,27 @@ static void sink_thread(void *argument)
                 if (nal.loss_generation != sink->consumed_generation)
                 {
                     sink->consumed_generation = nal.loss_generation;
+                    if (!sink->recovery_pending)
+                        rt_kprintf("[" TAG "] input loss; waiting for IDR\n");
                     sink->wait_idr = true;
                     sink->recovery_pending = true;
-                    rt_kprintf("[" TAG "] input loss; waiting for IDR\n");
                 }
-                bool feed = nal.configure ? accept_configuration(sink, &nal)
-                                          : prepare_picture(sink, &nal);
-                if (feed && submit_nal(sink, &nal) != 0)
+                unsigned pending = (sink->head + SINK_QUEUE_LENGTH - sink->tail) % SINK_QUEUE_LENGTH;
+                /* At panel rate, a vsync wait for every output can keep an
+                 * existing backlog alive. Skip decoded outputs in bounded
+                 * groups while continuing to feed every compressed picture. */
+                if (sink->have_frame && pending >= 3U)
+                    sink->defer_present = ++backlog_units % 4U != 0U;
+                else
                 {
-                    sink->wait_idr = true;
-                    sink->recovery_pending = true;
+                    backlog_units = 0;
+                    sink->defer_present = false;
                 }
+                decode_unit(sink, &nal);
                 free(nal.data);
-                /* Do not wait for the FIFO to empty before consuming MPP
-                 * packets: producers may continuously keep the FIFO full. */
-                if (!sink->recovery_pending)
-                    pump_decoder(sink);
             }
         }
+        sink->defer_present = false;
         if (!sink->recovery_pending)
             pump_decoder(sink);
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
@@ -1054,6 +1205,16 @@ bool carplay_video_sink_has_presented(void)
     return result;
 }
 
+bool carplay_video_sink_needs_keyframe(void)
+{
+    if (!video_read_enter())
+        return false;
+    bool needed = s_sink.running && !s_sink.stop &&
+                  (s_sink.recovery_pending || s_sink.loss_generation != s_sink.consumed_generation);
+    video_read_leave();
+    return needed;
+}
+
 size_t carplay_video_sink_pending(void)
 {
     if (!video_read_enter())
@@ -1096,7 +1257,7 @@ void carplay_video_sink_perf(carplay_video_perf_t *out)
 /* ------------------------------------------------------------------ */
 
 #define VIDEO_TEST_READ_BYTES  (64U * 1024U)
-#define VIDEO_TEST_CARRY_BYTES (SINK_MAX_NAL_BYTES + VIDEO_TEST_READ_BYTES)
+#define VIDEO_TEST_CARRY_BYTES (SINK_MAX_UNIT_BYTES + VIDEO_TEST_READ_BYTES)
 
 static size_t find_last_start_code(const uint8_t *data, size_t len)
 {
@@ -1275,6 +1436,11 @@ static int cmd_carplay_video_owned(int argc, char **argv)
         rt_kprintf("[" TAG "] recovery: repeated_configs=%u waiting_idr=%u skipped_nals=%u\n",
                    sink->repeated_configs, sink->wait_idr ? 1U : 0U,
                    sink->waiting_nals);
+        rt_kprintf("[" TAG "] overflows=%u discarded_units=%u overflow_to_idr_ms last/max=%u/%u samples=%u"
+                   " idr_to_latch_ms last/max=%u/%u samples=%u\n",
+                   sink->queue_overflows, sink->queue_discarded, sink->queue_idr_last_ms,
+                   sink->queue_idr_max_ms, sink->queue_idr_samples, sink->queue_latch_last_ms,
+                   sink->queue_latch_max_ms, sink->queue_latch_samples);
         rt_kprintf("[" TAG "] elapsed_ms avg/max: queue=%u/%u decode=%u/%u present=%u/%u\n",
                    sink->dequeued ? (unsigned)(sink->queue_wait_ms / sink->dequeued) : 0U,
                    (unsigned)sink->queue_wait_max_ms,

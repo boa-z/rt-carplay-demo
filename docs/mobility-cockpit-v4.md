@@ -71,6 +71,12 @@ Open **Settings → Phone Controls** to see Now Playing, route guidance and phon
 
 **Implemented / Host Tested.** The integration and LVGL preview exercise these display paths with modeled values, including field clearing and artwork fallback. **Hardware Pending.** On D213, connect an iPhone over USB and then wirelessly. Change tracks, pause playback, and check received artwork and progress. Start and cancel a route with upcoming turns and lane guidance. Check phone status during charging and a call, verify local time and the selected clock mode, then disconnect and reconnect. Session data should clear on disconnect and return as updates arrive. The board RTC should keep running.
 
+## Screen recovery
+
+The D213 video queue accepts or drops entire H.264 access units. During an ordinary backlog, it continues decoding reference pictures and skips some decoded output to reduce display-fence waits. On overflow, it discards queued pictures, retains the latest queued SPS/PPS, and reserves room for the next access unit that starts with the first slice of an IDR picture. The receiver requests a MainScreen keyframe over the encrypted event channel and keeps the current scanout until a new picture can be latched. A complete IDR refreshes the decoder after a queue gap. Decoder errors and changed stream configuration still require a rebuild.
+
+**Host Tested.** The normal, Launcher and Fusion sink regressions cover a full queue, configuration retention and IDR admission. **Hardware Pending.** Repeatedly invoke Siri over wired and wireless projection at 60 fps and use 30 fps as a control. Take `carplay_video status` snapshots around the run. The overflow counters are cumulative within a session. `overflow_to_idr_ms` measures the last and maximum time from queue overflow to submission of the first IDR slice to MPP. `idr_to_latch_ms` measures the time from that submission to the first corresponding or later frame confirmed by VSync. If a gap occurs, check these timings and `resets`, and confirm that the picture resumes in the same session without repeated flashing.
+
 ## Evidence
 
 Render the current UI using the LVGL 9 software renderer at 1024×600. The launcher preview covers settings and the GNSS editor. The fusion preview covers the instrument strip and full-screen transitions.

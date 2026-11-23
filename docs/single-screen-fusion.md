@@ -22,7 +22,7 @@ Physical size metadata now follows the viewport: `RTCARPLAY_PANEL_WIDTH_MM` and 
 
 ## CarPlay frame rate
 
-In **Settings → Display → CarPlay frame rate**, the default is 60 fps. A saved 30 fps selection stays in effect. Restart the receiver before connecting to apply the new `/info` `maxFPS`. Rebooting the board restarts the receiver. The D213 1024×600 panel timing is approximately 60 Hz. The iPhone chooses its actual video rate, and the video sink retains each scanout buffer through the display fence.
+In **Settings → Display → CarPlay frame rate**, the default is 30 fps and a saved selection stays in effect. If 60 fps was saved, select 30 fps for the first Siri regression run, then repeat at 60 fps. Restart the receiver before connecting to apply the new `/info` `maxFPS`. Rebooting the board restarts the receiver. The D213 1024×600 panel timing is approximately 60 Hz. The iPhone chooses its actual video rate, and the video sink retains each scanout buffer through the display fence.
 
 For a board comparison, use Fullscreen and the same active animation for at least ten seconds at each setting. Sample `carplay_status` and `carplay_video status` at both ends of the interval. Compare `offered_max_fps`, the incoming rate, `presented_fps`, queue drops and stage times. Repeat on wired and wireless connections. Only a sustained measured `presented_fps` near 60 establishes the target on the board.
 
