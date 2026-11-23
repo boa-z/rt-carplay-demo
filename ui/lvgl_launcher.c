@@ -9,6 +9,9 @@
 #include <string.h>
 #include <stdint.h>
 #include "lvgl.h"
+#if LV_USE_TJPGD
+#include "src/libs/tjpgd/tjpgd.h"
+#endif
 #include "connection_manager.h"
 #include "internet_share_lubanlite.h"
 #include "carplay_app.h"
@@ -1931,45 +1934,108 @@ static void update_connectivity(const demo_status_t *status, bool have_status)
 #endif
 }
 
-#if LV_USE_LODEPNG || (LV_USE_TJPGD && LV_USE_FS_MEMFS && LV_FS_MEMFS_LETTER)
-static bool cover_dimensions(const uint8_t *bytes, size_t size, uint32_t *width, uint32_t *height)
+#if LV_USE_LODEPNG || LV_USE_TJPGD
+#define PHONE_COVER_SIDE 96U
+
+#if LV_USE_TJPGD
+typedef struct
 {
+    const uint8_t *bytes;
+    size_t size, offset;
+    uint16_t *pixels;
+    uint32_t width, height, stride;
+} phone_cover_jpeg_t;
+
+static size_t phone_cover_jpeg_read(JDEC *decoder, uint8_t *output, size_t length)
+{
+    phone_cover_jpeg_t *image = decoder->device;
+    if (length > image->size - image->offset)
+        length = image->size - image->offset;
+    if (output)
+        memcpy(output, image->bytes + image->offset, length);
+    image->offset += length;
+    return length;
+}
+
+static int phone_cover_jpeg_block(JDEC *decoder, void *bitmap, JRECT *rect)
+{
+    phone_cover_jpeg_t *image = decoder->device;
+    uint32_t cols = rect->right - rect->left + 1U;
+    uint32_t first_row = (rect->top * image->height + decoder->height - 1U) / decoder->height;
+    uint32_t end_row = ((rect->bottom + 1U) * image->height + decoder->height - 1U) / decoder->height;
+    uint32_t first_col = (rect->left * image->width + decoder->width - 1U) / decoder->width;
+    uint32_t end_col = ((rect->right + 1U) * image->width + decoder->width - 1U) / decoder->width;
+    for (uint32_t row = first_row; row < end_row; ++row)
+    {
+        uint32_t source_row = row * decoder->height / image->height - rect->top;
+        for (uint32_t col = first_col; col < end_col; ++col)
+        {
+            uint32_t source_col = col * decoder->width / image->width - rect->left;
+            uint32_t index = source_row * cols + source_col;
+#if JD_FORMAT == 1
+            uint16_t rgb565 = ((const uint16_t *)bitmap)[index];
+#elif JD_FORMAT == 2
+            uint8_t gray = ((const uint8_t *)bitmap)[index];
+            uint16_t rgb565 = (uint16_t)(((gray & 0xf8U) << 8) | ((gray & 0xfcU) << 3) | (gray >> 3));
+#else
+            const uint8_t *rgb = (const uint8_t *)bitmap + 3U * index;
+            uint16_t rgb565 = (uint16_t)(((rgb[0] & 0xf8U) << 8) | ((rgb[1] & 0xfcU) << 3) | (rgb[2] >> 3));
+#endif
+            image->pixels[row * image->stride + col] = rgb565;
+        }
+    }
+    return 1;
+}
+
+static bool phone_cover_jpeg(const uint8_t *bytes, size_t size, lv_image_dsc_t *descriptor)
+{
+    static _Alignas(LV_DRAW_BUF_ALIGN) uint16_t pixels[PHONE_COVER_SIDE * PHONE_COVER_SIDE];
+    static _Alignas(4) uint8_t workspace[4096];
+    phone_cover_jpeg_t image = { .bytes = bytes, .size = size, .pixels = pixels };
+    JDEC decoder;
+    JRESULT result = jd_prepare(&decoder, phone_cover_jpeg_read, workspace, sizeof(workspace), &image);
+    if (result != JDR_OK || !decoder.width || !decoder.height ||
+        decoder.width > 2048U || decoder.height > 2048U)
+    {
+        rt_kprintf("[carplay-cover] JPEG header rejected bytes=%u code=%d\n", (unsigned)size, (int)result);
+        return false;
+    }
+    uint32_t longest = decoder.width > decoder.height ? decoder.width : decoder.height;
+    uint32_t divisor = longest > PHONE_COVER_SIDE ? longest : PHONE_COVER_SIDE;
+    image.width = LV_MAX(1U, decoder.width * PHONE_COVER_SIDE / divisor);
+    image.height = LV_MAX(1U, decoder.height * PHONE_COVER_SIDE / divisor);
+    image.stride = PHONE_COVER_SIDE;
+    result = jd_decomp(&decoder, phone_cover_jpeg_block, 0);
+    if (result != JDR_OK)
+    {
+        rt_kprintf("[carplay-cover] JPEG decode failed %ux%u code=%d\n",
+                   (unsigned)decoder.width, (unsigned)decoder.height, (int)result);
+        return false;
+    }
+    *descriptor = (lv_image_dsc_t){
+        .header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_RGB565, .w = image.width, .h = image.height, .stride = image.stride * sizeof(uint16_t) },
+        .data_size = image.stride * image.height * sizeof(uint16_t),
+        .data = (const uint8_t *)pixels,
+    };
+    rt_kprintf("[carplay-cover] JPEG decoded %ux%u -> %ux%u\n",
+               (unsigned)decoder.width, (unsigned)decoder.height,
+               (unsigned)image.width, (unsigned)image.height);
+    return true;
+}
+#endif
+
 #if LV_USE_LODEPNG
+static bool cover_png_dimensions(const uint8_t *bytes, size_t size, uint32_t *width, uint32_t *height)
+{
     if (size >= 33 && !memcmp(bytes, "\x89PNG\r\n\x1a\n\0\0\0\rIHDR", 16))
     {
         *width = ((uint32_t)bytes[16] << 24) | ((uint32_t)bytes[17] << 16) | ((uint32_t)bytes[18] << 8) | bytes[19];
         *height = ((uint32_t)bytes[20] << 24) | ((uint32_t)bytes[21] << 16) | ((uint32_t)bytes[22] << 8) | bytes[23];
         return true;
     }
-#endif
-#if LV_USE_TJPGD && LV_USE_FS_MEMFS && LV_FS_MEMFS_LETTER
-    if (size >= 4 && bytes[0] == 0xff && bytes[1] == 0xd8)
-    {
-        size_t offset = 2;
-        while (size - offset >= 4 && bytes[offset++] == 0xff)
-        {
-            while (offset < size && bytes[offset] == 0xff)
-                ++offset;
-            if (size - offset < 3)
-                return false;
-            uint8_t marker = bytes[offset++];
-            if (marker == 0xd9 || marker == 0xda)
-                return false;
-            size_t length = ((size_t)bytes[offset] << 8) | bytes[offset + 1];
-            if (length < 2 || length > size - offset)
-                return false;
-            if (marker == 0xc0 && length >= 8)
-            {
-                *height = ((uint32_t)bytes[offset + 3] << 8) | bytes[offset + 4];
-                *width = ((uint32_t)bytes[offset + 5] << 8) | bytes[offset + 6];
-                return true;
-            }
-            offset += length;
-        }
-    }
-#endif
     return false;
 }
+#endif
 
 static void update_phone_cover(uint32_t revision)
 {
@@ -1978,6 +2044,9 @@ static void update_phone_cover(uint32_t revision)
     static uint32_t shown;
     if (revision == shown)
         return;
+    size_t size = revision ? carplay_app_phone_artwork(revision, bytes, sizeof(bytes)) : 0;
+    if (revision && !size)
+        return;
     lv_image_cache_drop(&descriptor);
     lv_obj_add_flag(phone_cover, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(phone_cover_placeholder, LV_OBJ_FLAG_HIDDEN);
@@ -1985,26 +2054,39 @@ static void update_phone_cover(uint32_t revision)
     if (!revision)
         return;
 
-    size_t size = carplay_app_phone_artwork(revision, bytes, sizeof(bytes));
-    if (!size)
-        return;
     shown = revision;
+    bool ready = false;
+#if LV_USE_TJPGD
+    if (size > 2U && bytes[0] == 0xff && bytes[1] == 0xd8)
+        ready = phone_cover_jpeg(bytes, size, &descriptor);
+#endif
+#if LV_USE_LODEPNG
     uint32_t width, height;
-    /* Bound the decoded working set before calling a compressed image decoder. */
-    if (!cover_dimensions(bytes, size, &width, &height) || !width || !height || width > 384 || height > 384)
+    if (!ready && cover_png_dimensions(bytes, size, &width, &height) &&
+        width && height && width <= 512U && height <= 512U)
+    {
+        descriptor = (lv_image_dsc_t){
+            .header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_RAW, .w = width, .h = height },
+            .data_size = (uint32_t)size,
+            .data = bytes,
+        };
+        lv_image_decoder_dsc_t decoded;
+        if (lv_image_decoder_open(&decoded, &descriptor, NULL) == LV_RESULT_OK)
+        {
+            lv_image_decoder_close(&decoded);
+            ready = true;
+        }
+    }
+#endif
+    if (!ready)
+    {
+        rt_kprintf("[carplay-cover] no thumbnail bytes=%u signature=%02x:%02x\n",
+                   (unsigned)size, bytes[0], size > 1U ? bytes[1] : 0U);
         return;
-    descriptor = (lv_image_dsc_t){
-        .header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_RAW, .w = width, .h = height },
-        .data_size = (uint32_t)size,
-        .data = bytes,
-    };
-    lv_image_decoder_dsc_t decoded;
-    if (lv_image_decoder_open(&decoded, &descriptor, NULL) != LV_RESULT_OK)
-        return;
-    lv_image_decoder_close(&decoded);
+    }
     lv_image_set_src(phone_cover, &descriptor);
-    uint32_t longest = width > height ? width : height;
-    lv_image_set_scale(phone_cover, longest > 96 ? 96U * LV_SCALE_NONE / longest : LV_SCALE_NONE);
+    uint32_t longest = LV_MAX(descriptor.header.w, descriptor.header.h);
+    lv_image_set_scale(phone_cover, longest > PHONE_COVER_SIDE ? PHONE_COVER_SIDE * LV_SCALE_NONE / longest : LV_SCALE_NONE);
     lv_obj_remove_flag(phone_cover, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(phone_cover_placeholder, LV_OBJ_FLAG_HIDDEN);
 }
@@ -2041,7 +2123,7 @@ static void update_phone_settings(void)
     format_elapsed(length, sizeof(length), track->has_duration, duration);
     snprintf(detail, sizeof(detail), "%s / %s", position, length);
     set_phone_text(phone_position, track->has_elapsed || track->has_duration ? detail : "");
-#if LV_USE_LODEPNG || (LV_USE_TJPGD && LV_USE_FS_MEMFS && LV_FS_MEMFS_LETTER)
+#if LV_USE_LODEPNG || LV_USE_TJPGD
     update_phone_cover(track->artwork_revision);
 #endif
 

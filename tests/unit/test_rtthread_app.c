@@ -540,6 +540,50 @@ static void test_phone_media(void)
     assert(carplay_app_phone_media(&media) && !*media.track.title);
 }
 
+#if defined(RTCARPLAY_DEMO_LAUNCHER)
+static void test_phone_artwork(void)
+{
+    clear_phone_media(&s_app);
+    static const uint8_t cover[] = { 0xff, 0xd8, 0xff, 0xd9 };
+    iap2_session_config_t metadata = { 0 };
+    carplay_app_configure_classic_metadata(&metadata);
+    rtcp_now_playing_details_t update = { .item.title = "First title" };
+    metadata.on_now_playing_details(&update, NULL);
+    update = (rtcp_now_playing_details_t){
+        .has_artwork_transfer_id = true, .artwork_transfer_id = 130,
+        .has_artwork = true, .artwork = cover, .artwork_length = sizeof(cover),
+    };
+    metadata.on_now_playing_details(&update, NULL);
+    carplay_phone_media_t media;
+    assert(carplay_app_phone_media(&media));
+    uint32_t revision = media.track.artwork_revision;
+    assert(revision);
+    update = (rtcp_now_playing_details_t){ .item.title = "Updated title" };
+    metadata.on_now_playing_details(&update, NULL);
+    update = (rtcp_now_playing_details_t){ .item = { .has_playing = true, .playing = true } };
+    metadata.on_now_playing_details(&update, NULL);
+    assert(carplay_app_phone_media(&media));
+    assert(!strcmp(media.track.title, "Updated title") && media.track.playing);
+    assert(media.track.artwork_revision == revision);
+    uint8_t copy[sizeof(cover)];
+    assert(carplay_app_phone_artwork(revision, copy, sizeof(copy)) == sizeof(cover));
+    assert(!memcmp(cover, copy, sizeof(cover)));
+    update = (rtcp_now_playing_details_t){
+        .has_artwork_transfer_id = true, .artwork_transfer_id = 131, .has_artwork = true,
+    };
+    metadata.on_now_playing_details(&update, NULL);
+    assert(carplay_app_phone_media(&media) && !media.track.artwork_revision);
+    assert(!carplay_app_phone_artwork(revision, copy, sizeof(copy)));
+    update.artwork = cover;
+    update.artwork_length = sizeof(cover);
+    metadata.on_now_playing_details(&update, NULL);
+    assert(carplay_app_phone_media(&media) && media.track.artwork_revision);
+    metadata.on_now_playing_details(&(rtcp_now_playing_details_t){ .invalidated = true }, NULL);
+    assert(carplay_app_phone_media(&media) && !media.track.artwork_revision);
+    clear_phone_media(&s_app);
+}
+#endif
+
 int main(void)
 {
     char *enable_diag[] = { "carplay_classic_diag", "on" };
@@ -552,7 +596,9 @@ int main(void)
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
     test_viewport_metadata();
 #endif
+#if !defined(RTCARPLAY_DEMO_LAUNCHER)
     test_bt_lifetime();
+#endif
     thread_deletes = 0;
     char directory[] = "/tmp/rtcp-rtthread-lifecycle-XXXXXX";
     assert(mkdtemp(directory));
@@ -597,7 +643,12 @@ int main(void)
         assert(carplay_app_start(&config) == RTCP_OK);
         assert(carplay_app_is_running() && pending && live_mutexes == 1);
         if (cycle == 0)
+        {
             test_phone_media();
+#if defined(RTCARPLAY_DEMO_LAUNCHER)
+            test_phone_artwork();
+#endif
+        }
 #ifdef RTCARPLAY_NATIVE_NCM
         char expected_id[18];
         snprintf(expected_id, sizeof(expected_id), "%02X:%02X:%02X:%02X:%02X:%02X",

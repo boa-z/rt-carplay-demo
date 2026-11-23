@@ -477,6 +477,7 @@ typedef struct
     carplay_phone_media_t phone_media;
     carplay_phone_track_t iap2_track;
     size_t phone_artwork_size;
+    uint32_t phone_artwork_revision;
 #if defined(RTCARPLAY_IAP2) || defined(RTCARPLAY_USB_HOST)
     carplay_phone_maneuver_t maneuver_cache[8];
     unsigned maneuver_slot;
@@ -868,7 +869,8 @@ static void copy_phone_text(char *destination, size_t size, const char *text)
         rt_snprintf(destination, size, "%s", text);
 }
 
-static void update_phone_track(carplay_phone_track_t *track, const rtcp_now_playing_details_t *update)
+static void update_phone_track(carplay_phone_track_t *track, const rtcp_now_playing_details_t *update,
+                               bool artwork_has_transfer_lifecycle)
 {
     if (update->invalidated)
     {
@@ -879,7 +881,9 @@ static void update_phone_track(carplay_phone_track_t *track, const rtcp_now_play
     {
         track->has_duration = false;
         track->has_elapsed = false;
-        track->artwork_revision = 0;
+        /* iAP2 reports cover replacement separately via the file transfer ID. */
+        if (!artwork_has_transfer_lifecycle || !*update->item.title)
+            track->artwork_revision = 0;
     }
     copy_phone_text(track->title, sizeof(track->title), update->item.title);
     copy_phone_text(track->artist, sizeof(track->artist), update->item.artist);
@@ -901,6 +905,39 @@ static void update_phone_track(carplay_phone_track_t *track, const rtcp_now_play
     }
 }
 
+static void update_phone_artwork(app_state_t *app, carplay_phone_track_t *track,
+                                 const rtcp_now_playing_details_t *update)
+{
+#if defined(RTCARPLAY_DEMO_LAUNCHER)
+    if (update->has_artwork)
+    {
+        if (update->artwork && update->artwork_length && update->artwork_length <= sizeof(s_phone_artwork))
+        {
+            if (!app->phone_artwork_revision || app->phone_artwork_size != update->artwork_length ||
+                memcmp(s_phone_artwork, update->artwork, update->artwork_length))
+            {
+                memcpy(s_phone_artwork, update->artwork, update->artwork_length);
+                app->phone_artwork_size = update->artwork_length;
+                if (++s_artwork_revision == 0)
+                    ++s_artwork_revision;
+                app->phone_artwork_revision = s_artwork_revision;
+                APP_LOG("cover stored revision=%u bytes=%u", (unsigned)s_artwork_revision,
+                        (unsigned)app->phone_artwork_size);
+            }
+            track->artwork_revision = app->phone_artwork_revision;
+        }
+        else
+        {
+            track->artwork_revision = 0;
+        }
+    }
+#else
+    (void)app;
+    (void)track;
+    (void)update;
+#endif
+}
+
 static void on_airplay_metadata(const rtcp_now_playing_details_t *update, void *context)
 {
     app_state_t *app = context;
@@ -908,30 +945,8 @@ static void on_airplay_metadata(const rtcp_now_playing_details_t *update, void *
     if (!app->lock || rt_mutex_take(app->lock, RT_WAITING_FOREVER) != RT_EOK)
         return;
     carplay_phone_track_t *track = &app->phone_media.track;
-    update_phone_track(track, update);
-#if defined(RTCARPLAY_DEMO_LAUNCHER)
-    if (update->has_artwork)
-    {
-        if (update->artwork && update->artwork_length && update->artwork_length <= sizeof(s_phone_artwork))
-        {
-            if (!track->artwork_revision || app->phone_artwork_size != update->artwork_length ||
-                memcmp(s_phone_artwork, update->artwork, update->artwork_length))
-            {
-                memcpy(s_phone_artwork, update->artwork, update->artwork_length);
-                app->phone_artwork_size = update->artwork_length;
-                if (++s_artwork_revision == 0)
-                    ++s_artwork_revision;
-                track->artwork_revision = s_artwork_revision;
-            }
-        }
-        else
-        {
-            track->artwork_revision = 0;
-        }
-    }
-#endif
-    if (!track->artwork_revision)
-        app->phone_artwork_size = 0;
+    update_phone_track(track, update, false);
+    update_phone_artwork(app, track, update);
     (void)rt_mutex_release(app->lock);
 }
 
@@ -940,6 +955,7 @@ static void clear_phone_media(app_state_t *app)
     memset(&app->phone_media, 0, sizeof(app->phone_media));
     app->iap2_track = (carplay_phone_track_t){ 0 };
     app->phone_artwork_size = 0;
+    app->phone_artwork_revision = 0;
 #ifdef RT_USING_RTC
     atomic_store(&s_phone_clock_received, false);
 #endif
@@ -973,7 +989,8 @@ static void on_iap2_playback(const rtcp_now_playing_details_t *update, void *con
     on_classic_playback(update, context);
     if (!phone_metadata_enter())
         return;
-    update_phone_track(&s_app.iap2_track, update);
+    update_phone_track(&s_app.iap2_track, update, true);
+    update_phone_artwork(&s_app, &s_app.iap2_track, update);
     phone_metadata_leave();
 }
 
@@ -3476,7 +3493,8 @@ bool carplay_app_phone_media(carplay_phone_media_t *media)
             if (!media->track.title[0] && s_app.iap2_track.title[0])
                 media->track = s_app.iap2_track;
             else if (media->track.title[0] && !strcmp(media->track.title, s_app.iap2_track.title) &&
-                     !strcmp(media->track.artist, s_app.iap2_track.artist))
+                     (!media->track.artist[0] || !s_app.iap2_track.artist[0] ||
+                      !strcmp(media->track.artist, s_app.iap2_track.artist)))
             {
                 if (!media->track.has_duration)
                 {
@@ -3488,7 +3506,11 @@ bool carplay_app_phone_media(carplay_phone_media_t *media)
                     media->track.has_elapsed = s_app.iap2_track.has_elapsed;
                     media->track.elapsed_ms = s_app.iap2_track.elapsed_ms;
                 }
+                if (media->track.artwork_revision != s_app.phone_artwork_revision)
+                    media->track.artwork_revision = s_app.iap2_track.artwork_revision;
             }
+            if (media->track.artwork_revision != s_app.phone_artwork_revision)
+                media->track.artwork_revision = 0;
 #if defined(RTCARPLAY_IAP2) || defined(RTCARPLAY_USB_HOST)
             for (size_t row = 0; row < CARPLAY_PHONE_MANEUVER_ROWS && media->maneuvers[row].present; ++row)
                 for (size_t slot = 0; slot < sizeof(s_app.maneuver_cache) / sizeof(s_app.maneuver_cache[0]); ++slot)
@@ -3517,7 +3539,8 @@ size_t carplay_app_phone_artwork(uint32_t revision, uint8_t *buffer, size_t capa
     if (s_receiver_running && !s_receiver_shutting_down && s_app.lock &&
         rt_mutex_take(s_app.lock, RT_WAITING_NO) == RT_EOK)
     {
-        if (revision == s_app.phone_media.track.artwork_revision && s_app.phone_artwork_size <= capacity)
+        if (revision == s_app.phone_artwork_revision && s_app.phone_artwork_size <= capacity &&
+            (revision == s_app.phone_media.track.artwork_revision || revision == s_app.iap2_track.artwork_revision))
         {
             size = s_app.phone_artwork_size;
             memcpy(buffer, s_phone_artwork, size);

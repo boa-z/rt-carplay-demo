@@ -220,7 +220,7 @@ typedef struct
 } carplay_phone_track_t;
 
 #define CARPLAY_PHONE_MANEUVER_ROWS 3U
-#define CARPLAY_PHONE_ARTWORK_MAX   (96U * 1024U)
+#define CARPLAY_PHONE_ARTWORK_MAX   (192U * 1024U)
 
 typedef struct
 {

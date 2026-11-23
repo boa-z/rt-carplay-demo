@@ -36,6 +36,7 @@ static char stored_bt_name[CARPLAY_BT_NAME_MAX + 1] = CARPLAY_BT_NAME_DEFAULT;
 static bool preferences_error;
 static rtcp_appearance_setting_t model_phone_appearance;
 static carplay_phone_media_t model_phone_media;
+static bool cover_read_busy;
 static bool clock_received;
 static bool clock_automatic = true;
 static int clock_offset;
@@ -57,6 +58,17 @@ bool carplay_app_phone_media(carplay_phone_media_t *media)
 
 size_t carplay_app_phone_artwork(uint32_t revision, uint8_t *buffer, size_t capacity)
 {
+    if (cover_read_busy)
+        return 0;
+    if (revision == 3)
+    {
+        FILE *file = fopen(CARPLAY_PREVIEW_JPEG, "rb");
+        assert(file);
+        size_t length = fread(buffer, 1, capacity, file);
+        assert(feof(file) && !ferror(file));
+        fclose(file);
+        return length;
+    }
     static const uint8_t png[] = {
         0x89,
         0x50,
@@ -745,6 +757,40 @@ int main(int argc, char **argv)
     assert(!strcmp(lv_label_get_text(phone_clock), "2026-11-21 16:42:19  UTC+00:00"));
     assert(!strcmp(lv_label_get_text(phone_clock_mode), TR("iPhone time received")));
     screenshot(argv[1], "03-settings-phone_dark_zh");
+    model_phone_media.track.artwork_revision = 3;
+    cover_read_busy = true;
+    update_page(NULL);
+    assert(!lv_obj_has_flag(phone_cover, LV_OBJ_FLAG_HIDDEN));
+    cover_read_busy = false;
+    update_page(NULL);
+    assert(!lv_obj_has_flag(phone_cover, LV_OBJ_FLAG_HIDDEN));
+    assert(lv_obj_has_flag(phone_cover_placeholder, LV_OBJ_FLAG_HIDDEN));
+    const lv_image_dsc_t *cover_image = lv_image_get_src(phone_cover);
+    assert(cover_image->header.cf == LV_COLOR_FORMAT_RGB565);
+    assert(cover_image->header.w == 96U && cover_image->header.h == 52U);
+    assert(lv_image_get_scale(phone_cover) == LV_SCALE_NONE);
+    const uint16_t *cover_pixels = (const uint16_t *)cover_image->data;
+    unsigned colors = 0;
+    for (uint32_t row = 0; row < cover_image->header.h; ++row)
+        for (uint32_t col = 0; col < cover_image->header.w; ++col)
+            colors += cover_pixels[row * cover_image->header.stride / 2U + col] != cover_pixels[0];
+    assert(colors > 100U);
+    lv_refr_now(NULL);
+    lv_area_t cover_area;
+    lv_obj_get_coords(phone_cover, &cover_area);
+    for (unsigned sample = 1; sample <= 3; ++sample)
+    {
+        unsigned col = cover_image->header.w * sample / 4U;
+        unsigned row = cover_image->header.h * sample / 4U;
+        uint16_t expected = cover_pixels[row * cover_image->header.stride / 2U + col];
+        unsigned screen_x = (unsigned)cover_area.x1 + col;
+        unsigned screen_y = (unsigned)cover_area.y1 + row;
+        assert(screen_x < 1024U && screen_y < 600U);
+        const uint8_t *pixel = pixels + (screen_y * 1024U + screen_x) * 4U;
+        assert(abs((int)pixel[0] - (int)((expected & 31U) * 255U / 31U)) <= 4);
+        assert(abs((int)pixel[1] - (int)(((expected >> 5) & 63U) * 255U / 63U)) <= 4);
+        assert(abs((int)pixel[2] - (int)((expected >> 11) * 255U / 31U)) <= 4);
+    }
     lv_obj_t *phone_page = settings_pages[SETTINGS_PHONE];
     lv_obj_scroll_to_y(phone_page, lv_obj_get_scroll_y(phone_page) + lv_obj_get_scroll_bottom(phone_page), LV_ANIM_OFF);
     assert(lv_obj_get_scroll_y(phone_page) > 0 && lv_obj_get_scroll_bottom(phone_page) == 0);
