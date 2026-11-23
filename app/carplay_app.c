@@ -716,7 +716,9 @@ static int on_screen_message(rtcp_video_message_type_t type,
                              uint64_t arrival_time_us, void *context)
 {
     (void)prefix_capacity;
+#if !defined(RTCARPLAY_VIDEO)
     (void)arrival_time_us;
+#endif
     app_state_t *app = context;
     bool configuration = type == RTCP_VIDEO_CONFIG_H264;
     if (!configuration)
@@ -733,6 +735,13 @@ static int on_screen_message(rtcp_video_message_type_t type,
     {
         APP_LOG("screen H.264 configuration: %u bytes", (unsigned)annex_b_len);
     }
+#if defined(RTCARPLAY_VIDEO)
+    if (app->on_screen == carplay_video_sink_frame)
+    {
+        carplay_video_sink_frame_at(configuration, annex_b, annex_b_len, sender_time_ns, arrival_time_us);
+        return RTCP_OK;
+    }
+#endif
     if (app->on_screen != NULL)
     {
         app->on_screen(configuration, annex_b, annex_b_len, sender_time_ns,
@@ -3661,6 +3670,15 @@ void carplay_app_performance_report(void)
     app_state_t *app = &s_app;
     if (!s_receiver_running || !app->lock)
         return;
+    if (!enabled)
+    {
+        app->perf_ms = 0;
+        return;
+    }
+    uint32_t now = (uint32_t)rt_tick_get_millisecond();
+    uint32_t dt = now - app->perf_ms;
+    if (app->perf_ms && dt < 5000U)
+        return;
     rtcp_screen_stats_t rx;
     if (rt_mutex_take(app->lock, RT_WAITING_NO) != RT_EOK)
         return;
@@ -3668,24 +3686,19 @@ void carplay_app_performance_report(void)
     (void)rt_mutex_release(app->lock);
     if (!rx.frames && !rx.owner_calls)
         return;
-    uint32_t now = (uint32_t)rt_tick_get_millisecond();
     carplay_video_perf_t video;
     carplay_video_sink_perf(&video);
-    /* Keep the baseline fresh while muted; enabling starts a new window. */
-    if (!enabled || !app->perf_ms)
+    if (!app->perf_ms)
     {
         app->perf_ms = now;
         app->perf_screen = rx;
         app->perf_video = video;
         return;
     }
-    uint32_t dt = now - app->perf_ms;
-    if (dt < 5000U)
-        return;
     const rtcp_screen_stats_t *old = &app->perf_screen;
     const carplay_video_perf_t *prev = &app->perf_video;
     unsigned rx10 = (unsigned)((uint64_t)(rx.frames - old->frames) * 10000U / dt);
-    unsigned show10 = (unsigned)((uint64_t)(video.frames - prev->frames) * 10000U / dt);
+    unsigned show10 = (unsigned)((uint64_t)(video.latched - prev->latched) * 10000U / dt);
     unsigned messages = rx.messages - old->messages;
     unsigned gaps = rx.frame_gap_count - old->frame_gap_count;
     unsigned sender = rx.sender_gap_count - old->sender_gap_count;
@@ -3710,6 +3723,28 @@ void carplay_app_performance_report(void)
                dequeued ? (unsigned)((video.queue_ms - prev->queue_ms) / dequeued) : 0,
                decodes ? (unsigned)((video.decode_ms - prev->decode_ms) / decodes) : 0,
                presents ? (unsigned)((video.present_ms - prev->present_ms) / presents) : 0);
+    const carplay_video_window_t *window = &video.window;
+    rt_kprintf("[carplay-perf] peak_window=%u queue_ms p95/max=%u/%u decode_us p95/max=%u/%u\n",
+               window->peak, window->queue_p95_ms, window->queue_max_ms,
+               window->decode_p95_us, window->decode_max_us);
+    rt_kprintf("[carplay-perf] packet_waits=%u packet_max_us=%u frame_starves=%u\n",
+               window->packet_waits, window->packet_wait_max_us, window->frame_starves);
+    rt_kprintf("[carplay-perf] submit_max_us=%u fence_max_us=%u fence_fallbacks=%u\n",
+               window->submit_max_us, window->fence_max_us, window->fence_fallbacks);
+    rt_kprintf("[carplay-perf] enqueue_max_us alloc/copy/lock_wait/hold=%u/%u/%u/%u\n",
+               window->alloc_max_us, window->copy_max_us, window->lock_wait_max_us, window->lock_hold_max_us);
+    rt_kprintf("[carplay-perf] pressure_peak=%u deferred=%u discarded=%u filtered=%u\n",
+               window->pressure_peak, window->deferred_outputs,
+               window->discarded_outputs, window->recovery_filtered);
+    rt_kprintf("[carplay-perf] rx_latch_ms p95/max=%u/%u samples=%u\n",
+               window->rx_latch_p95_ms, window->rx_latch_max_ms, window->rx_latch_samples);
+    if (window->overflows)
+    {
+        rt_kprintf("[carplay-perf] queue_full count=%u depth=%u oldest_ms=%u\n",
+                   window->overflows, window->overflow_depth, window->overflow_oldest_ms);
+        rt_kprintf("[carplay-perf] last_overflow packet_waits=%u frame_starves=%u\n",
+                   window->overflow_packet_waits, window->overflow_frame_starves);
+    }
     rt_kprintf("[screen-wait] owner_calls=%u ge100ms=%u max_total_us=%u\n",
                rx.owner_calls - old->owner_calls, rx.owner_gap_over100ms - old->owner_gap_over100ms,
                rx.owner_gap_max_us);

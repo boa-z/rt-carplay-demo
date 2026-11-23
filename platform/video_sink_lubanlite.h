@@ -60,8 +60,26 @@ void carplay_video_sink_frame(bool configuration, const uint8_t *annex_b,
                               size_t annex_b_len, uint64_t sender_time_ns,
                               void *context);
 
+/* Same queue admission, with the complete-message arrival time from the
+ * RT-Thread receiver's monotonic clock. */
+void carplay_video_sink_frame_at(bool configuration, const uint8_t *annex_b,
+                                 size_t annex_b_len, uint64_t sender_time_ns,
+                                 uint64_t arrival_time_us);
+
 /* Coherent diagnostic counters copied with interrupts briefly masked on this
  * single-core target. These are elapsed wall times, not isolated CPU costs. */
+typedef struct
+{
+    unsigned peak, queue_p95_ms, queue_max_ms, decode_p95_us, decode_max_us;
+    unsigned packet_waits, packet_wait_max_us, frame_starves;
+    unsigned submit_max_us, fence_max_us, fence_fallbacks;
+    unsigned alloc_max_us, copy_max_us, lock_wait_max_us, lock_hold_max_us;
+    unsigned overflows, overflow_depth, overflow_oldest_ms;
+    unsigned overflow_packet_waits, overflow_frame_starves;
+    unsigned pressure_peak, deferred_outputs, discarded_outputs, recovery_filtered;
+    unsigned rx_latch_samples, rx_latch_p95_ms, rx_latch_max_ms;
+} carplay_video_window_t;
+
 typedef struct
 {
     unsigned frames, latched, packets, drops, errors, pending, queue_peak;
@@ -69,5 +87,9 @@ typedef struct
      * including retained-frame retries, excluding static layout reapplication. */
     unsigned dequeued, decode_calls, present_calls;
     uint64_t queue_ms, decode_ms, present_ms;
+    carplay_video_window_t window;
 } carplay_video_perf_t;
+
+/* Reads lifetime totals and closes the diagnostic window for its sole caller.
+ * P95 is a histogram estimate. Maxima and samples are scoped to that window. */
 void carplay_video_sink_perf(carplay_video_perf_t *stats);

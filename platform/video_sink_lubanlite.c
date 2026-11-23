@@ -29,6 +29,7 @@
 #include "artinchip_fb.h"
 #include "mpp_decoder.h"
 #include "rtcp/rtcp.h"
+#include "rtcp_rtthread.h"
 
 #define TAG "carplay-vid"
 
@@ -46,11 +47,33 @@
 #define SINK_FENCE_TIMEOUT_MS   100U
 #define SINK_MAX_PACKET_RETRIES 2000U
 
+static const unsigned perf_bins_us[] = {
+    1000,
+    4000,
+    8000,
+    12000,
+    16000,
+    20000,
+    25000,
+    33000,
+    50000,
+    75000,
+    100000,
+    150000,
+    250000,
+    500000,
+    UINT_MAX,
+};
+#define PERF_BIN_COUNT (sizeof(perf_bins_us) / sizeof(perf_bins_us[0]))
+
+extern unsigned long long aic_get_time_us(void);
+
 typedef struct
 {
     uint8_t *data;
     size_t len;
     uint32_t pts_us;
+    uint32_t arrival_ms;
     uint32_t queued_ms;
     uint32_t overflow_ms;
     bool configure;
@@ -61,6 +84,7 @@ typedef struct
 typedef struct
 {
     uint32_t start_ms;
+    uint32_t fence_start_us;
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
     rtcp_display_rect_t destination;
     uint32_t generation;
@@ -87,7 +111,7 @@ typedef struct
     nal_entry_t queue[SINK_QUEUE_LENGTH];
     atomic_uint head;
     atomic_uint tail;
-    bool queue_wait_idr;
+    atomic_bool queue_wait_idr;
     uint32_t queue_overflow_ms;
     atomic_uint queue_overflows;
     atomic_uint queue_discarded;
@@ -108,6 +132,7 @@ typedef struct
     bool have_pending_scanout; /* An attempted update has no confirmed latch. */
     struct mpp_frame ready_scanout;
     bool have_ready_scanout;
+    bool ready_deferred;
     bool async_scanout;
     bool fence_armed;
     unsigned fence_sequence;
@@ -135,6 +160,12 @@ typedef struct
     atomic_bool recovery_pending;
     bool reset_pending;
     bool defer_present;
+    unsigned display_pressure;
+    uint32_t last_submit_ms;
+    carplay_video_window_t window;
+    unsigned queue_hist[PERF_BIN_COUNT];
+    unsigned decode_hist[PERF_BIN_COUNT];
+    unsigned rx_latch_hist[PERF_BIN_COUNT];
     atomic_uint queue_peak;
     atomic_uint dequeued;
     atomic_uint_fast64_t queue_wait_ms;
@@ -153,6 +184,45 @@ typedef struct
 static uint32_t sink_now_ms(void)
 {
     return (uint32_t)rt_tick_get_millisecond();
+}
+
+static uint32_t sink_now_us(void)
+{
+    return (uint32_t)aic_get_time_us();
+}
+
+static void update_max(unsigned *maximum, unsigned sample)
+{
+    if (sample > *maximum)
+        *maximum = sample;
+}
+
+static void observe_latency(unsigned *hist, unsigned sample)
+{
+    unsigned bin = 0;
+    while (sample > perf_bins_us[bin])
+        ++bin;
+    ++hist[bin];
+}
+
+static unsigned ms_to_us(unsigned ms)
+{
+    return ms > UINT_MAX / 1000U ? UINT_MAX : ms * 1000U;
+}
+
+static unsigned latency_p95(const unsigned *hist, unsigned exact_max)
+{
+    unsigned total = 0;
+    for (unsigned bin = 0; bin < PERF_BIN_COUNT; ++bin)
+        total += hist[bin];
+    unsigned needed = total - total / 20U;
+    for (unsigned bin = 0; bin < PERF_BIN_COUNT; ++bin)
+    {
+        if (hist[bin] >= needed)
+            return perf_bins_us[bin] < exact_max ? perf_bins_us[bin] : exact_max;
+        needed -= hist[bin];
+    }
+    return exact_max;
 }
 
 static video_sink_t s_sink;
@@ -242,10 +312,19 @@ static bool unit_starts_idr(const uint8_t *data, size_t len)
 
 /* The producer owns queue admission under the queue mutex. Keep only the
  * newest queued SPS/PPS when abandoning stale pictures at an overrun. */
-static void start_queue_recovery(video_sink_t *sink, bool incoming_config)
+static unsigned start_queue_recovery(video_sink_t *sink, bool incoming_config, uint8_t **reclaim)
 {
     nal_entry_t config = { 0 };
     unsigned discarded = 0;
+    uint32_t now = sink_now_ms();
+    rt_base_t level = rt_hw_interrupt_disable();
+    ++sink->window.overflows;
+    sink->window.overflow_depth = (sink->head + SINK_QUEUE_LENGTH - sink->tail) % SINK_QUEUE_LENGTH;
+    update_max(&sink->window.peak, sink->window.overflow_depth);
+    sink->window.overflow_oldest_ms = now - sink->queue[sink->tail].queued_ms;
+    sink->window.overflow_packet_waits = sink->window.packet_waits;
+    sink->window.overflow_frame_starves = sink->window.frame_starves;
+    rt_hw_interrupt_enable(level);
     while (sink->tail != sink->head)
     {
         nal_entry_t *entry = &sink->queue[sink->tail];
@@ -253,21 +332,19 @@ static void start_queue_recovery(video_sink_t *sink, bool incoming_config)
         {
             if (config.data != NULL)
             {
-                free(config.data);
-                ++discarded;
+                reclaim[discarded++] = config.data;
             }
             config = *entry;
         }
         else
         {
-            free(entry->data);
-            ++discarded;
+            reclaim[discarded++] = entry->data;
         }
         sink->tail = (sink->tail + 1U) % SINK_QUEUE_LENGTH;
     }
     ++sink->loss_generation;
     ++sink->queue_overflows;
-    sink->queue_overflow_ms = sink_now_ms();
+    sink->queue_overflow_ms = now;
     sink->queue_wait_idr = true;
     sink->queue_discarded += discarded;
     sink->dropped_nals += discarded;
@@ -277,6 +354,7 @@ static void start_queue_recovery(video_sink_t *sink, bool incoming_config)
         sink->queue[sink->head] = config;
         sink->head = (sink->head + 1U) % SINK_QUEUE_LENGTH;
     }
+    return discarded;
 }
 
 static void drop_nal(video_sink_t *sink, const char *reason)
@@ -292,59 +370,101 @@ static void drop_nal(video_sink_t *sink, const char *reason)
 }
 
 static bool enqueue_nal(video_sink_t *sink, const uint8_t *data, size_t len,
-                        uint32_t pts_us, bool configure)
+                        uint32_t pts_us, uint32_t arrival_ms, bool configure)
 {
     if (len == 0U || len > SINK_MAX_UNIT_BYTES)
     {
         drop_nal(sink, "invalid_size");
         return false;
     }
+    bool checked_idr = !configure && sink->queue_wait_idr;
+    bool idr = checked_idr && unit_starts_idr(data, len);
+    if (checked_idr && !idr)
+    {
+        uint32_t lock_start = sink_now_us();
+        if (rt_mutex_take(sink->lock, RT_WAITING_FOREVER) != RT_EOK)
+            return false;
+        uint32_t locked = sink_now_us();
+        bool filtered = sink->queue_wait_idr;
+        if (filtered)
+        {
+            ++sink->queue_discarded;
+            ++sink->dropped_nals;
+        }
+        rt_base_t level = rt_hw_interrupt_disable();
+        sink->window.recovery_filtered += filtered;
+        update_max(&sink->window.lock_wait_max_us, locked - lock_start);
+        update_max(&sink->window.lock_hold_max_us, sink_now_us() - locked);
+        rt_hw_interrupt_enable(level);
+        (void)rt_mutex_release(sink->lock);
+        if (filtered)
+            return false;
+    }
+    uint32_t alloc_start = sink_now_us();
     uint8_t *copy = malloc(len);
     if (copy == NULL)
     {
         drop_nal(sink, "allocation");
         return false;
     }
+    uint32_t copy_start = sink_now_us();
     memcpy(copy, data, len);
+    uint32_t lock_start = sink_now_us();
 
     if (rt_mutex_take(sink->lock, RT_WAITING_FOREVER) != RT_EOK)
     {
         free(copy);
         return false;
     }
+    uint32_t locked = sink_now_us();
+    uint8_t *reclaim[SINK_QUEUE_LENGTH - 1U];
     bool was_empty = sink->head == sink->tail;
     bool overflow = (sink->head + 1U) % SINK_QUEUE_LENGTH == sink->tail;
-    if (overflow)
-        start_queue_recovery(sink, configure);
-    bool overflow_idr = sink->queue_wait_idr && !configure && unit_starts_idr(data, len);
-    if (sink->queue_wait_idr && !configure && !overflow_idr)
+    unsigned reclaim_count = overflow ? start_queue_recovery(sink, configure, reclaim) : 0;
+    bool waiting = sink->queue_wait_idr && !configure;
+    if (waiting && !checked_idr)
+        idr = unit_starts_idr(data, len);
+    bool accepted = !waiting || idr;
+    if (!accepted)
     {
         ++sink->queue_discarded;
         ++sink->dropped_nals;
-        (void)rt_mutex_release(sink->lock);
-        free(copy);
-        if (overflow)
-            rt_kprintf("[" TAG "] input dropped reason=queue_full; prioritizing IDR\n");
-        return false;
     }
-    if (overflow_idr)
-        sink->queue_wait_idr = false;
-    sink->queue[sink->head].data = copy;
-    sink->queue[sink->head].len = len;
-    sink->queue[sink->head].pts_us = pts_us;
-    sink->queue[sink->head].configure = configure;
-    sink->queue[sink->head].overflow_idr = overflow_idr;
-    sink->queue[sink->head].overflow_ms = sink->queue_overflow_ms;
-    sink->queue[sink->head].loss_generation = sink->loss_generation;
-    sink->queue[sink->head].queued_ms = sink_now_ms();
-    sink->head = (sink->head + 1U) % SINK_QUEUE_LENGTH;
+    else
+    {
+        if (waiting)
+            sink->queue_wait_idr = false;
+        sink->queue[sink->head] = (nal_entry_t){
+            .data = copy,
+            .len = len,
+            .pts_us = pts_us,
+            .arrival_ms = arrival_ms,
+            .configure = configure,
+            .overflow_idr = waiting,
+            .overflow_ms = sink->queue_overflow_ms,
+            .loss_generation = sink->loss_generation,
+            .queued_ms = sink_now_ms(),
+        };
+        sink->head = (sink->head + 1U) % SINK_QUEUE_LENGTH;
+    }
     unsigned pending = (sink->head + SINK_QUEUE_LENGTH - sink->tail) % SINK_QUEUE_LENGTH;
     if (pending > sink->queue_peak)
         sink->queue_peak = pending;
+    rt_base_t level = rt_hw_interrupt_disable();
+    update_max(&sink->window.peak, pending);
+    update_max(&sink->window.alloc_max_us, copy_start - alloc_start);
+    update_max(&sink->window.copy_max_us, lock_start - copy_start);
+    update_max(&sink->window.lock_wait_max_us, locked - lock_start);
+    update_max(&sink->window.lock_hold_max_us, sink_now_us() - locked);
+    rt_hw_interrupt_enable(level);
     (void)rt_mutex_release(sink->lock);
+    for (unsigned index = 0; index < reclaim_count; ++index)
+        free(reclaim[index]);
+    if (!accepted)
+        free(copy);
     if (overflow)
         rt_kprintf("[" TAG "] input dropped reason=queue_full; prioritizing IDR\n");
-    return was_empty;
+    return accepted && was_empty;
 }
 
 static bool dequeue_nal(video_sink_t *sink, nal_entry_t *out)
@@ -361,6 +481,10 @@ static bool dequeue_nal(video_sink_t *sink, nal_entry_t *out)
         sink->queue_wait_ms += wait;
         if (wait > sink->queue_wait_max_ms)
             sink->queue_wait_max_ms = wait;
+        rt_base_t level = rt_hw_interrupt_disable();
+        update_max(&sink->window.queue_max_ms, wait);
+        observe_latency(sink->queue_hist, ms_to_us(wait));
+        rt_hw_interrupt_enable(level);
     }
     (void)rt_mutex_release(sink->lock);
     return available;
@@ -368,19 +492,19 @@ static bool dequeue_nal(video_sink_t *sink, nal_entry_t *out)
 
 static void video_frame_owned(bool configuration, const uint8_t *annex_b,
                               size_t annex_b_len, uint64_t sender_time_ns,
-                              void *context)
+                              uint64_t arrival_time_us)
 {
-    (void)context;
     video_sink_t *sink = &s_sink;
     if (!sink->running || annex_b == NULL || annex_b_len == 0U)
         return;
 
     uint32_t pts_us = (uint32_t)(sender_time_ns / 1000U);
+    uint32_t arrival_ms = (uint32_t)(arrival_time_us / 1000U);
     /* Keep SPS/PPS atomic: resetting for each NAL destroys the SPS before
      * decoding its PPS. MPP walks Annex-B start codes inside this packet. */
     if (configuration)
     {
-        if (enqueue_nal(sink, annex_b, annex_b_len, pts_us, true))
+        if (enqueue_nal(sink, annex_b, annex_b_len, pts_us, arrival_ms, true))
             (void)rt_sem_release(sink->wake);
         return;
     }
@@ -389,7 +513,7 @@ static void video_frame_owned(bool configuration, const uint8_t *annex_b,
     if (cursor == NULL)
         return; /* not Annex-B; nothing to feed the decoder */
 
-    if (enqueue_nal(sink, cursor, (size_t)(end - cursor), pts_us, false))
+    if (enqueue_nal(sink, cursor, (size_t)(end - cursor), pts_us, arrival_ms, false))
         (void)rt_sem_release(sink->wake);
 }
 
@@ -471,7 +595,13 @@ static bool submit_scanout(video_sink_t *sink, const struct mpp_frame *frame,
 #endif
     memcpy(&layer.buf, &frame->buf, sizeof(layer.buf));
 
-    if (rt_device_control(sink->fb, AICFB_UPDATE_LAYER_CONFIG, &layer) < 0)
+    uint32_t start = sink_now_us();
+    int result = rt_device_control(sink->fb, AICFB_UPDATE_LAYER_CONFIG, &layer);
+    unsigned elapsed = sink_now_us() - start;
+    rt_base_t level = rt_hw_interrupt_disable();
+    update_max(&sink->window.submit_max_us, elapsed);
+    rt_hw_interrupt_enable(level);
+    if (result < 0)
     {
         ++sink->decode_errors;
         return false;
@@ -520,11 +650,18 @@ static bool present_timed(video_sink_t *sink, const struct mpp_frame *frame, boo
 
 static void commit_scanout(video_sink_t *sink, const struct mpp_frame *frame)
 {
+    uint32_t arrival_ms = (uint32_t)((uint64_t)frame->pts >> 32U);
+    unsigned elapsed_ms = ((uint32_t)rtcp_os_rtthread.now_ms() - arrival_ms) & INT32_MAX;
     if (sink->have_frame)
         (void)mpp_decoder_put_frame(sink->decoder, &sink->held);
     sink->held = *frame;
     sink->have_frame = true;
+    rt_base_t level = rt_hw_interrupt_disable();
     ++sink->latched_frames;
+    ++sink->window.rx_latch_samples;
+    update_max(&sink->window.rx_latch_max_ms, elapsed_ms);
+    observe_latency(sink->rx_latch_hist, ms_to_us(elapsed_ms));
+    rt_hw_interrupt_enable(level);
     if (sink->queue_latch_pending && !sink->recovery_pending &&
         sink->queue_idr_generation == sink->loss_generation &&
         (uint32_t)((uint32_t)frame->pts - sink->queue_idr_pts_us) < (UINT32_MAX / 2U + 1U))
@@ -591,6 +728,11 @@ static void progress_scanout(video_sink_t *sink)
         else
             latched = false;
         sink->fence_armed = false;
+        unsigned fence_age = sink_now_us() - sink->fence_timing.fence_start_us;
+        rt_base_t level = rt_hw_interrupt_disable();
+        update_max(&sink->window.fence_max_us, fence_age);
+        sink->window.fence_fallbacks += !latched;
+        rt_hw_interrupt_enable(level);
         if (!latched)
             latched = wait_scanout(sink);
     }
@@ -598,13 +740,22 @@ static void progress_scanout(video_sink_t *sink)
     {
         sink->fence_timing.start_ms = sink_now_ms();
         bool submitted = submit_scanout(sink, &sink->pending_scanout, &sink->fence_timing);
+        if (submitted)
+            sink->last_submit_ms = sink_now_ms();
         /* Sample after submitting. A missed interrupt costs one refresh but
          * only a subsequent interrupt can release the previous scanout. */
         if (submitted && sink->async_scanout &&
             rt_device_control(sink->fb, AICFB_GET_VSYNC_SEQUENCE, &sink->fence_sequence) >= 0)
         {
+            sink->fence_timing.fence_start_us = sink_now_us();
             sink->fence_armed = true;
             return;
+        }
+        if (submitted && sink->async_scanout)
+        {
+            rt_base_t level = rt_hw_interrupt_disable();
+            ++sink->window.fence_fallbacks;
+            rt_hw_interrupt_enable(level);
         }
         latched = submitted && wait_scanout(sink);
     }
@@ -622,8 +773,28 @@ static void discard_ready_scanout(video_sink_t *sink)
     {
         (void)mpp_decoder_put_frame(sink->decoder, &sink->ready_scanout);
         sink->have_ready_scanout = false;
+        sink->ready_deferred = false;
         ++sink->skipped_frames;
+        rt_base_t level = rt_hw_interrupt_disable();
+        ++sink->window.discarded_outputs;
+        rt_hw_interrupt_enable(level);
     }
+}
+
+static void update_display_pressure(video_sink_t *sink, unsigned depth, unsigned oldest_ms)
+{
+    /* Age alone cannot justify holding decoded output when there is room
+     * in the queue. Leave pacing as soon as there is headroom again. */
+    if (depth >= 12U || (depth >= 10U && oldest_ms >= 120U) ||
+        (sink->display_pressure == 2U && depth >= 10U))
+        sink->display_pressure = 2;
+    else if (depth >= 6U || (sink->display_pressure && depth > 4U))
+        sink->display_pressure = 1;
+    else
+        sink->display_pressure = 0;
+    rt_base_t level = rt_hw_interrupt_disable();
+    update_max(&sink->window.pressure_peak, sink->display_pressure);
+    rt_hw_interrupt_enable(level);
 }
 
 static unsigned drain_frames(video_sink_t *sink)
@@ -662,14 +833,27 @@ static unsigned drain_frames(video_sink_t *sink)
     }
     if (sink->have_ready_scanout && !sink->have_pending_scanout)
     {
-        if (sink->defer_present && !(sink->queue_latch_pending &&
-                                    sink->queue_idr_generation == sink->loss_generation))
+        bool recovering = sink->queue_latch_pending && sink->queue_idr_generation == sink->loss_generation;
+        if (sink->defer_present && !recovering)
         {
             discard_ready_scanout(sink);
             return drained;
         }
+        if (sink->async_scanout && sink->display_pressure == 2U && sink->have_frame && !recovering &&
+            sink_now_ms() - sink->last_submit_ms < 20U)
+        {
+            if (!sink->ready_deferred)
+            {
+                sink->ready_deferred = true;
+                rt_base_t level = rt_hw_interrupt_disable();
+                ++sink->window.deferred_outputs;
+                rt_hw_interrupt_enable(level);
+            }
+            return drained;
+        }
         sink->pending_scanout = sink->ready_scanout;
         sink->have_ready_scanout = false;
+        sink->ready_deferred = false;
         sink->have_pending_scanout = true;
         ++sink->frame_count;
         progress_scanout(sink);
@@ -687,33 +871,53 @@ static int submit_nal(video_sink_t *sink, const nal_entry_t *nal)
     struct mpp_packet packet;
     memset(&packet, 0, sizeof(packet));
     int ret = -1;
+    bool waited = false;
+    uint32_t wait_start = 0;
     for (unsigned attempt = 0; attempt < SINK_MAX_PACKET_RETRIES; ++attempt)
     {
         ret = mpp_decoder_get_packet(sink->decoder, &packet, (int)nal->len);
         if (ret == DEC_OK)
             break;
         if (sink->stop)
-            return -1;
+            break;
         if (ret != DEC_NO_EMPTY_PACKET && ret != -1)
         {
             ++sink->decode_errors;
-            return -1;
+            break;
+        }
+        if (!waited)
+        {
+            waited = true;
+            wait_start = sink_now_us();
+            rt_base_t level = rt_hw_interrupt_disable();
+            ++sink->window.packet_waits;
+            rt_hw_interrupt_enable(level);
         }
         /* Only this thread decodes. Waiting without pumping cannot release
          * either of the two MPP packet slots. */
         pump_decoder(sink);
         if (sink->recovery_pending)
-            return -1;
+            break;
         rt_thread_mdelay(1);
+    }
+    if (waited)
+    {
+        unsigned elapsed = sink_now_us() - wait_start;
+        rt_base_t level = rt_hw_interrupt_disable();
+        update_max(&sink->window.packet_wait_max_us, elapsed);
+        rt_hw_interrupt_enable(level);
     }
     if (ret != DEC_OK)
     {
-        ++sink->decode_errors;
+        if (!sink->stop && !sink->recovery_pending && (ret == DEC_NO_EMPTY_PACKET || ret == -1))
+            ++sink->decode_errors;
         return -1;
     }
     memcpy(packet.data, nal->data, nal->len);
     packet.size = (int)nal->len;
-    packet.pts = (long long)nal->pts_us;
+    /* MPP copies PTS to the matching frame, including reordered output.
+     * Keep sender PTS in the low word for IDR recovery comparisons. */
+    packet.pts = (long long)(((uint64_t)(nal->arrival_ms & INT32_MAX) << 32U) | nal->pts_us);
     ret = mpp_decoder_put_packet(sink->decoder, &packet);
     if (ret != 0)
     {
@@ -730,9 +934,10 @@ static void pump_decoder(video_sink_t *sink)
         return;
     for (int i = 0; i < 32 && !sink->stop; ++i)
     {
-        uint32_t decode_start = sink_now_ms();
+        uint32_t decode_start = sink_now_us();
         int ret = mpp_decoder_decode(sink->decoder);
-        uint32_t decode_elapsed = sink_now_ms() - decode_start;
+        uint32_t decode_us = sink_now_us() - decode_start;
+        uint32_t decode_elapsed = (decode_us + 500U) / 1000U;
         /* Exclude empty probes from per-call averages. Values are elapsed
          * wall time including scheduler/VE waits, not isolated CPU time. */
         if (ret != DEC_NO_READY_PACKET)
@@ -741,6 +946,11 @@ static void pump_decoder(video_sink_t *sink)
             sink->decode_ms += decode_elapsed;
             if (decode_elapsed > sink->decode_max_ms)
                 sink->decode_max_ms = decode_elapsed;
+            rt_base_t level = rt_hw_interrupt_disable();
+            update_max(&sink->window.decode_max_us, decode_us);
+            observe_latency(sink->decode_hist, decode_us);
+            sink->window.frame_starves += ret == DEC_NO_EMPTY_FRAME;
+            rt_hw_interrupt_enable(level);
         }
         if (ret == DEC_NO_READY_PACKET)
             break;
@@ -749,7 +959,11 @@ static void pump_decoder(video_sink_t *sink)
         if (ret == DEC_NO_EMPTY_FRAME)
         {
             if (drain_frames(sink) == 0U)
-                break;
+            {
+                if (!sink->ready_deferred)
+                    break;
+                discard_ready_scanout(sink);
+            }
             continue;
         }
         if (ret != 0)
@@ -995,6 +1209,8 @@ static void sink_thread(void *argument)
                     discard_ready_scanout(sink);
                 }
                 unsigned pending = (sink->head + SINK_QUEUE_LENGTH - sink->tail) % SINK_QUEUE_LENGTH;
+                if (sink->async_scanout)
+                    update_display_pressure(sink, pending + 1U, sink_now_ms() - nal.queued_ms);
                 /* At panel rate, a vsync wait for every output can keep an
                  * existing backlog alive. Skip decoded outputs in bounded
                  * groups while continuing to feed every compressed picture. */
@@ -1010,6 +1226,8 @@ static void sink_thread(void *argument)
             }
         }
         sink->defer_present = false;
+        if (sink->async_scanout && sink->head == sink->tail)
+            update_display_pressure(sink, 0, 0);
         if (!sink->recovery_pending)
             pump_decoder(sink);
         else
@@ -1208,6 +1426,7 @@ static void video_perf_owned(carplay_video_perf_t *out)
 {
     if (!out)
         return;
+    unsigned queue_hist[PERF_BIN_COUNT], decode_hist[PERF_BIN_COUNT], rx_latch_hist[PERF_BIN_COUNT];
     rt_base_t level = rt_hw_interrupt_disable();
     *out = (carplay_video_perf_t){
         .frames = s_sink.frame_count,
@@ -1223,8 +1442,20 @@ static void video_perf_owned(carplay_video_perf_t *out)
         .queue_ms = s_sink.queue_wait_ms,
         .decode_ms = s_sink.decode_ms,
         .present_ms = s_sink.present_ms,
+        .window = s_sink.window,
     };
+    memcpy(queue_hist, s_sink.queue_hist, sizeof(queue_hist));
+    memcpy(decode_hist, s_sink.decode_hist, sizeof(decode_hist));
+    memcpy(rx_latch_hist, s_sink.rx_latch_hist, sizeof(rx_latch_hist));
+    memset(&s_sink.window, 0, sizeof(s_sink.window));
+    memset(s_sink.queue_hist, 0, sizeof(s_sink.queue_hist));
+    memset(s_sink.decode_hist, 0, sizeof(s_sink.decode_hist));
+    memset(s_sink.rx_latch_hist, 0, sizeof(s_sink.rx_latch_hist));
+    s_sink.window.peak = out->pending;
     rt_hw_interrupt_enable(level);
+    out->window.queue_p95_ms = latency_p95(queue_hist, ms_to_us(out->window.queue_max_ms)) / 1000U;
+    out->window.decode_p95_us = latency_p95(decode_hist, out->window.decode_max_us);
+    out->window.rx_latch_p95_ms = latency_p95(rx_latch_hist, ms_to_us(out->window.rx_latch_max_ms)) / 1000U;
 }
 
 /* Public calls retain resources through their final queue/wake access. */
@@ -1267,9 +1498,16 @@ int carplay_video_sink_stop(void)
 void carplay_video_sink_frame(bool configuration, const uint8_t *annex_b,
                               size_t length, uint64_t timestamp, void *context)
 {
+    (void)context;
+    carplay_video_sink_frame_at(configuration, annex_b, length, timestamp, rtcp_os_rtthread.now_us());
+}
+
+void carplay_video_sink_frame_at(bool configuration, const uint8_t *annex_b,
+                                 size_t length, uint64_t timestamp, uint64_t arrival_time_us)
+{
     if (!video_read_enter())
         return;
-    video_frame_owned(configuration, annex_b, length, timestamp, context);
+    video_frame_owned(configuration, annex_b, length, timestamp, arrival_time_us);
     video_read_leave();
 }
 
