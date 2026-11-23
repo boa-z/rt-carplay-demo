@@ -43,6 +43,7 @@
 #define SINK_BITSTREAM_BYTES    (1024U * 1024U)
 #define SINK_PACKET_COUNT       2
 #define SINK_EXTRA_FRAMES       1
+#define SINK_FENCE_TIMEOUT_MS   100U
 #define SINK_MAX_PACKET_RETRIES 2000U
 
 typedef struct
@@ -56,6 +57,15 @@ typedef struct
     bool overflow_idr;
     unsigned loss_generation;
 } nal_entry_t;
+
+typedef struct
+{
+    uint32_t start_ms;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    rtcp_display_rect_t destination;
+    uint32_t generation;
+#endif
+} scanout_timing_t;
 
 typedef struct
 {
@@ -96,6 +106,12 @@ typedef struct
     bool have_frame;
     struct mpp_frame pending_scanout;
     bool have_pending_scanout; /* An attempted update has no confirmed latch. */
+    struct mpp_frame ready_scanout;
+    bool have_ready_scanout;
+    bool async_scanout;
+    bool fence_armed;
+    unsigned fence_sequence;
+    scanout_timing_t fence_timing;
     atomic_bool display_reported;
 
     atomic_bool stop;
@@ -392,10 +408,11 @@ static bool disable_video_layer(video_sink_t *sink)
     return rt_device_control(sink->fb, AICFB_WAIT_FOR_VSYNC, NULL) >= 0;
 }
 
-static bool present_frame(video_sink_t *sink, const struct mpp_frame *frame, bool new_frame)
+static bool submit_scanout(video_sink_t *sink, const struct mpp_frame *frame,
+                           scanout_timing_t *timing)
 {
 #if !defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
-    (void)new_frame;
+    (void)timing;
 #endif
     struct aicfb_layer_data layer;
     memset(&layer, 0, sizeof(layer));
@@ -427,6 +444,8 @@ static bool present_frame(video_sink_t *sink, const struct mpp_frame *frame, boo
     layer.scale_size.height = destination.height;
     layer.pos.x = destination.x;
     layer.pos.y = destination.y;
+    timing->destination = destination;
+    timing->generation = generation;
 #else
     /* Letterbox: keep the source aspect ratio inside the panel.  The DE layer
      * position/scale is in panel pixels, not in the AirPlay display mode, so
@@ -457,31 +476,47 @@ static bool present_frame(video_sink_t *sink, const struct mpp_frame *frame, boo
         ++sink->decode_errors;
         return false;
     }
-    if (rt_device_control(sink->fb, AICFB_WAIT_FOR_VSYNC, &layer) >= 0)
-    {
-#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
-        sink->fusion_generation = generation;
-        carplay_fusion_video_latched(&destination, sink->display_width, sink->display_height,
-                                     generation, sink_now_ms(), new_frame);
-#endif
-        return true;
-    }
-    ++sink->decode_errors;
-    return false;
+    return true;
 }
 
-/* Include retries in presentation timings; these are wall-clock stage costs. */
-static bool present_timed(video_sink_t *sink, const struct mpp_frame *frame, bool new_frame)
+static void finish_scanout(video_sink_t *sink, const scanout_timing_t *timing,
+                           bool new_frame, bool latched)
 {
-    uint32_t start = sink_now_ms();
-    bool presented = present_frame(sink, frame, new_frame);
-    uint32_t elapsed = sink_now_ms() - start;
+    uint32_t elapsed = sink_now_ms() - timing->start_ms;
     ++sink->present_calls;
     sink->present_ms += elapsed;
     if (elapsed > sink->present_max_ms)
         sink->present_max_ms = elapsed;
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+    if (latched)
+    {
+        sink->fusion_generation = timing->generation;
+        carplay_fusion_video_latched(&timing->destination, sink->display_width, sink->display_height,
+                                     timing->generation, sink_now_ms(), new_frame);
+    }
+#else
+    (void)new_frame;
+    (void)latched;
+#endif
+}
+
+static bool wait_scanout(video_sink_t *sink)
+{
+    if (rt_device_control(sink->fb, AICFB_WAIT_FOR_VSYNC, NULL) >= 0)
+        return true;
+    ++sink->decode_errors;
+    return false;
+}
+
+#if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
+static bool present_timed(video_sink_t *sink, const struct mpp_frame *frame, bool new_frame)
+{
+    scanout_timing_t timing = { .start_ms = sink_now_ms() };
+    bool presented = submit_scanout(sink, frame, &timing) && wait_scanout(sink);
+    finish_scanout(sink, &timing, new_frame, presented);
     return presented;
 }
+#endif
 
 static void commit_scanout(video_sink_t *sink, const struct mpp_frame *frame)
 {
@@ -524,6 +559,12 @@ static bool retire_scanout(video_sink_t *sink)
     {
         (void)mpp_decoder_put_frame(sink->decoder, &sink->pending_scanout);
         sink->have_pending_scanout = false;
+        sink->fence_armed = false;
+    }
+    if (sink->have_ready_scanout)
+    {
+        (void)mpp_decoder_put_frame(sink->decoder, &sink->ready_scanout);
+        sink->have_ready_scanout = false;
     }
     if (sink->have_frame)
     {
@@ -533,22 +574,70 @@ static bool retire_scanout(video_sink_t *sink)
     return true;
 }
 
-static unsigned drain_frames(video_sink_t *sink)
+static void progress_scanout(video_sink_t *sink)
 {
-    /* A failed update/vsync leaves hardware ownership uncertain. Retain both
-     * old and attempted scanouts and retry the same frame before taking more
-     * MPP frames. This bounds retained scanouts at two and avoids recycling a
-     * buffer the DE may still read. Also retries with no new decoded output. */
-    if (sink->have_pending_scanout)
+    if (!sink->have_pending_scanout || sink->stop)
+        return;
+    bool latched;
+    if (sink->fence_armed)
     {
-        if (sink->stop || !present_timed(sink, &sink->pending_scanout, true))
-            return 0;
+        unsigned sequence;
+        if (rt_device_control(sink->fb, AICFB_GET_VSYNC_SEQUENCE, &sequence) >= 0)
+        {
+            latched = sequence != sink->fence_sequence;
+            if (!latched && sink_now_ms() - sink->fence_timing.start_ms < SINK_FENCE_TIMEOUT_MS)
+                return;
+        }
+        else
+            latched = false;
+        sink->fence_armed = false;
+        if (!latched)
+            latched = wait_scanout(sink);
+    }
+    else
+    {
+        sink->fence_timing.start_ms = sink_now_ms();
+        bool submitted = submit_scanout(sink, &sink->pending_scanout, &sink->fence_timing);
+        /* Sample after submitting. A missed interrupt costs one refresh but
+         * only a subsequent interrupt can release the previous scanout. */
+        if (submitted && sink->async_scanout &&
+            rt_device_control(sink->fb, AICFB_GET_VSYNC_SEQUENCE, &sink->fence_sequence) >= 0)
+        {
+            sink->fence_armed = true;
+            return;
+        }
+        latched = submitted && wait_scanout(sink);
+    }
+    finish_scanout(sink, &sink->fence_timing, true, latched);
+    if (latched)
+    {
         commit_scanout(sink, &sink->pending_scanout);
         sink->have_pending_scanout = false;
     }
+}
+
+static void discard_ready_scanout(video_sink_t *sink)
+{
+    if (sink->have_ready_scanout)
+    {
+        (void)mpp_decoder_put_frame(sink->decoder, &sink->ready_scanout);
+        sink->have_ready_scanout = false;
+        ++sink->skipped_frames;
+    }
+}
+
+static unsigned drain_frames(video_sink_t *sink)
+{
+    progress_scanout(sink);
+    if (sink->recovery_pending)
+    {
+        discard_ready_scanout(sink);
+        return 0;
+    }
+    if (sink->stop || (sink->have_pending_scanout && !sink->fence_armed))
+        return 0;
+
     unsigned drained = 0U;
-    struct mpp_frame newest;
-    bool have_newest = false;
     while (drained < 8U && !sink->stop && sink->decoder != NULL)
     {
         struct mpp_frame frame;
@@ -566,33 +655,24 @@ static unsigned drain_frames(video_sink_t *sink)
         /* Catch up using decoded output only: never discard compressed
          * reference NALs. MPP keeps separate decoder/display references.
          * The old scanout stays held until the new layer reaches vsync. */
-        if (have_newest)
-        {
-            (void)mpp_decoder_put_frame(sink->decoder, &newest);
-            ++sink->skipped_frames;
-        }
-        newest = frame;
-        have_newest = true;
+        discard_ready_scanout(sink);
+        sink->ready_scanout = frame;
+        sink->have_ready_scanout = true;
         ++drained;
     }
-    if (have_newest)
+    if (sink->have_ready_scanout && !sink->have_pending_scanout)
     {
         if (sink->defer_present && !(sink->queue_latch_pending &&
                                     sink->queue_idr_generation == sink->loss_generation))
         {
-            (void)mpp_decoder_put_frame(sink->decoder, &newest);
-            ++sink->skipped_frames;
+            discard_ready_scanout(sink);
             return drained;
         }
-        bool presented = present_timed(sink, &newest, true);
+        sink->pending_scanout = sink->ready_scanout;
+        sink->have_ready_scanout = false;
+        sink->have_pending_scanout = true;
         ++sink->frame_count;
-        if (presented)
-            commit_scanout(sink, &newest);
-        else
-        {
-            sink->pending_scanout = newest;
-            sink->have_pending_scanout = true;
-        }
+        progress_scanout(sink);
     }
     return drained;
 }
@@ -708,7 +788,8 @@ static int create_decoder(video_sink_t *sink)
     config.pix_fmt = MPP_FMT_NV12;
     config.bitstream_buffer_size = SINK_BITSTREAM_BYTES;
     config.packet_count = SINK_PACKET_COUNT;
-    config.extra_frame_num = SINK_EXTRA_FRAMES;
+    /* Reserve space for the submitted and newest unsent display buffers. */
+    config.extra_frame_num = SINK_EXTRA_FRAMES + (sink->async_scanout ? 2 : 0);
     int ret = mpp_decoder_init(sink->decoder, &config);
     if (ret != 0)
     {
@@ -894,7 +975,7 @@ static void sink_thread(void *argument)
 
     while (!sink->stop)
     {
-        if (rt_sem_take(sink->wake, 10) == RT_EOK)
+        if (rt_sem_take(sink->wake, sink->fence_armed ? 1 : 10) == RT_EOK)
         {
             nal_entry_t nal;
             while (dequeue_nal(sink, &nal))
@@ -911,12 +992,13 @@ static void sink_thread(void *argument)
                         rt_kprintf("[" TAG "] input loss; waiting for IDR\n");
                     sink->wait_idr = true;
                     sink->recovery_pending = true;
+                    discard_ready_scanout(sink);
                 }
                 unsigned pending = (sink->head + SINK_QUEUE_LENGTH - sink->tail) % SINK_QUEUE_LENGTH;
                 /* At panel rate, a vsync wait for every output can keep an
                  * existing backlog alive. Skip decoded outputs in bounded
                  * groups while continuing to feed every compressed picture. */
-                if (sink->have_frame && pending >= 3U)
+                if (!sink->async_scanout && sink->have_frame && pending >= 3U)
                     sink->defer_present = ++backlog_units % 4U != 0U;
                 else
                 {
@@ -930,6 +1012,8 @@ static void sink_thread(void *argument)
         sink->defer_present = false;
         if (!sink->recovery_pending)
             pump_decoder(sink);
+        else
+            progress_scanout(sink);
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
         apply_display_mode(sink);
 #endif
@@ -988,6 +1072,8 @@ static int video_start_owned(uint16_t display_width, uint16_t display_height)
                    (unsigned)display_width, (unsigned)display_height);
     }
 
+    unsigned vsync_sequence;
+    sink->async_scanout = rt_device_control(sink->fb, AICFB_GET_VSYNC_SEQUENCE, &vsync_sequence) >= 0;
     int ret = create_decoder(sink);
     if (ret != RTCP_OK)
         return ret;
@@ -1436,11 +1522,12 @@ static int cmd_carplay_video_owned(int argc, char **argv)
         rt_kprintf("[" TAG "] recovery: repeated_configs=%u waiting_idr=%u skipped_nals=%u\n",
                    sink->repeated_configs, sink->wait_idr ? 1U : 0U,
                    sink->waiting_nals);
-        rt_kprintf("[" TAG "] overflows=%u discarded_units=%u overflow_to_idr_ms last/max=%u/%u samples=%u"
-                   " idr_to_latch_ms last/max=%u/%u samples=%u\n",
-                   sink->queue_overflows, sink->queue_discarded, sink->queue_idr_last_ms,
-                   sink->queue_idr_max_ms, sink->queue_idr_samples, sink->queue_latch_last_ms,
-                   sink->queue_latch_max_ms, sink->queue_latch_samples);
+        rt_kprintf("[" TAG "] overflows=%u discarded_units=%u async_vsync=%u\n",
+                   sink->queue_overflows, sink->queue_discarded, sink->async_scanout ? 1U : 0U);
+        rt_kprintf("[" TAG "] overflow_to_idr_ms last/max=%u/%u samples=%u\n",
+                   sink->queue_idr_last_ms, sink->queue_idr_max_ms, sink->queue_idr_samples);
+        rt_kprintf("[" TAG "] idr_to_latch_ms last/max=%u/%u samples=%u\n",
+                   sink->queue_latch_last_ms, sink->queue_latch_max_ms, sink->queue_latch_samples);
         rt_kprintf("[" TAG "] elapsed_ms avg/max: queue=%u/%u decode=%u/%u present=%u/%u\n",
                    sink->dequeued ? (unsigned)(sink->queue_wait_ms / sink->dequeued) : 0U,
                    (unsigned)sink->queue_wait_max_ms,

@@ -17,6 +17,8 @@ static unsigned packet_type;
 static unsigned render_remaining, render_id, returned[16], return_count;
 static long long render_pts;
 static unsigned updates, vsyncs, displayed_id, wake_signals;
+static bool vsync_sequence_available;
+static unsigned vsync_sequence;
 static bool hardware_reads, disable_queued;
 static bool fail_present, fail_vsync, fail_disable, lifecycle, fail_startup, worker_pending;
 static bool hold_worker, self_worker, reader_pending, check_display_reentry;
@@ -128,6 +130,12 @@ int rt_device_control(rt_device_t d, int cmd, void *arg)
             disable_queued = false;
         }
     }
+    if ((unsigned)cmd == AICFB_GET_VSYNC_SEQUENCE)
+    {
+        if (!vsync_sequence_available)
+            return -1;
+        *(unsigned *)arg = vsync_sequence;
+    }
     if ((unsigned)cmd == AICFB_GET_SCREENINFO)
     {
         struct aicfb_screeninfo *screen = arg;
@@ -153,6 +161,7 @@ int mpp_decoder_init(struct mpp_decoder *d, struct decode_config *c)
 {
     (void)d;
     assert(c->packet_count == 2);
+    assert(c->extra_frame_num == (vsync_sequence_available ? 3 : 1));
     return 0;
 }
 int mpp_decoder_get_packet(struct mpp_decoder *d, struct mpp_packet *p, int size)
@@ -331,6 +340,8 @@ static void reset(void)
     disable_queued = false;
     reference_mode = reference_active = fail_next = false;
     render_remaining = return_count = updates = vsyncs = displayed_id = 0;
+    vsync_sequence_available = false;
+    vsync_sequence = 0;
     render_id = 1;
     render_pts = 0;
     fail_disable = fail_present = fail_vsync = lifecycle = fail_startup = worker_pending = false;
@@ -607,6 +618,47 @@ int main(int argc, char **argv)
     assert(s_sink.display_reported && carplay_video_sink_has_presented()); /* no built-in UI policy */
     assert(return_count == 3 && returned[0] == 1 && returned[1] == 2 && returned[2] == 99);
     assert(s_sink.frame_count == 1 && s_sink.skipped_frames == 2 && s_sink.held.id == 3);
+
+    reset();
+    vsync_sequence_available = s_sink.async_scanout = true;
+    vsync_sequence = UINT_MAX;
+    s_sink.have_frame = true;
+    s_sink.held.id = 99;
+    render_remaining = 1;
+    assert(drain_frames(&s_sink) == 1 && s_sink.fence_armed);
+    assert(vsyncs == 0 && return_count == 0 && s_sink.latched_frames == 0);
+    render_remaining = 2;
+    assert(drain_frames(&s_sink) == 2 && s_sink.ready_scanout.id == 3);
+    assert(vsyncs == 0 && return_count == 1 && returned[0] == 2 && updates == 1);
+    ++vsync_sequence;
+    ++vsyncs;
+    assert(drain_frames(&s_sink) == 0 && s_sink.latched_frames == 1);
+    assert(return_count == 2 && returned[1] == 99 && s_sink.held.id == 1);
+    assert(updates == 2 && s_sink.pending_scanout.id == 3 && !s_sink.have_ready_scanout);
+    assert(drain_frames(&s_sink) == 0 && return_count == 2);
+    ++vsync_sequence;
+    assert(drain_frames(&s_sink) == 0 && s_sink.latched_frames == 2 && s_sink.held.id == 3);
+    assert(return_count == 3 && returned[2] == 1 && !s_sink.have_pending_scanout);
+
+    reset();
+    vsync_sequence_available = s_sink.async_scanout = true;
+    s_sink.have_frame = true;
+    s_sink.held.id = 88;
+    render_remaining = 1;
+    assert(drain_frames(&s_sink) == 1 && s_sink.fence_armed);
+    clock_ms += SINK_FENCE_TIMEOUT_MS;
+    fail_vsync = true;
+    assert(drain_frames(&s_sink) == 0 && s_sink.have_pending_scanout);
+    assert(s_sink.held.id == 88 && !return_count && s_sink.decode_errors == 1);
+    fail_vsync = false;
+    assert(drain_frames(&s_sink) == 0 && s_sink.fence_armed);
+    render_remaining = 1;
+    assert(drain_frames(&s_sink) == 1 && s_sink.have_ready_scanout);
+    fail_vsync = true;
+    assert(!retire_scanout(&s_sink) && !return_count);
+    assert(s_sink.have_frame && s_sink.have_pending_scanout && s_sink.have_ready_scanout);
+    fail_vsync = false;
+    assert(retire_scanout(&s_sink) && return_count == 3 && !hardware_reads);
 
     reset(); /* Failed present/vsync cannot transfer HMI ownership. */
     s_display_observer = display_event;
