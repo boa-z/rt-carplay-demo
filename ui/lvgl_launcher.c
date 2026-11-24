@@ -282,7 +282,7 @@ static void set_text_if_changed(lv_obj_t *label, const char *value)
     lv_label_set_text(label, value);
 }
 
-#if defined(RTCARPLAY_OTA)
+#if defined(RTCARPLAY_OTA) || defined(RTCARPLAY_NETWORK_TIME)
 static lv_obj_t *build_text_keyboard(lv_obj_t *parent, int x, int y, int width, int height)
 {
     lv_obj_t *keyboard = lv_keyboard_create(parent);
