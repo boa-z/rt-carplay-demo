@@ -52,11 +52,11 @@ git range-diff "$old_carplay..$old_projection" "$new_carplay..$new_projection"
 
 Verify that the new SDK is an ancestor of `new_carplay` and that `new_carplay` is an ancestor of `new_projection`. Review any changed or dropped patches in `range-diff`. Check that both branch tips contain `README.md` and `README.zh-CN.md`, and compare each branch's submodule gitlinks against its previous tip. Initialize the pinned submodules and materialize Git LFS objects before building. Update submodule pins in separate product commits when required.
 
-Run the CarPlay host regressions and LVGL previews, build the D213 bootloader and CarPlay image, and build both `rtprojection` and `rtprojection_wireless` when rebasing the Android Auto branch. Record the SDK commit, product commit, submodule commits, defconfig, and build and board results. Coordinate any rewrite of published branches with collaborators and check the expected remote tips before a lease-protected force push. A push to `carplay-oss` can replace the rolling `preview` release.
+Run the CarPlay host regressions and LVGL previews, build the D213 bootloader and CarPlay image, and build both `rtprojection` and `rtprojection_wireless` when rebasing the Android Auto branch. Record the SDK commit, product commit, submodule commits, defconfig, and build and board results. Coordinate any rewrite of published branches with collaborators and check the expected remote tips before a lease-protected force push. A push to `carplay-oss` can replace the rolling `nightly` release.
 
 ## Firmware builds
 
-The `D213 firmware` GitHub Actions workflow runs on pushes to `carplay-oss` and supports manual dispatch. It first runs the SDK and application Host regressions plus both actual-LVGL previews, then builds the single unified firmware and publishes the resulting IMG, A/B OTA package and Bootloader as a rolling `preview` GitHub Release. A push whose commit message contains `[ultra-dev]` skips only the release step: the image is still built and uploaded as an Actions artifact for review. Checkout enables Git LFS and recursive submodules; the SDK contains the Xuantie V2.6.1 Linux toolchain archive and the required Realtek library as LFS objects.
+The `D213 firmware` GitHub Actions workflow runs on pushes to `carplay-oss` and supports manual dispatch. It runs the SDK and application Host regressions and both LVGL previews, builds the firmware, and publishes the complete IMG as a rolling `nightly` GitHub prerelease. A push with `[ultra-dev]` in its commit message still builds and uploads an Actions artifact for review and skips the release. The checkout uses Git LFS and recursive submodules for the Xuantie V2.6.1 Linux toolchain and Realtek library.
 
 ```sh
 python3 -m venv .ci-venv
@@ -67,7 +67,7 @@ bash .ci/build-firmware.sh
 
 Install `build-essential`, `patch`, `dosfstools`, `mtools`, `device-tree-compiler`, `u-boot-tools` and `cpio` on Ubuntu. The build script first compiles `d21x_demo128-nand-carplay_baremetal_bootloader_defconfig` from this repository. It verifies that the packaged Bootloader is byte-identical to the newly built binary. It then applies `d21x_demo128-nand_rt-thread_rtcarplay_defconfig` and produces the complete ArtInChip `.img` container. It does not rely on a prebuilt Bootloader or a second SDK checkout. Before upload, `.ci/verify-image.py` checks the container bounds, all nine component CRC32 values and the mandatory DDR updater, Bootloader and OS records.
 
-The workflow publishes `d213-carplay.img`, the A/B OTA package `ota.cpio`, the matching Bootloader, `version.txt` (the manifest with `version=`, `commit=`, `board=`, `size=` and `sha256=` read by Settings), `source-manifest.txt` and `SHA256SUMS` to the rolling `preview` prerelease. Download them from there and run `sha256sum -c SHA256SUMS` before flashing with the board's ArtInChip tool. These are D213 `demo128-nand-carplay` images for the existing 128 MiB SPI NAND board and panel configuration. The OTA package keeps the same URL across builds.
+The release contains the D213 `demo128-nand-carplay` IMG with its original SDK filename, `source-manifest.txt`, and `SHA256SUMS`. Download them and run `sha256sum -c SHA256SUMS` before a manual USB installation. The release notes link to the current asset for [direct image OTA](ota.md).
 
 Build logs are uploaded on failure. A successful workflow confirms cross-compilation and packaging; physical USB upgrade, NAND boot, panel, audio and iPhone acceptance require a separate board run and are recorded as `NOT_RUN` in the source manifest.
 
@@ -95,4 +95,4 @@ Run `make -C application/rt-thread/rtcarplay check-lubanlite-video SDK_ROOT="$PW
 
 Run `make -C application/rt-thread/rtcarplay -j8 check` under ASan/UBSan after fetching the SDK's pinned mbedTLS. It includes the relocated receiver/audio/pairing tests and the existing video, touch, launcher, bonds, USB DMA, handoff, reconnect and capability tests. The SDK's standalone suite no longer compiles board sources. Generic SDK switches are sourced once from its Kconfig; the application owns hardware selection and source collection. See the SDK [migration guide](../../../../packages/third-party/rt-carplay/docs/luban-lite-migration.md). These are Host device/scheduler models, not physical board acceptance.
 
-CI validates the complete CRC CPIO archive and restricts its mapping to OS and rodata before generating the authorization manifest. The manifest is uploaded after the assets. A rolling-release replacement during transfer fails size or SHA256 validation; check again to obtain a consistent target. See [OTA](ota.md).
+CI also runs the application OTA worker against the generated IMG using modeled HTTP and NAND, covering validation and the inactive OS/Rodata write mapping.
