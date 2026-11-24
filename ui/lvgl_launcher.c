@@ -1926,7 +1926,7 @@ static void ota_source_open(lv_event_t *event)
     carplay_ota_status_t ota;
     carplay_ota_status(&ota);
     lv_textarea_set_text(ota_source_entry, ota.source);
-    lv_label_set_text(ota_source_hint, TR("Enter an HTTP or HTTPS URL to a .img file."));
+    lv_label_set_text(ota_source_hint, TR("Enter an HTTP or HTTPS URL to an OTA .cpio file."));
     show_modal(ota_source_panel);
 }
 
@@ -2003,7 +2003,7 @@ static void ota_update(void)
         lv_obj_remove_state(ota_update_button, LV_STATE_DISABLED);
     else
         lv_obj_add_state(ota_update_button, LV_STATE_DISABLED);
-    const char *action = "Download image";
+    const char *action = "Download update";
     if (ota.state == CARPLAY_OTA_DOWNLOADING)
         action = "Cancel download";
     else if (ota.state == CARPLAY_OTA_READY_TO_INSTALL)
@@ -2061,7 +2061,7 @@ static void build_ota(lv_obj_t *parent)
                                     &carplay_ui_18, ota_action, NULL);
     ota_action_label = lv_obj_get_child(ota_update_button, 0);
 #else
-    ota_update_button = button_text(parent, "Download image", 667, 351, 258, 59, 14,
+    ota_update_button = button_text(parent, "Download update", 667, 351, 258, 59, 14,
                                     CARPLAY_STYLE_ACCENT_CARD, CARPLAY_STYLE_ACCENT_TEXT,
                                     &carplay_ui_18, NULL, NULL);
 #endif

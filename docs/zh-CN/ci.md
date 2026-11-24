@@ -65,9 +65,9 @@ pip install -r .ci/requirements.txt
 bash .ci/build-firmware.sh
 ```
 
-Ubuntu 需要安装 `build-essential`、`patch`、`dosfstools`、`mtools`、`device-tree-compiler`、`u-boot-tools` 和 `cpio`。构建脚本首先从本仓库编译 `d21x_demo128-nand-carplay_baremetal_bootloader_defconfig`，并逐字节核对打包使用的 Bootloader 与新构建二进制一致，再应用 `d21x_demo128-nand_rt-thread_rtcarplay_defconfig`，生成完整 ArtInChip `.img` 容器。此流程不依赖预编译 Bootloader 或另一个 SDK 检出。上传前，`.ci/verify-image.py` 会核对容器边界、全部九个组件的 CRC32，以及必需的 DDR 升级器、Bootloader 和 OS 记录。
+Ubuntu 需要安装 `build-essential`、`patch`、`dosfstools`、`mtools`、`device-tree-compiler`、`u-boot-tools` 和 `cpio`。构建脚本编译 `d21x_demo128-nand-carplay_baremetal_bootloader_defconfig` 并逐字节核对打包使用的 Bootloader，再应用 `d21x_demo128-nand_rt-thread_rtcarplay_defconfig` 生成完整 `.img` 和 SDK 的 `ota.cpio`。CI 检查 IMG 的组件边界和 CRC32，确认两种产物的版本及 OS、Rodata 内容一致，并用模拟 NAND 让原厂 OTA 组件处理实际生成的 CPIO。
 
-发布包含保留 SDK 原名的 D213 `demo128-nand-carplay` IMG、`source-manifest.txt` 和 `SHA256SUMS`。下载后可在手动 USB 烧录前执行 `sha256sum -c SHA256SUMS`。发布说明包含当前镜像的[直链 OTA](ota.md)地址。
+发布保留 USB IMG 和 [OTA 更新包](ota.md)的 SDK 原始文件名。`SHA256SUMS` 覆盖两份固件和 `source-manifest.txt`，下载后可执行 `sha256sum -c SHA256SUMS` 校验。
 
 失败时上传构建日志。工作流成功表示交叉编译和打包通过；实际 USB 升级、NAND 启动、面板、音频和 iPhone 验收需要另行上板，源码清单中记录为 `NOT_RUN`。
 

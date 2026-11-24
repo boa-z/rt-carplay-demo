@@ -13,7 +13,7 @@
 #include <webclient.h>
 #include <aic_crc32.h>
 #include <boot_param.h>
-#include <burn.h>
+#include <ota.h>
 #include <env.h>
 #include <absystem_os.h>
 #include "rtcp/rtcp.h"
@@ -22,13 +22,12 @@
 #include "connection_manager.h"
 #include "network_manager.h"
 
-#define OTA_PAGE        2048U
-#define OTA_CHUNK       4096U
-#define OTA_MAX_SIZE    (32U * 1024U * 1024U)
-#define IMG_HEADER_SIZE 2048U
-#define IMG_META_SIZE   512U
+#define OTA_PAGE         2048U
+#define OTA_CHUNK        OTA_BURN_LEN
+#define OTA_MAX_SIZE     (32U * 1024U * 1024U)
+#define CPIO_HEADER_SIZE 110U
 #ifndef RTCARPLAY_OTA_STAGE
-#define RTCARPLAY_OTA_STAGE "/data/.carplay-update.img"
+#define RTCARPLAY_OTA_STAGE "/data/.carplay-update.cpio"
 #endif
 #ifndef RTCARPLAY_OTA_SOURCE_FILE
 #define RTCARPLAY_OTA_SOURCE_FILE "/data/.carplay-ota-source"
@@ -49,60 +48,21 @@ enum ota_operation
     OTA_SOURCE,
     OTA_CONFIRM
 };
-enum image_member
+struct cpio_member
 {
-    IMG_DDR,
-    IMG_LOADER,
-    IMG_INFO,
-    IMG_SPL,
-    IMG_ENV,
-    IMG_ENV_R,
-    IMG_OS,
-    IMG_RODATA,
-    IMG_DATA,
-    IMG_MEMBER_COUNT
+    uint32_t header, payload, size, checksum;
 };
-
-static const char * const member_names[] = {
-    "image.updater.ddr",
-    "image.updater.spl",
-    "image.info",
-    "image.target.spl",
-    "image.target.env",
-    "image.target.env_r",
-    "image.target.os",
-    "image.target.rodata",
-    "image.target.data",
-};
-static const struct
+struct update_archive
 {
-    const char *name;
-    uint32_t offset;
-    uint32_t capacity;
-} target_layout[] = {
-    [IMG_SPL] = { "spl", 0, 0x100000 },
-    [IMG_ENV] = { "env", 0x100000, 0x40000 },
-    [IMG_ENV_R] = { "env_r", 0x140000, 0x40000 },
-    [IMG_OS] = { "os", 0x180000, 0x800000 },
-    [IMG_RODATA] = { "rodata", 0x1180000, 0xc00000 },
-    [IMG_DATA] = { "data", 0x2980000, 0x2000000 },
-};
-
-struct image_part
-{
-    uint32_t offset, size, crc;
-};
-struct update_image
-{
-    struct image_part os, rodata;
-    uint32_t metadata_crc;
+    struct cpio_member info, os, rodata, trailer;
+    uint32_t crc;
     char version[24];
 };
 
 static struct rt_mutex ota_mutex, stage_guard;
 static bool initialized, worker_active, cancel_requested, boot_health_checked;
 static carplay_ota_status_t status;
-static struct update_image staged;
+static struct update_archive staged;
 static char requested_source[CARPLAY_OTA_SOURCE_MAX];
 
 static bool uses_tls(const char *url)
@@ -143,7 +103,7 @@ static const char *url_path(const char *url)
     return path;
 }
 
-static bool image_url(const char *url)
+static bool archive_url(const char *url)
 {
     if (!url || strlen(url) >= CARPLAY_OTA_SOURCE_MAX)
         return false;
@@ -151,7 +111,7 @@ static bool image_url(const char *url)
     if (!path)
         return false;
     size_t length = strcspn(path, "?");
-    return length > 5 && !memcmp(path + length - 4, ".img", 4) && path[length - 5] != '/';
+    return length > 6 && !memcmp(path + length - 5, ".cpio", 5) && path[length - 6] != '/';
 }
 
 static void set_status(carplay_ota_state_t state, int progress, const char *fmt, ...)
@@ -182,14 +142,13 @@ static int ota_service_init(void)
         char saved[CARPLAY_OTA_SOURCE_MAX];
         size_t length = fread(saved, 1, sizeof(saved) - 1, file);
         saved[length] = 0;
-        if (fgetc(file) == EOF && !ferror(file) && strlen(saved) == length && image_url(saved))
+        if (fgetc(file) == EOF && !ferror(file) && strlen(saved) == length && archive_url(saved))
             strcpy(status.source, saved);
         fclose(file);
     }
     remove(RTCARPLAY_OTA_STAGE);
-    if (!status.source[0])
-        remove("/data/.carplay-update.cpio");
-    set_status(CARPLAY_OTA_IDLE, -1, "Enter a firmware .img URL to get started.");
+    remove("/data/.carplay-update.img");
+    set_status(CARPLAY_OTA_IDLE, -1, "Enter a firmware .cpio URL to get started.");
     initialized = true;
     return RT_EOK;
 }
@@ -328,98 +287,131 @@ static uint32_t read_le32(const unsigned char *field)
            (uint32_t)field[2] << 16 | (uint32_t)field[3] << 24;
 }
 
-static bool field_equals(const unsigned char *field, const char *value)
+static uint32_t cpio_hex(const unsigned char *field)
 {
-    return !memcmp(field, value, strlen(value) + 1);
+    uint32_t value = 0;
+    for (unsigned index = 0; index < 8; ++index)
+    {
+        unsigned char digit = field[index] | 0x20;
+        value = (value << 4) | (digit <= '9' ? digit - '0' : digit - 'a' + 10);
+    }
+    return value;
 }
 
-static bool check_component(FILE *file, unsigned char *buffer, struct image_part part)
+static uint32_t byte_sum(const unsigned char *buffer, unsigned size)
 {
-    if (fseek(file, (long)part.offset, SEEK_SET))
+    uint32_t sum = 0;
+    for (unsigned index = 0; index < size; ++index)
+        sum += buffer[index];
+    return sum;
+}
+
+static bool cpio_header(FILE *file, unsigned char *buffer, struct cpio_member *member,
+                        const char *name, uint32_t length, uint32_t *crc)
+{
+    long position = ftell(file);
+    unsigned namesize = strlen(name) + 1;
+    unsigned header_size = (CPIO_HEADER_SIZE + namesize + 3) & ~3U;
+    if (position < 0 || fread(buffer, 1, header_size, file) != header_size ||
+        memcmp(buffer, "070702", 6) || memcmp(buffer + CPIO_HEADER_SIZE, name, namesize))
         return false;
-    uint32_t crc = 0;
-    for (uint32_t remaining = part.size; remaining;)
+    for (unsigned index = 6; index < CPIO_HEADER_SIZE; ++index)
     {
-        uint32_t count = remaining > OTA_CHUNK ? OTA_CHUNK : remaining;
+        unsigned char digit = buffer[index] | 0x20;
+        if ((digit < '0' || digit > '9') && (digit < 'a' || digit > 'f'))
+            return false;
+    }
+    bool trailer = !strcmp(name, "TRAILER!!!");
+    if (cpio_hex(buffer + 94) != namesize ||
+        (cpio_hex(buffer + 14) & 0170000) != (trailer ? 0U : 0100000U))
+        return false;
+    member->header = (uint32_t)position;
+    member->payload = member->header + header_size;
+    member->size = cpio_hex(buffer + 54);
+    member->checksum = cpio_hex(buffer + 102);
+    *crc = crc32(*crc, buffer, header_size);
+    return member->payload <= length && member->size <= length - member->payload;
+}
+
+static bool cpio_info(unsigned char *buffer, uint32_t length, struct update_archive *archive)
+{
+    char prefix[64];
+    int prefix_size = snprintf(prefix, sizeof(prefix), "[image]%csize = \"%u\";%cversion = \"", 0,
+                               (unsigned)length, 0);
+    if (memcmp(buffer + 4, prefix, prefix_size))
+        return false;
+    const char *version = (const char *)buffer + 4 + prefix_size;
+    const char *end = memchr(version, '"', sizeof(archive->version));
+    if (!end || end == version || strspn(version, "0123456789.") != (size_t)(end - version))
+        return false;
+    memcpy(archive->version, version, end - version);
+    static const char mapping[] =
+        "\";\0board = \"demo128-nand-carplay\";\0[file]\0"
+        "ota_info.bin:file;\0d21x_os.itb:os;\0rodata.fatfs:rodata;\0";
+    if (memcmp(end, mapping, sizeof(mapping)))
+        return false;
+    for (const unsigned char *padding = (const unsigned char *)end + sizeof(mapping);
+         padding < buffer + OTA_CPIO_INFO_LEN; ++padding)
+        if (*padding != 0xff)
+            return false;
+
+    /* mkcpio fills in the total size after creating the archive and the environment CRC. */
+    unsigned char *digits = buffer + 4 + sizeof("[image]\0size = \"") - 1;
+    unsigned char *quote = memchr(digits, '"', prefix_size);
+    size_t digits_size = (size_t)(quote - digits);
+    memmove(digits, quote, buffer + OTA_CPIO_INFO_LEN - quote);
+    memset(buffer + OTA_CPIO_INFO_LEN - digits_size, 0xff, digits_size);
+    return byte_sum(buffer, OTA_CPIO_INFO_LEN) == archive->info.checksum &&
+           crc32(0, buffer + 4, OTA_CPIO_INFO_LEN - 4) == read_le32(buffer);
+}
+
+static bool cpio_payload(FILE *file, unsigned char *buffer, const struct cpio_member *member,
+                         uint32_t *crc)
+{
+    if (!member->size || member->size % OTA_PAGE)
+        return false;
+    uint32_t checksum = 0;
+    for (uint32_t remaining = member->size; remaining;)
+    {
+        unsigned count = remaining > OTA_CHUNK ? OTA_CHUNK : remaining;
         if (fread(buffer, 1, count, file) != count)
             return false;
-        crc = crc32(crc, buffer, count);
+        checksum += byte_sum(buffer, count);
+        *crc = crc32(*crc, buffer, count);
         remaining -= count;
     }
-    return crc == part.crc;
+    return checksum == member->checksum;
 }
 
-static bool verify_image(FILE *file, unsigned char *buffer, struct update_image *image)
+static bool verify_archive(FILE *file, unsigned char *buffer, struct update_archive *archive)
 {
-    memset(image, 0, sizeof(*image));
+    memset(archive, 0, sizeof(*archive));
     if (fseek(file, 0, SEEK_END))
         return false;
     long length = ftell(file);
-    if (length < (long)IMG_HEADER_SIZE || length > (long)OTA_MAX_SIZE ||
-        fseek(file, 0, SEEK_SET) || fread(buffer, 1, IMG_HEADER_SIZE, file) != IMG_HEADER_SIZE ||
-        memcmp(buffer, "AIC.FW\0", 8) || !field_equals(buffer + 8, "d21x") ||
-        !field_equals(buffer + 72, "demo128_nand_carplay_page_2k_block_128k") ||
-        !field_equals(buffer + 200, "spi-nand") || read_le32(buffer + 264) ||
-        !field_equals(buffer + 268, "P=2K,B=128K"))
+    uint32_t *crc = &archive->crc;
+    if (length < 512 || length > (long)OTA_MAX_SIZE || length % 512 ||
+        fseek(file, 0, SEEK_SET) ||
+        !cpio_header(file, buffer, &archive->info, "ota_info.bin", length, crc) ||
+        archive->info.size != OTA_CPIO_INFO_LEN ||
+        fread(buffer, 1, OTA_CPIO_INFO_LEN, file) != OTA_CPIO_INFO_LEN)
         return false;
-    const unsigned char *version_end = memchr(buffer + 136, 0, sizeof(image->version));
-    if (!version_end || version_end == buffer + 136)
+    *crc = crc32(*crc, buffer, OTA_CPIO_INFO_LEN);
+    if (!cpio_info(buffer, length, archive) ||
+        !cpio_header(file, buffer, &archive->os, "d21x_os.itb", length, crc) ||
+        archive->os.size > 0x800000 || !cpio_payload(file, buffer, &archive->os, crc) ||
+        !cpio_header(file, buffer, &archive->rodata, "rodata.fatfs", length, crc) ||
+        archive->rodata.size > 0xc00000 || !cpio_payload(file, buffer, &archive->rodata, crc) ||
+        !cpio_header(file, buffer, &archive->trailer, "TRAILER!!!", length, crc) ||
+        archive->trailer.size || archive->trailer.checksum)
         return false;
-    size_t version_length = (size_t)(version_end - (buffer + 136));
-    if (strspn((const char *)buffer + 136, "0123456789.") != version_length)
+    unsigned padding = (unsigned)length - archive->trailer.payload;
+    if (padding >= 512 || fread(buffer, 1, padding, file) != padding)
         return false;
-    memcpy(image->version, buffer + 136, version_length);
-    uint32_t meta_size = read_le32(buffer + 336), files = read_le32(buffer + 340);
-    if (read_le32(buffer + 332) != IMG_HEADER_SIZE || !meta_size ||
-        meta_size > IMG_MEMBER_COUNT * IMG_META_SIZE || meta_size % IMG_META_SIZE ||
-        files != IMG_HEADER_SIZE + meta_size || files > (uint32_t)length ||
-        read_le32(buffer + 344) != (uint32_t)length - files)
-        return false;
-
-    uint32_t seen = 0, next_payload = files;
-    for (uint32_t offset = IMG_HEADER_SIZE; offset < files; offset += IMG_META_SIZE)
-    {
-        if (fseek(file, (long)offset, SEEK_SET) || fread(buffer, 1, IMG_META_SIZE, file) != IMG_META_SIZE ||
-            memcmp(buffer, "META\0\0\0", 8))
+    for (unsigned index = 0; index < padding; ++index)
+        if (buffer[index])
             return false;
-        unsigned member = 0;
-        while (member < IMG_MEMBER_COUNT && !field_equals(buffer + 8, member_names[member]))
-            ++member;
-        if (member == IMG_MEMBER_COUNT || (seen & (1U << member)))
-            return false;
-        seen |= 1U << member;
-        struct image_part part = { read_le32(buffer + 136), read_le32(buffer + 140), read_le32(buffer + 144) };
-        if (!part.size || part.offset > (uint32_t)length || part.size > (uint32_t)length - part.offset)
-            return false;
-        if (member == IMG_INFO)
-        {
-            if (part.offset || part.size != IMG_HEADER_SIZE)
-                return false;
-        }
-        else
-        {
-            if (part.offset != next_payload)
-                return false;
-            next_payload += (part.size + OTA_PAGE - 1) & ~(OTA_PAGE - 1);
-        }
-        if (member >= IMG_SPL &&
-            (!field_equals(buffer + 72, target_layout[member].name) ||
-             read_le32(buffer + 104) != target_layout[member].offset ||
-             read_le32(buffer + 108) != target_layout[member].capacity ||
-             !field_equals(buffer + 112, "spi-nand") || read_le32(buffer + 132) ||
-             part.size > target_layout[member].capacity))
-            return false;
-        if (member == IMG_OS)
-            image->os = part;
-        else if (member == IMG_RODATA)
-            image->rodata = part;
-        image->metadata_crc = crc32(image->metadata_crc, buffer, IMG_META_SIZE);
-        if (!check_component(file, buffer, part))
-            return false;
-    }
-    const uint32_t required = (1U << IMG_DDR) | (1U << IMG_LOADER) | (1U << IMG_INFO) |
-                              (1U << IMG_SPL) | (1U << IMG_OS) | (1U << IMG_RODATA);
-    return (seen & required) == required && next_payload == (uint32_t)length;
+    return true;
 }
 
 static bool download(FILE *file, unsigned char *buffer)
@@ -435,7 +427,7 @@ static bool download(FILE *file, unsigned char *buffer)
     int length = webclient_content_length_get(session);
     uint32_t total = 0;
     bool complete = false;
-    if (length < 0 || (length >= (int)IMG_HEADER_SIZE && (uint32_t)length <= limit))
+    if (length < 0 || (length >= 512 && (uint32_t)length <= limit))
     {
         while (!cancelled() && carplay_network_valid() && !carplay_active())
         {
@@ -480,8 +472,8 @@ static void download_worker(void)
     bool complete = file && download(file, buffer);
     carplay_network_release();
     if (complete)
-        set_status(CARPLAY_OTA_VERIFYING, -1, "Checking image layout and component checksums.");
-    bool verified = complete && !cancelled() && verify_image(file, buffer, &staged);
+        set_status(CARPLAY_OTA_VERIFYING, -1, "Checking OTA package and component checksums.");
+    bool verified = complete && !cancelled() && verify_archive(file, buffer, &staged);
     if (file && fclose(file))
         verified = false;
     rt_free(buffer);
@@ -492,14 +484,14 @@ static void download_worker(void)
     {
         bool was_cancelled = cancelled();
         set_status(was_cancelled ? CARPLAY_OTA_IDLE : CARPLAY_OTA_FAILED, -1,
-                   was_cancelled ? "Download cancelled." : complete ? "Invalid or incompatible firmware image."
+                   was_cancelled ? "Download cancelled." : complete ? "Invalid or incompatible OTA package."
                                                                     : "Download failed. Check URL, network and free space.");
         return;
     }
     rt_mutex_take(&ota_mutex, RT_WAITING_FOREVER);
     strcpy(status.remote, staged.version);
     rt_mutex_release(&ota_mutex);
-    set_status(CARPLAY_OTA_READY_TO_INSTALL, 100, "Verified image ready to install.");
+    set_status(CARPLAY_OTA_READY_TO_INSTALL, 100, "Verified OTA package ready to install.");
 }
 
 static bool nand_capacity(const char *name, uint32_t bytes)
@@ -517,30 +509,41 @@ static bool nand_capacity(const char *name, uint32_t bytes)
     return bytes <= good;
 }
 
-static bool flash_part(FILE *file, struct image_part part, char *name,
-                       unsigned char *buffer, unsigned char *readback, unsigned index)
+static bool feed_shard(FILE *file, unsigned char *buffer, unsigned size)
 {
-    if (carplay_active() || fseek(file, (long)part.offset, SEEK_SET) ||
-        aic_ota_find_part(name) || aic_ota_erase_part() || !nand_capacity(name, part.size))
+    return !carplay_active() && fread(buffer, 1, size, file) == size &&
+           ota_shard_download_fun((char *)buffer, (int)size) == RT_EOK;
+}
+
+static bool feed_archive(FILE *file, unsigned char *buffer, const struct update_archive *archive,
+                         const char *os, const char *rodata)
+{
+    if (fseek(file, 0, SEEK_SET) || !feed_shard(file, buffer, archive->os.header))
         return false;
-    uint32_t crc = 0;
-    for (uint32_t written = 0; written < part.size;)
+
+    const struct cpio_member *members[] = { &archive->os, &archive->rodata };
+    const char *slots[] = { os, rodata };
+    unsigned header_prefix = 0;
+    for (unsigned index = 0; index < 2; ++index)
     {
-        uint32_t count = part.size - written;
-        if (count > OTA_CHUNK)
-            count = OTA_CHUNK;
-        uint32_t aligned = (count + OTA_PAGE - 1) & ~(OTA_PAGE - 1);
-        memset(buffer, 0xff, aligned);
-        if (carplay_active() || fread(buffer, 1, count, file) != count ||
-            aic_ota_part_write(written, buffer, aligned) ||
-            aic_ota_part_read(written, readback, aligned) || memcmp(buffer, readback, aligned))
+        const struct cpio_member *member = members[index];
+        if (!feed_shard(file, buffer, member->payload - member->header - header_prefix) ||
+            !nand_capacity(slots[index], member->size))
             return false;
-        crc = crc32(crc, readback, count);
-        written += count;
-        set_status(CARPLAY_OTA_APPLYING, (int)(index * 50 + (uint64_t)written * 50 / part.size),
-                   "Writing inactive A/B slots. Keep power connected.");
+        for (unsigned written = 0; written < member->size;)
+        {
+            unsigned remaining = member->size - written;
+            unsigned count = remaining > OTA_CHUNK ? OTA_CHUNK : remaining;
+            /* The SDK drains a short final burn only when the next header starts arriving. */
+            header_prefix = count < OTA_CHUNK ? 4 : 0;
+            if (!feed_shard(file, buffer, count + header_prefix))
+                return false;
+            written += count;
+            set_status(CARPLAY_OTA_APPLYING, (int)(index * 50 + (uint64_t)written * 50 / member->size),
+                       "Writing inactive A/B slots. Keep power connected.");
+        }
     }
-    return crc == part.crc;
+    return feed_shard(file, buffer, archive->trailer.payload - archive->trailer.header - header_prefix);
 }
 
 static void install_worker(void)
@@ -554,32 +557,32 @@ static void install_worker(void)
     }
     rt_mutex_take(&stage_guard, RT_WAITING_FOREVER);
     FILE *file = fopen(RTCARPLAY_OTA_STAGE, "rb");
-    unsigned char *buffer = rt_malloc(2 * OTA_CHUNK);
-    struct update_image image;
-    char *os = slot == 'A' ? "os_r" : "os";
-    char *rodata = slot == 'A' ? "rodata_r" : "rodata";
+    unsigned char *buffer = rt_malloc(OTA_CHUNK);
+    struct update_archive archive;
+    const char *os = slot == 'A' ? "os_r" : "os";
+    const char *rodata = slot == 'A' ? "rodata_r" : "rodata";
     bool success = false;
-    if (!file || !buffer || !verify_image(file, buffer, &image) ||
-        image.metadata_crc != staged.metadata_crc)
-        set_status(CARPLAY_OTA_FAILED, -1, "Staged image verification failed. Download it again.");
-    else if (!nand_capacity(os, image.os.size) || !nand_capacity(rodata, image.rodata.size))
+    if (!file || !buffer || !verify_archive(file, buffer, &archive) || archive.crc != staged.crc)
+        set_status(CARPLAY_OTA_FAILED, -1, "Staged OTA package verification failed. Download it again.");
+    else if (!nand_capacity(os, archive.os.size) || !nand_capacity(rodata, archive.rodata.size))
         set_status(CARPLAY_OTA_FAILED, -1, "Inactive slots have insufficient usable NAND space.");
     else
     {
         set_status(CARPLAY_OTA_APPLYING, 0, "Writing inactive A/B slots. Keep power connected.");
-        if (!flash_part(file, image.os, os, buffer, buffer + OTA_CHUNK, 0) ||
-            !flash_part(file, image.rodata, rodata, buffer, buffer + OTA_CHUNK, 1) || carplay_active())
+        aic_reset_upgrade_status();
+        bool ready = ota_init() == RT_EOK;
+        bool written = ready && feed_archive(file, buffer, &archive, os, rodata);
+        if (ready)
+            ota_deinit();
+        if (!written || carplay_active())
             set_status(CARPLAY_OTA_FAILED, -1, "Inactive-slot write or readback failed. Current slot retained.");
         else
         {
-            aic_reset_upgrade_status();
-            aic_set_upgrade_status("d21x_os.itb");
-            aic_set_upgrade_status("rodata.fatfs");
             success = aic_upgrade_end() == 0 && commit_recorded(slot);
-            aic_reset_upgrade_status();
             set_status(success ? CARPLAY_OTA_REBOOTING : CARPLAY_OTA_FAILED, success ? 100 : -1,
                        success ? "Restarting into the inactive slots." : "A/B commit failed. Inspect the boot environment.");
         }
+        aic_reset_upgrade_status();
     }
     rt_free(buffer);
     if (file)
@@ -780,7 +783,7 @@ int carplay_ota_cancel(void)
 
 int carplay_ota_source_set(const char *url)
 {
-    return image_url(url) ? launch(OTA_SOURCE, 0, url) : -RT_EINVAL;
+    return archive_url(url) ? launch(OTA_SOURCE, 0, url) : -RT_EINVAL;
 }
 
 static int ota_command(int argc, char **argv)
@@ -802,13 +805,13 @@ static int ota_command(int argc, char **argv)
         return carplay_ota_source_set(argv[2]);
     if (argc == 1 || (argc == 2 && !strcmp(argv[1], "status")))
     {
-        rt_kprintf("Firmware %s (%.8s), slot %s, image %s\n%s\n%s\n", out.current,
+        rt_kprintf("Firmware %s (%.8s), slot %s, package %s\n%s\n%s\n", out.current,
                    out.current_commit, out.slot, out.remote, out.source, out.message);
         if (out.state == CARPLAY_OTA_READY_TO_INSTALL)
             rt_kprintf("Confirm with: carplay_ota install %u\n", (unsigned)out.candidate);
         return RT_EOK;
     }
-    rt_kprintf("usage: carplay_ota status|source <img-url>|download|cancel|install <candidate>\n");
+    rt_kprintf("usage: carplay_ota status|source <cpio-url>|download|cancel|install <candidate>\n");
     return -RT_EINVAL;
 }
-MSH_CMD_EXPORT_ALIAS(ota_command, carplay_ota, Update inactive A / B slots from a firmware image);
+MSH_CMD_EXPORT_ALIAS(ota_command, carplay_ota, Update inactive A / B slots from a firmware package);

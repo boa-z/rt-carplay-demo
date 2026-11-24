@@ -1,7 +1,7 @@
 /*
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
- * Firmware version and direct image A/B update service.
+ * Firmware version and CPIO A/B update service.
  *
  * The launcher only reads a snapshot; every blocking step (TLS handshake,
  * HTTP transfer, flash write) runs in the OTA worker thread so the LVGL task

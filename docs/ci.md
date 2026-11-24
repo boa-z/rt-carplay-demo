@@ -65,9 +65,9 @@ pip install -r .ci/requirements.txt
 bash .ci/build-firmware.sh
 ```
 
-Install `build-essential`, `patch`, `dosfstools`, `mtools`, `device-tree-compiler`, `u-boot-tools` and `cpio` on Ubuntu. The build script first compiles `d21x_demo128-nand-carplay_baremetal_bootloader_defconfig` from this repository. It verifies that the packaged Bootloader is byte-identical to the newly built binary. It then applies `d21x_demo128-nand_rt-thread_rtcarplay_defconfig` and produces the complete ArtInChip `.img` container. It does not rely on a prebuilt Bootloader or a second SDK checkout. Before upload, `.ci/verify-image.py` checks the container bounds, all nine component CRC32 values and the mandatory DDR updater, Bootloader and OS records.
+Install `build-essential`, `patch`, `dosfstools`, `mtools`, `device-tree-compiler`, `u-boot-tools` and `cpio` on Ubuntu. The build script compiles `d21x_demo128-nand-carplay_baremetal_bootloader_defconfig` and verifies that the packaged Bootloader matches the new binary. It then applies `d21x_demo128-nand_rt-thread_rtcarplay_defconfig` to produce the factory `.img` and SDK `ota.cpio`. CI checks the IMG component bounds and CRC32, matches the version and OS/Rodata payloads across both files, then feeds the generated CPIO through the actual SDK downloader with modeled NAND.
 
-The release contains the D213 `demo128-nand-carplay` IMG with its original SDK filename, `source-manifest.txt`, and `SHA256SUMS`. Download them and run `sha256sum -c SHA256SUMS` before a manual USB installation. The release notes link to the current asset for [direct image OTA](ota.md).
+The release keeps the SDK filenames for both the USB IMG and [OTA package](ota.md). `SHA256SUMS` covers both files and `source-manifest.txt`. After downloading the assets, run `sha256sum -c SHA256SUMS` to verify them.
 
 Build logs are uploaded on failure. A successful workflow confirms cross-compilation and packaging; physical USB upgrade, NAND boot, panel, audio and iPhone acceptance require a separate board run and are recorded as `NOT_RUN` in the source manifest.
 

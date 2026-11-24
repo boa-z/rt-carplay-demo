@@ -1164,11 +1164,11 @@ int main(int argc, char **argv)
         if (lv_obj_check_type(child, &lv_keyboard_class))
             inside(child);
     }
-    lv_textarea_set_text(ota_source_entry, "http://192.168.1.20:8080/d213/carplay.img");
+    lv_textarea_set_text(ota_source_entry, "http://192.168.1.20:8080/d213/ota.cpio");
     screenshot(argv[1], "04-ota-source-http_dark_en");
     click_caption(ota_source_panel, "Save");
     assert(lv_obj_has_flag(ota_source_panel, LV_OBJ_FLAG_HIDDEN));
-    assert(!strcmp(ota_model.source, "http://192.168.1.20:8080/d213/carplay.img"));
+    assert(!strcmp(ota_model.source, "http://192.168.1.20:8080/d213/ota.cpio"));
 
     network_model.available = network_model.route_ready = true;
     update_page(NULL);

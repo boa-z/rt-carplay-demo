@@ -61,7 +61,7 @@ python -I tools/generate_icon_assets.py <path>/lucide.ttf
 
 ## OTA
 
-页面调用 `platform/ota_lubanlite.c` 的 `carplay_ota_*` 服务，显示已安装版本、槽位、保存的 `.img` 地址以及可用的下载和安装进度。下载、镜像校验和安装在工作线程中执行。页面在安装前显示已校验的目标版本，等待用户确认。详见[固件更新](ota.md)。
+页面调用 `platform/ota_lubanlite.c` 的 `carplay_ota_*` 服务，显示已安装版本、槽位、保存的 `.cpio` 地址以及可用的下载和安装进度。下载、更新包校验和安装在工作线程中执行。页面在安装前显示已校验的目标版本，等待用户确认。详见[固件更新](ota.md)。
 
 ## 手机控制
 

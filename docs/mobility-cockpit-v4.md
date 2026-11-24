@@ -61,7 +61,7 @@ The Settings page writes the display mode through `carplay_connection_set_displa
 
 ## OTA
 
-The page controls `carplay_ota_*` in `platform/ota_lubanlite.c`. It shows the installed version, slot, saved `.img` URL, and download and installation progress when available. Download, image verification and installation run in a worker. The page asks for confirmation with the verified target version before installation. See [Firmware updates](ota.md).
+The page controls `carplay_ota_*` in `platform/ota_lubanlite.c`. It shows the installed version, slot, saved `.cpio` URL, and download and installation progress when available. Download, package verification and installation run in a worker. The page asks for confirmation with the verified target version before installation. See [Firmware updates](ota.md).
 
 ## Phone Controls
 

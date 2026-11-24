@@ -131,8 +131,8 @@ config RTCARPLAY_OTA
     depends on RT_USING_DFS && RT_USING_LWIP && WEBCLIENT_USING_MBED_TLS
     depends on AIC_SPINAND_DRV && !OTA_RODATA_DIRECT
     help
-      Stage and validate a D213 CarPlay .img from an HTTP or HTTPS URL.
-      Explicit confirmation writes the verified OS and Rodata to inactive slots.
+      Stage and validate a D213 CarPlay .cpio from an HTTP or HTTPS URL.
+      On confirmation the SDK OTA downloader updates inactive OS and Rodata slots.
 
 config RTCARPLAY_INTERNET_PROBE_PATH
     string "HTTP 204 connectivity probe path"
