@@ -1,1 +1,2 @@
-#define RT_WLAN_DEVICE_AP_NAME "ap0"
+#define RT_WLAN_DEVICE_AP_NAME  "ap0"
+#define RT_WLAN_DEVICE_STA_NAME "sta0"

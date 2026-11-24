@@ -5,8 +5,6 @@
 #include <wlan_mgnt.h>
 #include <netif/ethernetif.h>
 #include <lwip/tcpip.h>
-#include <lwip/dhcp.h>
-#include <lwip/prot/dhcp.h>
 #include <lwip/dns.h>
 #include <lwip/sockets.h>
 #include <lwip/netdb.h>
@@ -26,7 +24,7 @@ static struct
     struct netif *wan, *lan;
     ip4_addr_t address, lan_address, lan_mask, wan_mask, gateway;
     ip_addr_t resolver;
-    int dhcp_started, probe_ok, sharing, initialized, checked, link;
+    int probe_ok, sharing, initialized, checked, link;
     u32_t checked_at, generation;
 } share;
 
@@ -143,8 +141,6 @@ static void network_refresh(void)
                  !ip4_addr_cmp(&share.gateway, netif_ip4_gw(wan)))) ||
         !ip_addr_cmp(&share.resolver, resolver))
         invalidate_probe();
-    if (wan != share.wan)
-        share.dhcp_started = 0;
     if (lan != share.lan || !addressed(lan) ||
         (lan && (!ip4_addr_cmp(&share.lan_address, netif_ip4_addr(lan)) ||
                  !ip4_addr_cmp(&share.lan_mask, netif_ip4_netmask(lan)))))
@@ -161,14 +157,6 @@ static void network_refresh(void)
         share.address = *netif_ip4_addr(wan);
         share.wan_mask = *netif_ip4_netmask(wan);
         share.gateway = *netif_ip4_gw(wan);
-        if (!share.dhcp_started)
-        {
-            struct dhcp *client = netif_dhcp_data(wan);
-            if ((client && client->state != DHCP_STATE_OFF) || dhcp_start(wan) == ERR_OK)
-                share.dhcp_started = 1;
-        }
-        if (netif_default != wan)
-            netif_set_default(wan);
     }
     if (lan)
     {

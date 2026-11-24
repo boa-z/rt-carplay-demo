@@ -1,5 +1,7 @@
 [English](../internet-sharing.md) | [简体中文](internet-sharing.md)
 
+[网络管理器](network-manager.md)管理车机默认路由。现有共享仅转发 CarPlay AP 到以太网。STA 维护支持车机发起 HTTPS，Wi-Fi STA 转发仍需完成 AP+STA 及 iPhone 验收。
+
 # Ethernet 互联网共享
 
 ## 范围与证据

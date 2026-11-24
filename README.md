@@ -45,7 +45,7 @@ The local `Kconfig` and `SConscript` select board features. SDK protocol switche
 | USB enumeration, trust or network bring-up | [Wired startup](docs/wired-startup.md) and [native NCM](docs/wired-native-ncm.md) |
 | Wireless pairing, reconnect and wired/wireless handoff | [Connection manager](docs/connection-manager.md) and [Bluetooth checks](docs/mobility-cockpit-v4.md#bluetooth-name) |
 | Audio routing, Siri, and microphone recovery | [Audio recovery](docs/audio-recovery.md) |
-| Wired Ethernet, USB files and firmware updates | [Internet sharing](docs/internet-sharing.md), [USB files](docs/usb-files.md) and [A/B OTA](docs/ota.md) |
+| Network, USB files and firmware | [Network manager](docs/network-manager.md), [Internet sharing](docs/internet-sharing.md), [USB files](docs/usb-files.md), [A/B OTA](docs/ota.md) and [update mirrors](docs/ota-mirror.md) |
 
 ## Verify changes
 

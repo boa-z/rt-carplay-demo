@@ -23,6 +23,8 @@ static atomic_bool automatic = true, wireless_enabled = DEMO_HAS_WIRELESS;
 static bool usb_armed;
 static uint32_t usb_open_at;
 static bool retry_requested;
+static atomic_bool maintenance_requested, maintenance_ready;
+static atomic_flag maintenance_owner = ATOMIC_FLAG_INIT;
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
 static uint16_t requested_width = 768, applied_width = 768;
 static carplay_display_mode_t requested_display = CARPLAY_FUSION;
@@ -147,7 +149,7 @@ MSH_CMD_EXPORT_ALIAS(connection_command, carplay_connection,
 static bool mode_changed(void)
 {
     (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
-    bool changed = requested_wireless != status.wireless;
+    bool changed = requested_wireless != status.wireless || atomic_load(&maintenance_requested);
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
     changed |= display_pending;
 #endif
@@ -303,6 +305,35 @@ static void close_session(void)
     while (carplay_app_stop() != RTCP_OK) rt_thread_mdelay(250);
 }
 
+bool carplay_connection_maintenance_acquire(void)
+{
+    if (!worker_started || atomic_flag_test_and_set(&maintenance_owner))
+        return false;
+    if (!carplay_app_maintenance_begin())
+    {
+        atomic_flag_clear(&maintenance_owner);
+        return false;
+    }
+    atomic_store(&maintenance_requested, true);
+    for (unsigned waited = 0; waited < 15000; waited += 50)
+    {
+        if (atomic_load(&maintenance_ready))
+            return true;
+        rt_thread_mdelay(50);
+    }
+    carplay_connection_maintenance_release();
+    return false;
+}
+
+void carplay_connection_maintenance_release(void)
+{
+    carplay_app_maintenance_end();
+    atomic_store(&maintenance_requested, false);
+    while (atomic_load(&maintenance_ready))
+        rt_thread_mdelay(20);
+    atomic_flag_clear(&maintenance_owner);
+}
+
 /* Called only with no active USB session. The launcher's single panel
  * reader remains usable even if receiver startup/storage loading failed. */
 static bool idle_actions(void)
@@ -368,7 +399,7 @@ static bool claim_connection(void)
 {
     bool ready;
     (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
-    ready = !manager_open && file_action == FILE_NONE && !requested_wireless &&
+    ready = !atomic_load(&maintenance_requested) && !manager_open && file_action == FILE_NONE && !requested_wireless &&
             (!automatic || retry_due(false));
     if (ready)
     {
@@ -490,6 +521,15 @@ static void demo_worker(void *argument)
 
     for (;;)
     {
+        if (atomic_load(&maintenance_requested))
+        {
+            close_session();
+            atomic_store(&maintenance_ready, true);
+            while (atomic_load(&maintenance_requested))
+                rt_thread_mdelay(50);
+            atomic_store(&maintenance_ready, false);
+            continue;
+        }
         if (mode_changed())
         {
             close_session();

@@ -39,7 +39,7 @@
 
 #define AP_START_WAIT_MS 15000U
 
-static const char *s_ifname = "wlan0";
+static const char *s_ifname;
 
 /*
  * Start the AP through the RT-Thread WLAN framework.  Do NOT call
@@ -109,12 +109,13 @@ static int wifi_set_vendor_ie(const uint8_t *ie, size_t len)
         return RTCP_EINVAL;
 
     /* Replacing the list is not supported by the driver: clear it first. */
-    (void)wext_del_custom_ie(s_ifname);
+    const char *interface = s_ifname ? s_ifname : wifi_ap_interface_name();
+    (void)wext_del_custom_ie(interface);
     rtw_custom_ie_t custom = {
         .ie = (uint8_t *)ie,
         .type = (uint8_t)(PROBE_RSP | BEACON),
     };
-    if (wext_add_custom_ie(s_ifname, &custom, 1) != 0)
+    if (wext_add_custom_ie(interface, &custom, 1) != 0)
         return RTCP_EIO;
     return RTCP_OK;
 }
@@ -159,9 +160,15 @@ int rtcp_wifi_lubanlite_get_mac(uint8_t mac[6])
     if (mac == NULL)
         return RTCP_EINVAL;
     char text[32] = { 0 };
-    if (wifi_get_mac_address(text) != RTW_SUCCESS)
+    if (!strcmp(wifi_ap_interface_name(), "wlan0"))
+    {
+        if (wifi_get_mac_address(text) != RTW_SUCCESS)
+            return RTCP_EIO;
+        return parse_mac(text, mac);
+    }
+    if (wext_get_bssid(wifi_ap_interface_name(), mac) != 0)
         return RTCP_EIO;
-    return parse_mac(text, mac);
+    return RTCP_OK;
 }
 
 #if defined(RT_USING_LWIP)

@@ -57,6 +57,8 @@ typedef struct
 /* Application-owned connection worker. No LVGL dependency. Initialize from
  * the application owner before posting requests. Snapshots are caller-owned. */
 int carplay_connection_manager_start(void);
+bool carplay_connection_maintenance_acquire(void);
+void carplay_connection_maintenance_release(void);
 bool carplay_connection_status(demo_status_t *out);
 /* Legacy manual diagnostic override; Launcher V2 uses automatic discovery. */
 void carplay_connection_select_mode(bool wireless);

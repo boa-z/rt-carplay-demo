@@ -13,6 +13,9 @@
 #if defined(RTCARPLAY_AUTO_CONNECT)
 #include "connection_manager.h"
 #endif
+#if defined(RTCARPLAY_OTA) && !defined(RTCARPLAY_DEMO_LAUNCHER)
+#include "ota_lubanlite.h"
+#endif
 #include "rtcp/rtcp.h"
 
 #ifdef RTCARPLAY_AUTO_START
@@ -48,6 +51,9 @@ int main(void)
             rt_thread_mdelay(1000);
         }
     } while (result != RTCP_OK);
+#if defined(RTCARPLAY_OTA)
+    carplay_ota_boot_health_ready();
+#endif
     rt_kprintf("rt-carplay: automatic Headless USB/wireless discovery\n");
 #elif defined(RTCARPLAY_AUTO_START)
     rtcarplay_autostart();

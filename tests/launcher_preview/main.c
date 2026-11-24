@@ -28,8 +28,9 @@ static unsigned backlight_writes;
 static bool files_opened, microphone_muted;
 static unsigned file_version, replies;
 static carplay_internet_status_t network_model;
+static carplay_wifi_status_t wifi_model;
 static carplay_ota_status_t ota_model;
-static unsigned ota_checks, ota_installs;
+static unsigned ota_installs;
 static unsigned manager_calls;
 static unsigned stored_preferences[CARPLAY_PREF_COUNT];
 static char stored_bt_name[CARPLAY_BT_NAME_MAX + 1] = CARPLAY_BT_NAME_DEFAULT;
@@ -41,6 +42,38 @@ static bool clock_received;
 static bool clock_automatic = true;
 static int clock_offset;
 static time_t rtc_seconds = 1795279339;
+static carplay_time_status_t network_time_model;
+static char time_server_model[CARPLAY_TIME_SERVER_MAX] = "time.cloudflare.com";
+static char time_server_requested[CARPLAY_TIME_SERVER_MAX];
+
+void carplay_network_time_start(void)
+{
+    network_time_model = CARPLAY_TIME_SYNCING;
+    strcpy(time_server_requested, time_server_model);
+}
+
+carplay_time_status_t carplay_network_time_status(void)
+{
+    return network_time_model;
+}
+
+void carplay_network_time_server_get(char server[CARPLAY_TIME_SERVER_MAX])
+{
+    strcpy(server, time_server_model);
+}
+
+int carplay_network_time_server_set(const char *server)
+{
+    if (!*server || strstr(server, "://"))
+        return -RT_EINVAL;
+    strcpy(time_server_model, server);
+    return RT_EOK;
+}
+
+int carplay_network_time_server_reset(void)
+{
+    return carplay_network_time_server_set("time.cloudflare.com");
+}
 
 void carplay_app_set_phone_appearance(rtcp_appearance_setting_t appearance)
 {
@@ -319,20 +352,37 @@ void carplay_ota_status(carplay_ota_status_t *out)
 {
     *out = ota_model;
 }
-int carplay_ota_check(void)
+void carplay_ota_boot_health_ready(void)
 {
-    ++ota_checks;
-    ota_model.state = CARPLAY_OTA_CHECKING;
+}
+int carplay_ota_download(void)
+{
+    assert(ota_model.source[0]);
+    ota_model.state = CARPLAY_OTA_DOWNLOADING;
     ota_model.busy = true;
     return 0;
 }
-int carplay_ota_install(const char *commit)
+int carplay_ota_install(uint32_t candidate)
 {
-    if (strcmp(commit, ota_model.remote_commit))
+    if (candidate != ota_model.candidate)
         return -1;
     ++ota_installs;
-    ota_model.state = CARPLAY_OTA_DOWNLOADING;
+    ota_model.state = CARPLAY_OTA_APPLYING;
     ota_model.busy = true;
+    return 0;
+}
+int carplay_ota_cancel(void)
+{
+    ota_model.state = CARPLAY_OTA_IDLE;
+    ota_model.busy = false;
+    return 0;
+}
+int carplay_ota_source_set(const char *url)
+{
+    if (strncmp(url, "https://", 8) && strncmp(url, "http://", 7))
+        return -RT_EINVAL;
+    snprintf(ota_model.source, sizeof(ota_model.source), "%s", url);
+    ++ota_model.candidate;
     return 0;
 }
 
@@ -343,6 +393,46 @@ void carplay_internet_status(carplay_internet_status_t *out)
 bool carplay_internet_check(void)
 {
     return true;
+}
+
+void carplay_wifi_status(carplay_wifi_status_t *out)
+{
+    *out = wifi_model;
+}
+
+int carplay_wifi_enable(bool enabled)
+{
+    wifi_model.enabled = enabled;
+    wifi_model.connected = wifi_model.addressed = false;
+    return RT_EOK;
+}
+
+int carplay_wifi_scan(void)
+{
+    wifi_model.scan_revision++;
+    wifi_model.count = 1;
+    wifi_model.results[0] = (carplay_wifi_access_point_t){
+        .ssid = "Workshop",
+        .security = "WPA2",
+        .channel = 36,
+        .rssi = -42
+    };
+    return RT_EOK;
+}
+
+int carplay_wifi_join(unsigned revision, unsigned index, const char *password)
+{
+    assert(revision == wifi_model.scan_revision && index == 0 && !strcmp(password, "preview-pass"));
+    wifi_model.connected = true;
+    strcpy(wifi_model.connected_ssid, wifi_model.results[index].ssid);
+    return RT_EOK;
+}
+
+int carplay_wifi_forget(void)
+{
+    wifi_model.connected = wifi_model.addressed = false;
+    wifi_model.connected_ssid[0] = '\0';
+    return RT_EOK;
 }
 
 bool carplay_connection_status(demo_status_t *s)
@@ -476,6 +566,37 @@ static void inside(lv_obj_t *object)
     assert(a.x1 >= 0 && a.y1 >= 0 && a.x2 < 1024 && a.y2 < 600);
 }
 
+static void assert_dashboard_header(void)
+{
+    lv_obj_update_layout(pages[PAGE_DASHBOARD]);
+    lv_area_t dot, status, wifi, ethernet, clock;
+    lv_obj_get_coords(dash_dot, &dot);
+    lv_obj_get_coords(dash_status, &status);
+    lv_obj_get_coords(dash_wifi, &wifi);
+    lv_obj_get_coords(dash_ethernet, &ethernet);
+    lv_obj_get_coords(dash_clock, &clock);
+    assert(dot.x2 < status.x1);
+    assert(status.x2 < wifi.x1 && wifi.x2 < ethernet.x1);
+    assert(ethernet.x2 < clock.x2 - label_width(dash_clock) + 1);
+    const lv_area_t *elements[] = { &dot, &status, &wifi, &ethernet, &clock };
+    for (unsigned index = 0; index < sizeof(elements) / sizeof(elements[0]); ++index)
+    {
+        const lv_area_t *area = elements[index];
+        assert(abs(area->y1 + area->y2 + 1 - 2 * DASH_STATUS_CENTER_Y) <= 1);
+        assert(area->y1 >= 0 && area->y2 < 54);
+    }
+}
+
+static void tap(int32_t x, int32_t y)
+{
+    lv_indev_t *pointer = lv_indev_get_next(NULL);
+    assert(pointer);
+    launcher_panel_touch(RTCP_TOUCH_DOWN, 0, (uint16_t)x, (uint16_t)y, NULL);
+    lv_indev_read(pointer);
+    launcher_panel_touch(RTCP_TOUCH_UP, 0, (uint16_t)x, (uint16_t)y, NULL);
+    lv_indev_read(pointer);
+}
+
 static lv_obj_t *find_caption(lv_obj_t *parent, const char *caption)
 {
     for (uint32_t i = 0; i < lv_obj_get_child_count(parent); ++i)
@@ -583,6 +704,13 @@ int main(int argc, char **argv)
 
     /* Dashboard: reference sample, explicit demo label, four visible actions. */
     screenshot(argv[1], "01-dashboard_dark_en");
+    assert_dashboard_header();
+    lv_color_t disconnected_color = lv_obj_get_style_image_recolor(dash_ethernet, 0);
+    assert(lv_color_eq(disconnected_color, lv_obj_get_style_image_recolor(dash_wifi, 0)));
+    network_model.available = network_model.device = network_model.link = true;
+    update_page(NULL);
+    lv_color_t link_color = lv_obj_get_style_image_recolor(dash_ethernet, 0);
+    assert(!lv_color_eq(disconnected_color, link_color));
     assert(!strcmp(lv_label_get_text(dash_speed), "26"));
     assert(!strcmp(lv_label_get_text(dash_soc), "78"));
     assert(!lv_obj_has_flag(dash_note, LV_OBJ_FLAG_HIDDEN));
@@ -611,6 +739,117 @@ int main(int argc, char **argv)
     click_caption(pages[PAGE_DASHBOARD], "Settings");
     assert(!lv_obj_has_flag(pages[PAGE_SETTINGS], LV_OBJ_FLAG_HIDDEN));
     assert_settings_page(SETTINGS_DISPLAY);
+    click_caption(pages[PAGE_SETTINGS], "Ethernet");
+    assert_settings_page(SETTINGS_ETHERNET);
+    assert(!strcmp(lv_label_get_text(ethernet_values[0]), "Waiting for IPv4"));
+    assert(!strcmp(lv_label_get_text(ethernet_values[1]), "--"));
+    network_model.addressed = true;
+    strcpy(network_model.address, "192.168.2.3");
+    strcpy(network_model.mask, "255.255.255.0");
+    strcpy(network_model.gateway, "192.168.2.1");
+    strcpy(network_model.dns, "192.168.2.53");
+    update_page(NULL);
+    assert(!strcmp(lv_label_get_text(ethernet_values[0]), "Connected"));
+    assert(!strcmp(lv_label_get_text(ethernet_values[1]), network_model.address));
+    assert(!strcmp(lv_label_get_text(ethernet_values[2]), network_model.mask));
+    assert(!strcmp(lv_label_get_text(ethernet_values[3]), network_model.gateway));
+    assert(!strcmp(lv_label_get_text(ethernet_values[4]), network_model.dns));
+    lv_color_t addressed_color = lv_obj_get_style_image_recolor(dash_ethernet, 0);
+    assert(!lv_color_eq(link_color, addressed_color));
+    screenshot(argv[1], "03-settings-ethernet_dark_en");
+    carplay_ui_set_chinese(true);
+    assert(find_caption(pages[PAGE_SETTINGS], "有线网络"));
+    assert(!strcmp(lv_label_get_text(ethernet_values[0]), "已连接"));
+    screenshot(argv[1], "03-settings-ethernet_dark_zh");
+    carplay_ui_set_chinese(false);
+    network_model.link = network_model.addressed = false;
+    update_page(NULL);
+    assert(!strcmp(lv_label_get_text(ethernet_values[0]), "Cable disconnected"));
+    for (unsigned index = 1; index < 5; ++index)
+        assert(!strcmp(lv_label_get_text(ethernet_values[index]), "--"));
+    assert(lv_color_eq(disconnected_color, lv_obj_get_style_image_recolor(dash_ethernet, 0)));
+
+    click_caption(pages[PAGE_SETTINGS], "Wi-Fi");
+    assert_settings_page(SETTINGS_WIFI);
+    assert(lv_obj_has_state(wifi_scan_button, LV_STATE_DISABLED));
+    lv_obj_send_event(wifi_mode_button, LV_EVENT_CLICKED, NULL);
+    update_page(NULL);
+    lv_obj_send_event(wifi_scan_button, LV_EVENT_CLICKED, NULL);
+    update_page(NULL);
+    assert(strstr(lv_dropdown_get_options(wifi_results), "Workshop  WPA2  5 GHz  -42 dBm"));
+    assert(lv_textarea_get_password_mode(wifi_password));
+    lv_obj_send_event(wifi_theme_buttons[0], LV_EVENT_CLICKED, NULL);
+    assert(!carplay_ui_dark() && stored_preferences[CARPLAY_PREF_THEME] == 0);
+    assert(lv_color_eq(lv_obj_get_style_bg_color(theme_buttons[0], 0),
+                       lv_color_hex(carplay_ui_color(CARPLAY_UI_SOFT))));
+    lv_obj_t *results_list = lv_dropdown_get_list(wifi_results);
+    assert(lv_color_eq(lv_obj_get_style_bg_color(results_list, 0),
+                       lv_color_hex(carplay_ui_color(CARPLAY_UI_SURFACE2))));
+    lv_obj_update_layout(pages[PAGE_SETTINGS]);
+    lv_area_t password_area, keyboard_area, detail_area;
+    lv_obj_get_coords(wifi_password, &password_area);
+    tap(password_area.x1 + 30, (password_area.y1 + password_area.y2) / 2);
+    assert(!lv_obj_has_flag(wifi_keyboard, LV_OBJ_FLAG_HIDDEN));
+    assert(lv_keyboard_get_textarea(wifi_keyboard) == wifi_password);
+    lv_obj_update_layout(pages[PAGE_SETTINGS]);
+    lv_obj_get_coords(wifi_keyboard, &keyboard_area);
+    lv_obj_get_coords(settings_pages[SETTINGS_WIFI], &detail_area);
+    assert(keyboard_area.y1 > password_area.y2 && keyboard_area.y2 <= detail_area.y2);
+    tap(keyboard_area.x1 + 85, keyboard_area.y1 + 22);
+    assert(!strcmp(lv_textarea_get_text(wifi_password), "q"));
+    screenshot(argv[1], "03-settings-wifi-keyboard_light_en");
+    lv_obj_send_event(wifi_keyboard, LV_EVENT_READY, NULL);
+    assert(lv_obj_has_flag(wifi_keyboard, LV_OBJ_FLAG_HIDDEN));
+    assert(lv_keyboard_get_textarea(wifi_keyboard) == NULL);
+    lv_obj_send_event(wifi_theme_buttons[1], LV_EVENT_CLICKED, NULL);
+    assert(carplay_ui_dark() && stored_preferences[CARPLAY_PREF_THEME] == 1);
+    tap(password_area.x1 + 30, (password_area.y1 + password_area.y2) / 2);
+    assert(!lv_obj_has_flag(wifi_keyboard, LV_OBJ_FLAG_HIDDEN));
+    screenshot(argv[1], "03-settings-wifi-keyboard_dark_en");
+    lv_obj_send_event(wifi_keyboard, LV_EVENT_CANCEL, NULL);
+    assert(lv_obj_has_flag(wifi_keyboard, LV_OBJ_FLAG_HIDDEN));
+    lv_textarea_set_text(wifi_password, "preview-pass");
+    lv_obj_send_event(wifi_join_button, LV_EVENT_CLICKED, NULL);
+    update_page(NULL);
+    assert(!strcmp(lv_textarea_get_text(wifi_password), ""));
+    assert(lv_color_eq(link_color, lv_obj_get_style_image_recolor(dash_wifi, 0)));
+    wifi_model.addressed = true;
+    update_page(NULL);
+    screenshot(argv[1], "03-settings-wifi_dark_en");
+    assert(lv_color_eq(addressed_color, lv_obj_get_style_image_recolor(dash_wifi, 0)));
+    click_back(pages[PAGE_SETTINGS]);
+    assert_dashboard_header();
+    screenshot(argv[1], "01-dashboard-wifi_dark_en");
+    click_caption(pages[PAGE_DASHBOARD], "Settings");
+    click_caption(pages[PAGE_SETTINGS], "Date & time");
+    assert_settings_page(SETTINGS_CLOCK);
+    click_caption(settings_pages[SETTINGS_CLOCK], "Time server");
+    assert(!lv_obj_has_flag(clock_server_panel, LV_OBJ_FLAG_HIDDEN));
+    lv_textarea_set_text(clock_server_entry, "https://bad.test");
+    click_caption(clock_server_panel, "Save");
+    assert(!lv_obj_has_flag(clock_server_panel, LV_OBJ_FLAG_HIDDEN));
+    lv_textarea_set_text(clock_server_entry, "192.168.1.20");
+    screenshot(argv[1], "03-settings-time-server_dark_en");
+    click_caption(clock_server_panel, "Save");
+    assert(lv_obj_has_flag(clock_server_panel, LV_OBJ_FLAG_HIDDEN));
+    assert(!strcmp(lv_label_get_text(clock_server_value), "192.168.1.20"));
+    lv_obj_send_event(clock_network_button, LV_EVENT_CLICKED, NULL);
+    assert(!strcmp(time_server_requested, "192.168.1.20"));
+    assert(lv_obj_has_state(clock_network_button, LV_STATE_DISABLED));
+    network_time_model = CARPLAY_TIME_NO_WAN;
+    update_page(NULL);
+    assert(!lv_obj_has_state(clock_network_button, LV_STATE_DISABLED));
+    assert(!strcmp(lv_label_get_text(clock_network_status), "Connect Ethernet or Wi-Fi and try again."));
+    lv_obj_send_event(clock_network_button, LV_EVENT_CLICKED, NULL);
+    network_time_model = CARPLAY_TIME_SYNCED;
+    update_page(NULL);
+    assert(!strcmp(lv_label_get_text(clock_network_status), "Network time synchronized"));
+    assert(clock_automatic);
+    screenshot(argv[1], "03-settings-network-time_dark_en");
+    click_caption(settings_pages[SETTINGS_CLOCK], "Time server");
+    click_caption(clock_server_panel, "Restore default");
+    assert(!strcmp(time_server_model, "time.cloudflare.com"));
+    click_caption(pages[PAGE_SETTINGS], "Display");
     update_page(NULL);
     screenshot(argv[1], "03-settings_dark_en");
     lv_obj_t *display_cards[] = {
@@ -912,39 +1151,45 @@ int main(int argc, char **argv)
     click_caption(pages[PAGE_SETTINGS], "System update");
     assert(!lv_obj_has_flag(pages[PAGE_OTA], LV_OBJ_FLAG_HIDDEN));
     screenshot(argv[1], "04-ota_dark_en");
-    assert(!strcmp(lv_label_get_text(ota_state), "Not checked"));
-    assert(lv_obj_has_state(ota_check_button, LV_STATE_DISABLED));
+    assert(!strcmp(lv_label_get_text(ota_state), "Ready to download"));
+    assert(!lv_obj_has_state(ota_update_button, LV_STATE_DISABLED));
     assert(lv_obj_has_flag(ota_progress, LV_OBJ_FLAG_HIDDEN));
-    assert(lv_obj_has_flag(ota_install_button, LV_OBJ_FLAG_HIDDEN));
+
+    click_caption(pages[PAGE_OTA], "Enter firmware URL");
+    assert(!lv_obj_has_flag(ota_source_panel, LV_OBJ_FLAG_HIDDEN));
+    lv_obj_update_layout(ota_source_panel);
+    for (uint32_t index = 0; index < lv_obj_get_child_count(ota_source_panel); ++index)
+    {
+        lv_obj_t *child = lv_obj_get_child(ota_source_panel, (int32_t)index);
+        if (lv_obj_check_type(child, &lv_keyboard_class))
+            inside(child);
+    }
+    lv_textarea_set_text(ota_source_entry, "http://192.168.1.20:8080/d213/carplay.img");
+    screenshot(argv[1], "04-ota-source-http_dark_en");
+    click_caption(ota_source_panel, "Save");
+    assert(lv_obj_has_flag(ota_source_panel, LV_OBJ_FLAG_HIDDEN));
+    assert(!strcmp(ota_model.source, "http://192.168.1.20:8080/d213/carplay.img"));
 
     network_model.available = network_model.route_ready = true;
     update_page(NULL);
-    assert(!lv_obj_has_state(ota_check_button, LV_STATE_DISABLED));
-    lv_obj_send_event(ota_check_button, LV_EVENT_CLICKED, NULL);
-    assert(ota_checks == 1);
-    update_page(NULL);
-    assert(!strcmp(lv_label_get_text(ota_state), "Checking for updates..."));
-
     snprintf(ota_model.current, sizeof(ota_model.current), "1.0.0");
     snprintf(ota_model.current_commit, sizeof(ota_model.current_commit),
              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     snprintf(ota_model.slot, sizeof(ota_model.slot), "A");
-    ota_model.state = CARPLAY_OTA_AVAILABLE;
-    ota_model.busy = false;
-    snprintf(ota_model.remote, sizeof(ota_model.remote), "1.0.1");
-    snprintf(ota_model.remote_commit, sizeof(ota_model.remote_commit),
-             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    lv_obj_send_event(ota_update_button, LV_EVENT_CLICKED, NULL);
+    assert(ota_model.state == CARPLAY_OTA_DOWNLOADING);
     update_page(NULL);
-    assert(!strcmp(lv_label_get_text(ota_state), "Update available"));
-    assert(!lv_obj_has_flag(ota_install_button, LV_OBJ_FLAG_HIDDEN));
-    screenshot(argv[1], "04-ota-available_dark_en");
-
-    lv_obj_send_event(ota_install_button, LV_EVENT_CLICKED, NULL);
+    lv_obj_send_event(ota_update_button, LV_EVENT_CLICKED, NULL);
+    assert(ota_model.state == CARPLAY_OTA_IDLE);
+    ota_model.state = CARPLAY_OTA_READY_TO_INSTALL;
+    snprintf(ota_model.remote, sizeof(ota_model.remote), "1.0.1");
+    update_page(NULL);
+    lv_obj_send_event(ota_update_button, LV_EVENT_CLICKED, NULL);
     assert(!ota_installs && !lv_obj_has_flag(ota_confirm_panel, LV_OBJ_FLAG_HIDDEN));
     screenshot(argv[1], "04-ota-confirm_dark_en");
     ota_confirm_cancel(NULL);
     assert(!ota_installs);
-    lv_obj_send_event(ota_install_button, LV_EVENT_CLICKED, NULL);
+    lv_obj_send_event(ota_update_button, LV_EVENT_CLICKED, NULL);
     ota_confirm_install(NULL);
     assert(ota_installs == 1);
 
@@ -970,7 +1215,9 @@ int main(int argc, char **argv)
     assert(!lv_obj_has_flag(pages[PAGE_SETTINGS], LV_OBJ_FLAG_HIDDEN));
     assert_settings_page(SETTINGS_ABOUT);
     click_back(pages[PAGE_SETTINGS]);
+    update_page(NULL);
     screenshot(argv[1], "01-dashboard_dark_zh");
+    assert_dashboard_header();
     assert(find_caption(pages[PAGE_DASHBOARD], "仪表"));
     assert(find_caption(pages[PAGE_DASHBOARD], "当前速度"));
     assert(find_caption(pages[PAGE_DASHBOARD], "剩余电量"));

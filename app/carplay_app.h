@@ -25,6 +25,9 @@ bool carplay_app_clock_is_automatic(void);
 /** Report whether this session supplied a UTC sample, independently of RTC write success. */
 bool carplay_app_phone_clock_received(void);
 int carplay_app_set_clock_automatic(bool automatic);
+#if defined(RTCARPLAY_NETWORK_TIME)
+int carplay_app_set_network_clock(int64_t utc_seconds);
+#endif
 int carplay_app_set_local_clock(int64_t local_seconds, int offset_minutes);
 #endif
 
@@ -71,6 +74,8 @@ void carplay_app_config_defaults(carplay_app_config_t *config);
  * Concurrent/reentrant lifecycle calls return RTCP_ESTATE. Failed thread
  * creation/startup rolls back all initialized resources and permits retry. */
 int carplay_app_start(const carplay_app_config_t *config);
+bool carplay_app_maintenance_begin(void);
+void carplay_app_maintenance_end(void);
 
 /* Start with the built-in display geometry: SoftAP + mDNS (wireless) and the
  * IPv6 NCM link without them (wired).  The SDK application and the

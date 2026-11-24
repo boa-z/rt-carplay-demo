@@ -2,6 +2,8 @@
 
 # Ethernet Internet sharing
 
+The [Network Manager](network-manager.md) owns the board’s default route. Sharing stays scoped to the existing AP-to-Ethernet forwarding pair. STA maintenance supports board-originated HTTPS, while STA forwarding awaits AP+STA and iPhone acceptance.
+
 ## Scope and evidence
 
 This optional IPv4 gateway uses D213 Ethernet as WAN and the existing CarPlay Wi-Fi AP as LAN. It is implemented in the host application and the production RT-Thread lwIP 2.1.2 integration. The portable rt-carplay SDK, iAP2, Apple vendor IE, session arbitration and audio/video algorithms are unchanged. Ethernet and sharing are added directly to the existing GUI configuration; Headless remains a separate compatibility regression with sharing disabled. The Kconfig switch can disable sharing independently of Ethernet. No additional Internet defconfig is maintained, and enabling the feature is not an iPhone interoperability certification.

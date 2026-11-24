@@ -260,7 +260,7 @@ check-usb-iap2-worker: sdk-libraries
 	python3 tests/run_usb_iap2_worker.py
 
 .PHONY: check-ota
-check-ota: sdk-libraries
+check-ota:
 	python3 tests/run_ota_worker.py
 
 .PHONY: check-wireless-iap2-worker

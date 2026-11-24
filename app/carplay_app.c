@@ -196,6 +196,17 @@ static int set_clock_utc(int64_t seconds)
     return settimeofday(&value, NULL) == 0 ? RTCP_OK : RTCP_EIO;
 }
 
+#if defined(RTCARPLAY_NETWORK_TIME)
+int carplay_app_set_network_clock(int64_t utc_seconds)
+{
+    if (rt_mutex_take(&s_clock_lock, RT_WAITING_FOREVER) != RT_EOK)
+        return RTCP_EIO;
+    int result = set_clock_utc(utc_seconds);
+    rt_mutex_release(&s_clock_lock);
+    return result;
+}
+#endif
+
 int carplay_app_set_local_clock(int64_t local_seconds, int offset_minutes)
 {
     if (offset_minutes < -14 * 60 || offset_minutes > 14 * 60 || local_seconds < 0)
@@ -2529,11 +2540,32 @@ static int carplay_app_start_owned(const carplay_app_config_t *config)
     return RTCP_OK;
 }
 
+static atomic_bool s_maintenance;
+
+bool carplay_app_maintenance_begin(void)
+{
+    if (atomic_flag_test_and_set_explicit(&s_lifecycle_call, memory_order_acquire))
+        return false;
+    atomic_store(&s_maintenance, true);
+    atomic_flag_clear_explicit(&s_lifecycle_call, memory_order_release);
+    return true;
+}
+
+void carplay_app_maintenance_end(void)
+{
+    atomic_store(&s_maintenance, false);
+}
+
 int carplay_app_start(const carplay_app_config_t *config)
 {
     if (atomic_flag_test_and_set_explicit(&s_lifecycle_call,
                                           memory_order_acquire))
         return RTCP_ESTATE;
+    if (atomic_load(&s_maintenance))
+    {
+        atomic_flag_clear_explicit(&s_lifecycle_call, memory_order_release);
+        return RTCP_ESTATE;
+    }
     snapshots_retire();
     int result = carplay_app_start_owned(config);
     snapshots_enable();

@@ -34,3 +34,7 @@ extern const lv_image_dsc_t carplay_icon_info_26;
 extern const lv_image_dsc_t carplay_icon_languages_24;
 /* Lucide map-pin, 24px */
 extern const lv_image_dsc_t carplay_icon_map_pin_24;
+/* Lucide wifi, 20px */
+extern const lv_image_dsc_t carplay_icon_wifi_20;
+/* Lucide ethernet-port, 20px */
+extern const lv_image_dsc_t carplay_icon_ethernet_20;

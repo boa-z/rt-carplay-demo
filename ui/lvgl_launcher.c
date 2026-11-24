@@ -47,6 +47,13 @@ static void set_phone_text(lv_obj_t *label, const char *value)
 #define TR                    carplay_ui_translate
 #if defined(RTCARPLAY_OTA)
 #include "ota_lubanlite.h"
+#if defined(AIC_WLAN_REALTEK)
+#include "wifi_sta_lubanlite.h"
+#define CARPLAY_STA_SETTINGS
+#endif
+#endif
+#if defined(RTCARPLAY_NETWORK_TIME)
+#include "network_time_lubanlite.h"
 #endif
 #if defined(RT_USING_RTC)
 #include <drivers/rtc.h>
@@ -77,6 +84,12 @@ typedef enum
     SETTINGS_DISPLAY,
     SETTINGS_SOUND,
     SETTINGS_LANGUAGE,
+#if defined(CARPLAY_STA_SETTINGS)
+    SETTINGS_WIFI,
+#endif
+#if defined(RTCARPLAY_INTERNET_SHARE)
+    SETTINGS_ETHERNET,
+#endif
 #if defined(RT_USING_RTC)
     SETTINGS_CLOCK,
 #endif
@@ -116,6 +129,7 @@ static lv_obj_t *modal_scrim;
 
 /* Dashboard */
 static lv_obj_t *dash_dot, *dash_status, *dash_clock, *dash_note;
+static lv_obj_t *dash_wifi, *dash_ethernet;
 static lv_obj_t *dash_speed, *dash_soc, *dash_bar;
 
 /* Connectivity */
@@ -124,6 +138,10 @@ static lv_obj_t *conn_dot, *conn_state, *conn_action;
 /* Settings */
 static lv_obj_t *volume_value, *volume_slider, *brightness_value, *brightness_slider;
 static lv_obj_t *theme_buttons[3], *language_buttons[2], *display_buttons[2];
+#if defined(CARPLAY_STA_SETTINGS)
+static lv_obj_t *wifi_theme_buttons[2];
+static void wifi_keyboard_close(lv_event_t *event);
+#endif
 static lv_obj_t *fps_buttons[2];
 #if defined(CARPLAY_BT_NAME_SETTINGS)
 static lv_obj_t *bluetooth_name, *bluetooth_keyboard;
@@ -144,25 +162,33 @@ static lv_obj_t *gnss_buttons[2], *gnss_mode_buttons[2], *gnss_apply_button;
 static bool gnss_moving;
 #endif
 static lv_obj_t *display_note, *settings_hint;
+#if defined(RTCARPLAY_INTERNET_SHARE)
+static lv_obj_t *ethernet_values[5];
+#endif
 #if defined(RT_USING_RTC)
 static lv_obj_t *clock_current, *clock_date, *clock_time, *clock_zone, *clock_keyboard, *clock_apply;
 static lv_obj_t *clock_mode_buttons[2];
+#if defined(RTCARPLAY_NETWORK_TIME)
+static lv_obj_t *clock_network_button, *clock_network_status;
+static lv_obj_t *clock_server_panel, *clock_server_entry, *clock_server_hint, *clock_server_value;
+#endif
 static void load_clock_settings(void);
 #endif
 static lv_obj_t *settings_pages[SETTINGS_PAGE_COUNT];
 static lv_obj_t *settings_tabs[SETTINGS_PAGE_COUNT];
 static lv_obj_t *settings_captions[SETTINGS_PAGE_COUNT];
 static bool volume_dragging, brightness_dragging;
-static unsigned theme_choice, display_choice;
+static unsigned display_choice;
 
 /* OTA */
 static lv_obj_t *ota_version, *ota_detail, *ota_state, *ota_progress;
-static lv_obj_t *ota_check_button, *ota_install_button, *ota_backend;
+static lv_obj_t *ota_update_button, *ota_backend;
 #if defined(RTCARPLAY_OTA)
 static lv_obj_t *ota_confirm_panel, *ota_confirm_text;
-static char ota_confirm_commit[41];
+static lv_obj_t *ota_source_panel, *ota_source_entry, *ota_source_hint, *ota_action_label, *ota_url;
+static uint32_t ota_confirm_candidate;
+static bool ota_hmi_ready;
 #endif
-static bool network_ready;
 
 /* Pairing */
 static lv_obj_t *bt_panel, *bt_text, *bt_accept;
@@ -256,10 +282,29 @@ static void set_text_if_changed(lv_obj_t *label, const char *value)
     lv_label_set_text(label, value);
 }
 
+#if defined(RTCARPLAY_OTA)
+static lv_obj_t *build_text_keyboard(lv_obj_t *parent, int x, int y, int width, int height)
+{
+    lv_obj_t *keyboard = lv_keyboard_create(parent);
+    lv_obj_set_size(keyboard, width, height);
+    lv_obj_align(keyboard, LV_ALIGN_TOP_LEFT, x, y);
+    carplay_ui_style(keyboard, CARPLAY_STYLE_CARD);
+    carplay_ui_style_part(keyboard, CARPLAY_STYLE_INPUT, LV_PART_ITEMS);
+    carplay_ui_style_part(keyboard, CARPLAY_STYLE_INPUT, LV_PART_ITEMS | LV_STATE_CHECKED);
+    carplay_ui_style_part(keyboard, CARPLAY_STYLE_ACCENT_CARD, LV_PART_ITEMS | LV_STATE_PRESSED);
+    lv_obj_set_style_text_font(keyboard, LV_FONT_DEFAULT, LV_PART_ITEMS);
+    return keyboard;
+}
+#endif
+
 /* ---------------- page navigation ---------------- */
 
 static void show_page(page_t target)
 {
+#if defined(CARPLAY_STA_SETTINGS)
+    if (target != PAGE_SETTINGS)
+        wifi_keyboard_close(NULL);
+#endif
     for (unsigned i = 0; i < PAGE_COUNT; ++i)
     {
         if (!pages[i])
@@ -390,8 +435,12 @@ static void update_scrim(void)
     if (!modal_scrim)
         return;
     lv_obj_t *modals[] = { bt_panel,
+#if defined(RTCARPLAY_NETWORK_TIME)
+                           clock_server_panel,
+#endif
 #if defined(RTCARPLAY_OTA)
                            ota_confirm_panel,
+                           ota_source_panel,
 #endif
                            NULL };
     bool visible = false;
@@ -450,18 +499,13 @@ static void clock_text(char *out, size_t size)
 #endif
 }
 
-/* Dashboard header geometry, from svg/01-dashboard_*.svg: the clock's right
- * edge is the anchor at x = 964 and the state dot and label sit at x = 824/847.
- * The reference's own 14 px English label is wider than the space left of the
- * time (the reference PNG shows them overlapping), so the cluster keeps the
- * design anchors whenever the measured label fits and otherwise slides left
- * only as far as the current clock ink requires. */
-#define DASH_CLOCK_RIGHT  964
-#define DASH_STATUS_X     847
-#define DASH_STATUS_GAP   16 /* minimum clear space before the clock ink */
-#define DASH_STATUS_MIN_X 560
-#define DASH_DOT_SIZE     11
-#define DASH_DOT_GAP      12
+#define DASH_CLOCK_RIGHT     964
+#define DASH_STATUS_CENTER_Y 32
+#define DASH_STATUS_GAP      12
+#define DASH_STATUS_MIN_X    560
+#define DASH_DOT_SIZE        11
+#define DASH_DOT_GAP         12
+#define DASH_NET_ICON_SIZE   20
 
 static int32_t label_width(lv_obj_t *label)
 {
@@ -474,36 +518,54 @@ static int32_t label_width(lv_obj_t *label)
  * every content or language change; writes only when the geometry moved. */
 static void layout_dashboard_status(void)
 {
-    if (!dash_status || !dash_clock || !dash_dot)
-        return;
-    int32_t width = label_width(dash_status) + 2; /* rounding slack, no clipping */
-    int32_t limit = DASH_CLOCK_RIGHT - label_width(dash_clock) - DASH_STATUS_GAP;
-    int32_t left = DASH_STATUS_X;
-    if (left + width > limit)
-        left = limit - width;
-    if (left < DASH_STATUS_MIN_X)
-        left = DASH_STATUS_MIN_X;
+    int32_t ethernet_x = DASH_CLOCK_RIGHT - label_width(dash_clock) -
+                         DASH_STATUS_GAP - DASH_NET_ICON_SIZE;
+    int32_t wifi_x = ethernet_x - DASH_STATUS_GAP - DASH_NET_ICON_SIZE;
+    int32_t limit = wifi_x - DASH_STATUS_GAP;
+    int32_t width = LV_MIN(label_width(dash_status) + 2, limit - DASH_STATUS_MIN_X);
+    int32_t left = limit - width;
     int32_t dot_x = left - DASH_DOT_GAP - DASH_DOT_SIZE;
+    int32_t label_top = DASH_STATUS_CENTER_Y - lv_obj_get_style_text_font(dash_status, 0)->line_height / 2;
+    if (lv_obj_get_x(dash_ethernet) != ethernet_x)
+        lv_obj_set_x(dash_ethernet, ethernet_x);
+    if (lv_obj_get_x(dash_wifi) != wifi_x)
+        lv_obj_set_x(dash_wifi, wifi_x);
+    if (lv_obj_get_x(dash_status) != left || lv_obj_get_y(dash_status) != label_top)
+        lv_obj_set_pos(dash_status, left, label_top);
     if (lv_obj_get_x(dash_status) != left || lv_obj_get_width(dash_status) != width)
-    {
-        lv_obj_set_pos(dash_status, left, 64);
         lv_obj_set_width(dash_status, width);
-    }
     if (lv_obj_get_x(dash_dot) != dot_x)
-        lv_obj_set_pos(dash_dot, dot_x, 63);
+        lv_obj_set_x(dash_dot, dot_x);
+}
+
+static void update_network_icon(lv_obj_t *icon, carplay_style_role_t *shown, bool link,
+                                bool addressed)
+{
+    carplay_style_role_t role = CARPLAY_STYLE_ICON_FAINT;
+    if (link)
+        role = addressed ? CARPLAY_STYLE_ICON_ACCENT : CARPLAY_STYLE_ICON_MUTED;
+    if (*shown != role)
+    {
+        carplay_ui_style(icon, role);
+        *shown = role;
+    }
 }
 
 static void build_dashboard(lv_obj_t *parent)
 {
     text(parent, "Dashboard", 64, 54, 520, &carplay_ui_34, CARPLAY_STYLE_TEXT);
-    dash_dot = stroke(parent, 824, 63, 11, 11, LV_RADIUS_CIRCLE, CARPLAY_STYLE_DOT_OFF);
-    /* The clock is right-aligned against the reference anchor x = 964; it owns
-     * that slot and the state dot plus label are placed to its left. */
-    dash_clock = text(parent, "--:--", DASH_CLOCK_RIGHT - 84, 62, 84,
+    dash_dot = stroke(parent, 0, DASH_STATUS_CENTER_Y - DASH_DOT_SIZE / 2,
+                      DASH_DOT_SIZE, DASH_DOT_SIZE, LV_RADIUS_CIRCLE, CARPLAY_STYLE_DOT_OFF);
+    dash_clock = text(parent, "--:--", DASH_CLOCK_RIGHT - 84,
+                      DASH_STATUS_CENTER_Y - carplay_ui_17.line_height / 2, 84,
                       &carplay_ui_17, CARPLAY_STYLE_MUTED);
     lv_obj_set_style_text_align(dash_clock, LV_TEXT_ALIGN_RIGHT, 0);
-    dash_status = text(parent, "Not connected", DASH_STATUS_X, 64, 210, &carplay_ui_14,
+    int32_t icon_top = DASH_STATUS_CENTER_Y - DASH_NET_ICON_SIZE / 2;
+    dash_ethernet = icon_mask(parent, &carplay_icon_ethernet_20, 0, icon_top, CARPLAY_STYLE_ICON_FAINT);
+    dash_wifi = icon_mask(parent, &carplay_icon_wifi_20, 0, icon_top, CARPLAY_STYLE_ICON_FAINT);
+    dash_status = text(parent, "Not connected", DASH_STATUS_MIN_X, 0, 210, &carplay_ui_14,
                        CARPLAY_STYLE_MUTED);
+    lv_label_set_long_mode(dash_status, LV_LABEL_LONG_CLIP);
     layout_dashboard_status();
     dash_note = text(parent, "Demo values", 64, 92, 300, &carplay_ui_14, CARPLAY_STYLE_FAINT);
 
@@ -709,10 +771,12 @@ static void select_theme(lv_event_t *event)
     unsigned index = (unsigned)(uintptr_t)lv_event_get_user_data(event);
     if (index > 1)
         return; /* Auto needs an ambient-light input this board does not have. */
-    theme_choice = index;
     carplay_ui_set_dark(index == 1);
     int result = carplay_preferences_set(CARPLAY_PREF_THEME, index);
-    apply_segments(theme_buttons, 3, theme_choice);
+    apply_segments(theme_buttons, 3, index);
+#if defined(CARPLAY_STA_SETTINGS)
+    apply_segments(wifi_theme_buttons, 2, index);
+#endif
     settings_status(result ? "Settings not saved." : "Settings saved.", result != 0);
 }
 
@@ -804,6 +868,10 @@ static void build_slider_card(lv_obj_t *parent, int y, const char *title, icon_a
 
 static void show_settings_page(settings_page_t target)
 {
+#if defined(CARPLAY_STA_SETTINGS)
+    if (target != SETTINGS_WIFI)
+        wifi_keyboard_close(NULL);
+#endif
     for (unsigned index = 0; index < SETTINGS_PAGE_COUNT; ++index)
     {
         bool selected = index == (unsigned)target;
@@ -864,6 +932,7 @@ static void build_display_settings(lv_obj_t *parent)
     theme_buttons[2] = segment(appearance, "Auto", 503, 20, 100, 50, select_theme, (void *)2,
                                &carplay_ui_15);
     lv_obj_add_state(theme_buttons[2], LV_STATE_DISABLED);
+    apply_segments(theme_buttons, 3, carplay_ui_dark() ? 1U : 0U);
 
     lv_obj_t *display = display_option_card(parent, 238, "CarPlay display", 19);
     display_buttons[0] = segment(display, "Fullscreen", 303, 20, 150, 50, select_display,
@@ -1279,6 +1348,30 @@ static void update_clock_settings(void)
     char timestamp[64];
     format_local_clock(timestamp, sizeof(timestamp));
     set_phone_text(clock_current, timestamp);
+#if defined(RTCARPLAY_NETWORK_TIME)
+    static const char * const messages[] = {
+        [CARPLAY_TIME_IDLE] = "",
+        [CARPLAY_TIME_SYNCING] = "Synchronizing network time...",
+        [CARPLAY_TIME_SYNCED] = "Network time synchronized",
+        [CARPLAY_TIME_NO_WAN] = "Connect Ethernet or Wi-Fi and try again.",
+        [CARPLAY_TIME_NO_SERVER] = "Time server address could not be resolved.",
+        [CARPLAY_TIME_NO_REPLY] = "Time server did not respond.",
+        [CARPLAY_TIME_RTC_ERROR] = "Unable to set clock",
+        [CARPLAY_TIME_UNAVAILABLE] = "Network time unavailable",
+    };
+    carplay_time_status_t status = carplay_network_time_status();
+    const char *message = messages[status];
+    if (strcmp(lv_label_get_text(clock_network_status), TR(message)))
+        lv_label_set_text(clock_network_status, message);
+    if (status == CARPLAY_TIME_SYNCING)
+        lv_obj_add_state(clock_network_button, LV_STATE_DISABLED);
+    else
+        lv_obj_remove_state(clock_network_button, LV_STATE_DISABLED);
+    if (status == CARPLAY_TIME_SYNCING || carplay_app_clock_is_automatic())
+        lv_obj_add_state(clock_apply, LV_STATE_DISABLED);
+    else
+        lv_obj_remove_state(clock_apply, LV_STATE_DISABLED);
+#endif
 }
 
 static void close_clock_keyboard(lv_event_t *event)
@@ -1287,6 +1380,50 @@ static void close_clock_keyboard(lv_event_t *event)
     lv_keyboard_set_textarea(clock_keyboard, NULL);
     lv_obj_add_flag(clock_keyboard, LV_OBJ_FLAG_HIDDEN);
 }
+
+#if defined(RTCARPLAY_NETWORK_TIME)
+static void sync_network_time(lv_event_t *event)
+{
+    (void)event;
+    close_clock_keyboard(NULL);
+    carplay_network_time_start();
+    update_clock_settings();
+}
+
+static void clock_server_close(lv_event_t *event)
+{
+    (void)event;
+    lv_obj_add_flag(clock_server_panel, LV_OBJ_FLAG_HIDDEN);
+    update_scrim();
+}
+
+static void clock_server_open(lv_event_t *event)
+{
+    (void)event;
+    close_clock_keyboard(NULL);
+    char server[CARPLAY_TIME_SERVER_MAX];
+    carplay_network_time_server_get(server);
+    lv_textarea_set_text(clock_server_entry, server);
+    lv_label_set_text(clock_server_hint, TR("Enter a host name or IPv4 address."));
+    show_modal(clock_server_panel);
+}
+
+static void clock_server_save(lv_event_t *event)
+{
+    int result = lv_event_get_user_data(event)
+                     ? carplay_network_time_server_reset()
+                     : carplay_network_time_server_set(lv_textarea_get_text(clock_server_entry));
+    if (result != RT_EOK)
+    {
+        lv_label_set_text(clock_server_hint, TR(result == -RT_EINVAL ? "Invalid server address." : "Could not save the time server."));
+        return;
+    }
+    char server[CARPLAY_TIME_SERVER_MAX];
+    carplay_network_time_server_get(server);
+    lv_label_set_text(clock_server_value, server);
+    clock_server_close(NULL);
+}
+#endif
 
 static void load_clock_settings(void)
 {
@@ -1401,6 +1538,18 @@ static void build_clock_settings(lv_obj_t *parent)
                                     select_clock_mode, NULL, &carplay_ui_15);
     clock_mode_buttons[1] = segment(card, "Manual", 204, 83, 104, 38,
                                     select_clock_mode, (void *)1, &carplay_ui_15);
+#if defined(RTCARPLAY_NETWORK_TIME)
+    clock_network_button = button_text(card, "Sync via network", 332, 83, 266, 38, 9,
+                                       CARPLAY_STYLE_ACCENT_CARD, CARPLAY_STYLE_ACCENT_TEXT,
+                                       &carplay_ui_15, sync_network_time, NULL);
+    clock_network_status = text(parent, "", 24, 238, 580, &carplay_ui_15, CARPLAY_STYLE_MUTED);
+    button_text(parent, "Time server", 24, 271, 174, 43, 10,
+                CARPLAY_STYLE_CARD_ALT, CARPLAY_STYLE_TEXT, &carplay_ui_15, clock_server_open, NULL);
+    char server[CARPLAY_TIME_SERVER_MAX];
+    carplay_network_time_server_get(server);
+    clock_server_value = text(parent, server, 218, 283, 376, &carplay_ui_15, CARPLAY_STYLE_MUTED);
+    lv_label_set_long_mode(clock_server_value, LV_LABEL_LONG_DOT);
+#endif
     clock_date = clock_field(card, "Date", 24, 158, "YYYY-MM-DD", "0123456789-", 10);
     clock_time = clock_field(card, "Time", 194, 126, "HH:MM:SS", "0123456789:", 8);
     clock_zone = clock_field(card, "UTC offset", 332, 126, "+08:00", "0123456789+-:", 6);
@@ -1461,6 +1610,181 @@ static void build_clock_settings(lv_obj_t *parent)
 }
 #endif
 
+#if defined(CARPLAY_STA_SETTINGS)
+static lv_obj_t *wifi_mode_button, *wifi_scan_button, *wifi_join_button, *wifi_password;
+static lv_obj_t *wifi_keyboard, *wifi_results, *wifi_message;
+static unsigned wifi_scan_revision, wifi_shown_count;
+
+static void wifi_keyboard_close(lv_event_t *event)
+{
+    (void)event;
+    if (wifi_keyboard && !lv_obj_has_flag(wifi_keyboard, LV_OBJ_FLAG_HIDDEN))
+    {
+        lv_keyboard_set_textarea(wifi_keyboard, NULL);
+        lv_obj_add_flag(wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void wifi_keyboard_open(lv_event_t *event)
+{
+    (void)event;
+    lv_keyboard_set_textarea(wifi_keyboard, wifi_password);
+    lv_obj_remove_flag(wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void wifi_action(lv_event_t *event)
+{
+    carplay_wifi_status_t wifi;
+    carplay_wifi_status(&wifi);
+    unsigned action = (unsigned)(uintptr_t)lv_event_get_user_data(event);
+    int result;
+    switch (action)
+    {
+    case 0:
+        result = carplay_wifi_enable(!wifi.enabled);
+        break;
+    case 1:
+        result = carplay_wifi_scan();
+        break;
+    case 2:
+        result = carplay_wifi_join(wifi_scan_revision, lv_dropdown_get_selected(wifi_results),
+                                   lv_textarea_get_text(wifi_password));
+        lv_textarea_set_text(wifi_password, "");
+        wifi_keyboard_close(NULL);
+        break;
+    default:
+        result = carplay_wifi_forget();
+        break;
+    }
+    settings_status(result == -RT_EBUSY ? "Wi-Fi operation in progress." : result ? "Check Wi-Fi mode, network and password."
+                                                                                  : "",
+                    result != RT_EOK);
+}
+
+static void wifi_update(const carplay_wifi_status_t *wifi)
+{
+    set_text_if_changed(lv_obj_get_child(wifi_mode_button, 0),
+                        wifi->enabled ? "Leave STA maintenance" : "Pause CarPlay and enable Wi-Fi");
+    if (wifi->busy)
+        lv_obj_add_state(wifi_mode_button, LV_STATE_DISABLED);
+    else
+        lv_obj_remove_state(wifi_mode_button, LV_STATE_DISABLED);
+    if (wifi->busy || !wifi->enabled)
+        lv_obj_add_state(wifi_scan_button, LV_STATE_DISABLED);
+    else
+        lv_obj_remove_state(wifi_scan_button, LV_STATE_DISABLED);
+    if (!wifi->enabled || wifi->busy || !wifi->count)
+        lv_obj_add_state(wifi_join_button, LV_STATE_DISABLED);
+    else
+        lv_obj_remove_state(wifi_join_button, LV_STATE_DISABLED);
+    if (wifi_shown_count != wifi->count || wifi_scan_revision != wifi->scan_revision)
+    {
+        char options[CARPLAY_WIFI_SCAN_MAX * 72 + 1] = "";
+        size_t used = 0;
+        for (unsigned index = 0; index < wifi->count; ++index)
+        {
+            const carplay_wifi_access_point_t *ap = &wifi->results[index];
+            used += (size_t)snprintf(options + used, sizeof(options) - used, "%s%s  %s  %s  %d dBm",
+                                     index ? "\n" : "", ap->ssid, ap->security,
+                                     ap->channel > 14 ? "5 GHz" : "2.4 GHz", ap->rssi);
+        }
+        lv_dropdown_set_options(wifi_results, wifi->count ? options : "No scan results");
+        wifi_scan_revision = wifi->scan_revision;
+        wifi_shown_count = wifi->count;
+    }
+    char message[128];
+    snprintf(message, sizeof(message), "%s%s%s", wifi->connected_ssid,
+             wifi->connected ? (wifi->addressed ? "  IPv4 ready. " : "  Waiting for DHCP. ") : "",
+             wifi->addressed ? "" : wifi->message);
+    set_text_if_changed(wifi_message, wifi->busy ? "Wi-Fi operation in progress..." : message);
+}
+
+static void build_wifi_settings(lv_obj_t *page)
+{
+    wifi_mode_button = button_text(page, "Pause CarPlay and enable Wi-Fi", 0, 0, 378, 51, 12,
+                                   CARPLAY_STYLE_ACCENT_CARD, CARPLAY_STYLE_ACCENT_TEXT,
+                                   &carplay_ui_18, wifi_action, NULL);
+    wifi_scan_button = button_text(page, "Scan", 392, 0, 210, 51, 12, CARPLAY_STYLE_CARD,
+                                   CARPLAY_STYLE_TEXT, &carplay_ui_18, wifi_action, (void *)1);
+    wifi_message = text(page, "", 0, 66, 378, &carplay_ui_17, CARPLAY_STYLE_MUTED);
+    lv_label_set_long_mode(wifi_message, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    panel(page, 392, 57, 210, 39, 10, CARPLAY_STYLE_SEGMENT);
+    wifi_theme_buttons[0] = segment(page, "Light", 395, 60, 101, 33, select_theme, (void *)0,
+                                    &carplay_ui_15);
+    wifi_theme_buttons[1] = segment(page, "Dark", 498, 60, 101, 33, select_theme, (void *)1,
+                                    &carplay_ui_15);
+    apply_segments(wifi_theme_buttons, 2, carplay_ui_dark() ? 1U : 0U);
+    wifi_results = lv_dropdown_create(page);
+    lv_obj_set_pos(wifi_results, 0, 102);
+    lv_obj_set_width(wifi_results, 602);
+    lv_dropdown_set_options(wifi_results, "No scan results");
+    carplay_ui_style(wifi_results, CARPLAY_STYLE_INPUT);
+    lv_obj_t *results_list = lv_dropdown_get_list(wifi_results);
+    carplay_ui_style(results_list, CARPLAY_STYLE_INPUT);
+    carplay_ui_style_part(results_list, CARPLAY_STYLE_INPUT, LV_PART_SELECTED);
+    carplay_ui_style_part(results_list, CARPLAY_STYLE_ACCENT_CARD, LV_PART_SELECTED | LV_STATE_CHECKED);
+    carplay_ui_style_part(results_list, CARPLAY_STYLE_ACCENT_CARD, LV_PART_SELECTED | LV_STATE_PRESSED);
+    wifi_password = lv_textarea_create(page);
+    lv_obj_set_pos(wifi_password, 0, 162);
+    lv_obj_set_size(wifi_password, 602, 46);
+    lv_textarea_set_one_line(wifi_password, true);
+    lv_textarea_set_password_mode(wifi_password, true);
+    lv_textarea_set_password_show_time(wifi_password, 0);
+    lv_textarea_set_max_length(wifi_password, 63);
+    lv_textarea_set_placeholder_text(wifi_password, "Wi-Fi password");
+    carplay_ui_style(wifi_password, CARPLAY_STYLE_INPUT);
+    carplay_ui_style_part(wifi_password, CARPLAY_STYLE_MUTED, LV_PART_TEXTAREA_PLACEHOLDER);
+    lv_obj_add_event_cb(wifi_password, wifi_keyboard_open, LV_EVENT_CLICKED, NULL);
+    wifi_join_button = button_text(page, "Connect", 0, 220, 294, 51, 12, CARPLAY_STYLE_ACCENT_CARD,
+                                   CARPLAY_STYLE_ACCENT_TEXT, &carplay_ui_18, wifi_action, (void *)2);
+    button_text(page, "Forget network", 308, 220, 294, 51, 12, CARPLAY_STYLE_CARD,
+                CARPLAY_STYLE_TEXT, &carplay_ui_18, wifi_action, (void *)3);
+    wifi_keyboard = build_text_keyboard(page, 0, 216, 602, 198);
+    lv_obj_add_event_cb(wifi_keyboard, wifi_keyboard_close, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(wifi_keyboard, wifi_keyboard_close, LV_EVENT_CANCEL, NULL);
+    lv_obj_add_event_cb(wifi_password, wifi_keyboard_close, LV_EVENT_READY, NULL);
+    wifi_keyboard_close(NULL);
+}
+#endif
+
+#if defined(RTCARPLAY_INTERNET_SHARE)
+static void build_ethernet_settings(lv_obj_t *page)
+{
+    static const char * const captions[] = {
+        "Connection status", "IPv4 address", "Subnet mask", "Default gateway", "System DNS"
+    };
+    lv_obj_t *card = panel(page, 0, 0, SETTINGS_DETAIL_WIDTH - 4, 280, 16, CARPLAY_STYLE_CARD);
+    for (unsigned index = 0; index < sizeof(captions) / sizeof(captions[0]); ++index)
+    {
+        int top = 23 + (int)index * 52;
+        text(card, captions[index], 24, top, 242, &carplay_ui_18, CARPLAY_STYLE_MUTED);
+        ethernet_values[index] = text(card, "--", 270, top, 334, &carplay_ui_18, CARPLAY_STYLE_TEXT);
+        lv_obj_set_style_text_align(ethernet_values[index], LV_TEXT_ALIGN_RIGHT, 0);
+        if (index + 1 < sizeof(captions) / sizeof(captions[0]))
+            divider(card, 24, top + 34, 580, 1);
+    }
+}
+
+static void ethernet_update(const carplay_internet_status_t *network)
+{
+    const char *state = "Network unavailable";
+    if (network->available && network->device)
+        state = !network->link       ? "Cable disconnected"
+                : network->addressed ? "Connected"
+                                     : "Waiting for IPv4";
+    if (strcmp(lv_label_get_text(ethernet_values[0]), TR(state)) != 0)
+        lv_label_set_text(ethernet_values[0], state);
+
+    const char * const addresses[] = { network->address, network->mask, network->gateway, network->dns };
+    for (unsigned index = 0; index < sizeof(addresses) / sizeof(addresses[0]); ++index)
+    {
+        const char *value = addresses[index];
+        set_text_if_changed(ethernet_values[index + 1],
+                            network->addressed && *value && strcmp(value, "0.0.0.0") ? value : "--");
+    }
+}
+#endif
+
 static void build_settings(lv_obj_t *parent)
 {
     static const struct
@@ -1481,6 +1805,12 @@ static void build_settings(lv_obj_t *parent)
 #endif
 #if defined(RTCARPLAY_IAP2)
         [SETTINGS_GNSS] = { "GNSS simulation", &carplay_icon_map_pin_24 },
+#endif
+#if defined(CARPLAY_STA_SETTINGS)
+        [SETTINGS_WIFI] = { "Wi-Fi", &carplay_icon_wifi_20 },
+#endif
+#if defined(RTCARPLAY_INTERNET_SHARE)
+        [SETTINGS_ETHERNET] = { "Ethernet", &carplay_icon_ethernet_20 },
 #endif
     };
     build_header(parent, "Settings", open_dashboard);
@@ -1523,6 +1853,12 @@ static void build_settings(lv_obj_t *parent)
 #if defined(RTCARPLAY_IAP2)
     build_gnss_settings(settings_pages[SETTINGS_GNSS]);
 #endif
+#if defined(CARPLAY_STA_SETTINGS)
+    build_wifi_settings(settings_pages[SETTINGS_WIFI]);
+#endif
+#if defined(RTCARPLAY_INTERNET_SHARE)
+    build_ethernet_settings(settings_pages[SETTINGS_ETHERNET]);
+#endif
     settings_hint = text(parent, "", 338, 548, 632, &carplay_ui_14, CARPLAY_STYLE_FAINT);
     show_settings_page(SETTINGS_DISPLAY);
 }
@@ -1530,22 +1866,31 @@ static void build_settings(lv_obj_t *parent)
 /* ---------------- OTA ---------------- */
 
 #if defined(RTCARPLAY_OTA)
-static void ota_check_now(lv_event_t *event)
-{
-    (void)event;
-    (void)carplay_ota_check(); /* Queue only; never wait in the LVGL task. */
-}
+static void ota_source_open(lv_event_t *event);
 
-static void ota_install_now(lv_event_t *event)
+static void ota_action(lv_event_t *event)
 {
     (void)event;
     carplay_ota_status_t ota;
     carplay_ota_status(&ota);
-    if (ota.busy || ota.state != CARPLAY_OTA_AVAILABLE)
+    if (ota.state == CARPLAY_OTA_DOWNLOADING)
+    {
+        (void)carplay_ota_cancel();
         return;
-    snprintf(ota_confirm_commit, sizeof(ota_confirm_commit), "%s", ota.remote_commit);
+    }
+    if (ota.busy)
+        return;
+    if (ota.state != CARPLAY_OTA_READY_TO_INSTALL)
+    {
+        if (ota.source[0])
+            (void)carplay_ota_download();
+        else
+            ota_source_open(NULL);
+        return;
+    }
+    ota_confirm_candidate = ota.candidate;
     char body[192];
-    snprintf(body, sizeof(body), TR("Version %s"), ota.remote[0] ? ota.remote : ota.remote_commit);
+    snprintf(body, sizeof(body), TR("Version %s"), ota.remote);
     lv_label_set_text_fmt(
         ota_confirm_text, "%s\n\n%s", body,
         TR("Disconnect CarPlay and keep power connected before installing."));
@@ -1557,8 +1902,8 @@ static void ota_confirm_install(lv_event_t *event)
     (void)event;
     lv_obj_add_flag(ota_confirm_panel, LV_OBJ_FLAG_HIDDEN);
     update_scrim();
-    if (carplay_ota_install(ota_confirm_commit) != RT_EOK)
-        lv_label_set_text(ota_state, "Update changed. Retry.");
+    if (carplay_ota_install(ota_confirm_candidate) != RT_EOK)
+        lv_label_set_text(ota_state, TR("Update changed. Retry."));
 }
 
 static void ota_confirm_cancel(lv_event_t *event)
@@ -1568,16 +1913,41 @@ static void ota_confirm_cancel(lv_event_t *event)
     update_scrim();
 }
 
+static void ota_source_close(lv_event_t *event)
+{
+    (void)event;
+    lv_obj_add_flag(ota_source_panel, LV_OBJ_FLAG_HIDDEN);
+    update_scrim();
+}
+
+static void ota_source_open(lv_event_t *event)
+{
+    (void)event;
+    carplay_ota_status_t ota;
+    carplay_ota_status(&ota);
+    lv_textarea_set_text(ota_source_entry, ota.source);
+    lv_label_set_text(ota_source_hint, TR("Enter an HTTP or HTTPS URL to a .img file."));
+    show_modal(ota_source_panel);
+}
+
+static void ota_source_save(lv_event_t *event)
+{
+    (void)event;
+    int result = carplay_ota_source_set(lv_textarea_get_text(ota_source_entry));
+    if (result == RT_EOK)
+        ota_source_close(NULL);
+    else
+        lv_label_set_text(ota_source_hint, TR(result == -RT_EBUSY ? "Update worker is busy." : "Invalid firmware URL."));
+}
+
 static const char *ota_state_text(const carplay_ota_status_t *ota, char *buffer, size_t size)
 {
     switch (ota->state)
     {
-    case CARPLAY_OTA_CHECKING:
-        return TR("Checking for updates...");
-    case CARPLAY_OTA_UP_TO_DATE:
-        return TR("Up to date");
-    case CARPLAY_OTA_AVAILABLE:
-        return TR("Update available");
+    case CARPLAY_OTA_VERIFYING:
+        return TR("Verifying update");
+    case CARPLAY_OTA_READY_TO_INSTALL:
+        return TR("Ready to install");
     case CARPLAY_OTA_DOWNLOADING:
     case CARPLAY_OTA_APPLYING:
         if (ota->progress >= 0)
@@ -1590,10 +1960,14 @@ static const char *ota_state_text(const carplay_ota_status_t *ota, char *buffer,
         return TR(ota->state == CARPLAY_OTA_DOWNLOADING ? "Downloading" : "Installing");
     case CARPLAY_OTA_REBOOTING:
         return TR("Restarting");
+    case CARPLAY_OTA_TRIAL_BOOT:
+        return "Trial boot pending";
+    case CARPLAY_OTA_CONFIRMED:
+        return "Boot confirmed";
     case CARPLAY_OTA_FAILED:
         return TR("Update failed");
     default:
-        return TR("Not checked");
+        return TR("Ready to download");
     }
 }
 
@@ -1625,23 +1999,20 @@ static void ota_update(void)
     else
         lv_obj_add_flag(ota_progress, LV_OBJ_FLAG_HIDDEN);
 
-    bool busy = ota.busy != 0;
-    if (!busy && network_ready)
-        lv_obj_remove_state(ota_check_button, LV_STATE_DISABLED);
+    if (!ota.busy || ota.state == CARPLAY_OTA_DOWNLOADING)
+        lv_obj_remove_state(ota_update_button, LV_STATE_DISABLED);
     else
-        lv_obj_add_state(ota_check_button, LV_STATE_DISABLED);
-    if (!busy && network_ready && ota.state == CARPLAY_OTA_AVAILABLE)
-    {
-        lv_obj_remove_flag(ota_install_button, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_remove_state(ota_install_button, LV_STATE_DISABLED);
-    }
-    else
-    {
-        lv_obj_add_flag(ota_install_button, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_state(ota_install_button, LV_STATE_DISABLED);
-    }
-    set_text_if_changed(ota_backend, network_ready ? "Update backend available"
-                                                   : "Update backend unavailable");
+        lv_obj_add_state(ota_update_button, LV_STATE_DISABLED);
+    const char *action = "Download image";
+    if (ota.state == CARPLAY_OTA_DOWNLOADING)
+        action = "Cancel download";
+    else if (ota.state == CARPLAY_OTA_READY_TO_INSTALL)
+        action = "Install update";
+    else if (!ota.source[0])
+        action = "Enter firmware URL";
+    set_text_if_changed(ota_action_label, action);
+    set_text_if_changed(ota_url, ota.source);
+    set_text_if_changed(ota_backend, ota.message);
 }
 #else
 static void ota_update(void)
@@ -1649,8 +2020,7 @@ static void ota_update(void)
     if (!ota_state)
         return;
     set_text_if_changed(ota_state, "Update backend unavailable");
-    lv_obj_add_state(ota_check_button, LV_STATE_DISABLED);
-    lv_obj_add_flag(ota_install_button, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_state(ota_update_button, LV_STATE_DISABLED);
 }
 #endif
 
@@ -1668,7 +2038,7 @@ static void build_ota(lv_obj_t *parent)
 
     /* Measured with the compiled subsets, the longest current state string is
      * 279 px in a 290 px slot; scroll is the safety net for future copy. */
-    ota_state = text(parent, "Not checked", 97, 354, 290, &carplay_ui_21,
+    ota_state = text(parent, "Ready to download", 97, 354, 290, &carplay_ui_21,
                      CARPLAY_STYLE_MUTED);
     lv_label_set_long_mode(ota_state, LV_LABEL_LONG_SCROLL_CIRCULAR);
 
@@ -1684,29 +2054,30 @@ static void build_ota(lv_obj_t *parent)
     lv_obj_add_flag(ota_progress, LV_OBJ_FLAG_HIDDEN);
 
 #if defined(RTCARPLAY_OTA)
-    ota_install_button = button_text(parent, "Install update", 403, 351, 250, 59, 14,
-                                     CARPLAY_STYLE_ACCENT_CARD, CARPLAY_STYLE_ACCENT_TEXT,
-                                     &carplay_ui_18, ota_install_now, NULL);
-    lv_obj_add_flag(ota_install_button, LV_OBJ_FLAG_HIDDEN);
-    ota_check_button = button_text(parent, "Check for updates", 667, 351, 258, 59, 14,
-                                   CARPLAY_STYLE_ACCENT_CARD, CARPLAY_STYLE_ACCENT_TEXT,
-                                   &carplay_ui_18, ota_check_now, NULL);
-    icon_mask(parent, &carplay_icon_refresh_24, 686, 368, CARPLAY_STYLE_ICON_ACCENT);
+    ota_url = text(parent, "", 193, 302, 700, &carplay_ui_14, CARPLAY_STYLE_MUTED);
+    lv_label_set_long_mode(ota_url, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    ota_update_button = button_text(parent, "Enter firmware URL", 667, 351, 258, 59, 14,
+                                    CARPLAY_STYLE_ACCENT_CARD, CARPLAY_STYLE_ACCENT_TEXT,
+                                    &carplay_ui_18, ota_action, NULL);
+    ota_action_label = lv_obj_get_child(ota_update_button, 0);
 #else
-    ota_install_button = panel(parent, 403, 351, 250, 59, 14, CARPLAY_STYLE_ACCENT_CARD);
-    lv_obj_add_flag(ota_install_button, LV_OBJ_FLAG_HIDDEN);
-    ota_check_button = button_text(parent, "Check for updates", 667, 351, 258, 59, 14,
-                                   CARPLAY_STYLE_ACCENT_CARD, CARPLAY_STYLE_ACCENT_TEXT,
-                                   &carplay_ui_18, NULL, NULL);
+    ota_update_button = button_text(parent, "Download image", 667, 351, 258, 59, 14,
+                                    CARPLAY_STYLE_ACCENT_CARD, CARPLAY_STYLE_ACCENT_TEXT,
+                                    &carplay_ui_18, NULL, NULL);
 #endif
-    lv_obj_add_state(ota_check_button, LV_STATE_DISABLED);
+    lv_obj_add_state(ota_update_button, LV_STATE_DISABLED);
 
     panel(parent, 64, 457, 896, 88, 17, CARPLAY_STYLE_CARD_ALT);
     icon_mask(parent, &carplay_icon_info_26, 90, 482, CARPLAY_STYLE_ICON_FAINT);
-    text(parent, "Use the existing firmware updater", 134, 479, 700, &carplay_ui_17,
+    text(parent, "Update status", 134, 479, 560, &carplay_ui_17,
          CARPLAY_STYLE_TEXT);
-    ota_backend = text(parent, "Update backend available", 134, 511, 700, &carplay_ui_14,
+    ota_backend = text(parent, "Update backend available", 134, 511, 565, &carplay_ui_14,
                        CARPLAY_STYLE_MUTED);
+#if defined(RTCARPLAY_OTA)
+    lv_label_set_long_mode(ota_backend, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    button_text(parent, "Firmware URL", 718, 473, 213, 55, 14, CARPLAY_STYLE_ACCENT_CARD,
+                CARPLAY_STYLE_ACCENT_TEXT, &carplay_ui_18, ota_source_open, NULL);
+#endif
 }
 
 /* ---------------- modals ---------------- */
@@ -1726,6 +2097,22 @@ static void build_modals(lv_obj_t *screen)
     lv_obj_remove_flag(modal_scrim, LV_OBJ_FLAG_SCROLLABLE);
 
 #if defined(RTCARPLAY_OTA)
+    ota_source_panel = panel(screen, 80, 78, 864, 446, 24, CARPLAY_STYLE_CARD);
+    text(ota_source_panel, "Firmware URL", 24, 20, 810, &carplay_ui_21, CARPLAY_STYLE_TEXT);
+    ota_source_hint = text(ota_source_panel, "", 24, 62, 810, &carplay_ui_17, CARPLAY_STYLE_MUTED);
+    ota_source_entry = lv_textarea_create(ota_source_panel);
+    lv_obj_set_pos(ota_source_entry, 24, 102);
+    lv_obj_set_size(ota_source_entry, 816, 55);
+    lv_textarea_set_one_line(ota_source_entry, true);
+    lv_textarea_set_max_length(ota_source_entry, CARPLAY_OTA_SOURCE_MAX - 1);
+    carplay_ui_style(ota_source_entry, CARPLAY_STYLE_INPUT);
+    lv_obj_t *source_keyboard = build_text_keyboard(ota_source_panel, 24, 171, 816, 194);
+    lv_keyboard_set_textarea(source_keyboard, ota_source_entry);
+    button_text(ota_source_panel, "Cancel", 24, 381, 215, 50, 14, CARPLAY_STYLE_CARD_ALT,
+                CARPLAY_STYLE_TEXT, &carplay_ui_18, ota_source_close, NULL);
+    button_text(ota_source_panel, "Save", 534, 381, 306, 50, 14, CARPLAY_STYLE_ACCENT_CARD,
+                CARPLAY_STYLE_ACCENT_TEXT, &carplay_ui_18, ota_source_save, NULL);
+    lv_obj_add_flag(ota_source_panel, LV_OBJ_FLAG_HIDDEN);
     ota_confirm_panel = panel(screen, 80, 120, 864, 360, 24, CARPLAY_STYLE_CARD);
     text(ota_confirm_panel, "Install this update and restart?", 24, 26, 800,
          &carplay_ui_21, CARPLAY_STYLE_TEXT);
@@ -1740,6 +2127,27 @@ static void build_modals(lv_obj_t *screen)
                 CARPLAY_STYLE_ACCENT_CARD, CARPLAY_STYLE_ACCENT_TEXT, &carplay_ui_18,
                 ota_confirm_install, NULL);
     lv_obj_add_flag(ota_confirm_panel, LV_OBJ_FLAG_HIDDEN);
+#endif
+
+#if defined(RTCARPLAY_NETWORK_TIME)
+    clock_server_panel = panel(screen, 80, 78, 864, 446, 24, CARPLAY_STYLE_CARD);
+    text(clock_server_panel, "Time server", 24, 20, 810, &carplay_ui_21, CARPLAY_STYLE_TEXT);
+    clock_server_hint = text(clock_server_panel, "", 24, 62, 810, &carplay_ui_17, CARPLAY_STYLE_MUTED);
+    clock_server_entry = lv_textarea_create(clock_server_panel);
+    lv_obj_set_pos(clock_server_entry, 24, 102);
+    lv_obj_set_size(clock_server_entry, 816, 55);
+    lv_textarea_set_one_line(clock_server_entry, true);
+    lv_textarea_set_max_length(clock_server_entry, CARPLAY_TIME_SERVER_MAX - 1);
+    carplay_ui_style(clock_server_entry, CARPLAY_STYLE_INPUT);
+    lv_obj_t *server_keyboard = build_text_keyboard(clock_server_panel, 24, 171, 816, 194);
+    lv_keyboard_set_textarea(server_keyboard, clock_server_entry);
+    button_text(clock_server_panel, "Cancel", 24, 381, 215, 50, 14, CARPLAY_STYLE_CARD_ALT,
+                CARPLAY_STYLE_TEXT, &carplay_ui_18, clock_server_close, NULL);
+    button_text(clock_server_panel, "Restore default", 254, 381, 265, 50, 14, CARPLAY_STYLE_CARD_ALT,
+                CARPLAY_STYLE_TEXT, &carplay_ui_18, clock_server_save, clock_server_panel);
+    button_text(clock_server_panel, "Save", 534, 381, 306, 50, 14, CARPLAY_STYLE_ACCENT_CARD,
+                CARPLAY_STYLE_ACCENT_TEXT, &carplay_ui_18, clock_server_save, NULL);
+    lv_obj_add_flag(clock_server_panel, LV_OBJ_FLAG_HIDDEN);
 #endif
 
     bt_panel = panel(screen, 80, 120, 864, 360, 24, CARPLAY_STYLE_CARD);
@@ -2192,7 +2600,7 @@ static void update_phone_settings(void)
 
 static void update_settings_state(void)
 {
-    static unsigned last_theme = UINT32_MAX, last_language = UINT32_MAX;
+    static unsigned last_language = UINT32_MAX;
     static unsigned last_display = UINT32_MAX;
     demo_status_t status = { 0 };
     bool have = carplay_connection_status(&status);
@@ -2209,11 +2617,6 @@ static void update_settings_state(void)
         update_phone_settings();
 
     (void)have;
-    if (last_theme != theme_choice)
-    {
-        apply_segments(theme_buttons, 3, theme_choice);
-        last_theme = theme_choice;
-    }
     unsigned language = carplay_ui_is_chinese() ? 0U : 1U;
     if (last_language != language)
     {
@@ -2277,8 +2680,12 @@ static void update_page(lv_timer_t *timer)
     if (live && !was_live)
     {
         lv_obj_t *modals[] = { bt_panel,
+#if defined(RTCARPLAY_NETWORK_TIME)
+                               clock_server_panel,
+#endif
 #if defined(RTCARPLAY_OTA)
                                ota_confirm_panel,
+                               ota_source_panel,
 #endif
                                NULL };
         for (unsigned i = 0; i < sizeof(modals) / sizeof(modals[0]); ++i)
@@ -2309,13 +2716,28 @@ static void update_page(lv_timer_t *timer)
 
     carplay_internet_status_t network;
     carplay_internet_status(&network);
-    network_ready = network.available && network.route_ready;
+    static carplay_style_role_t ethernet_role = CARPLAY_STYLE_ICON_FAINT;
+    update_network_icon(dash_ethernet, &ethernet_role, network.link, network.addressed);
+#if defined(RTCARPLAY_INTERNET_SHARE)
+    ethernet_update(&network);
+#endif
 
     runtime_controls();
     update_dashboard(&status, have_status);
     update_connectivity(&status, have_status);
     update_settings_state();
     ota_update();
+#if defined(RTCARPLAY_OTA)
+    if (ota_hmi_ready)
+        carplay_ota_boot_health_ready();
+#endif
+#if defined(CARPLAY_STA_SETTINGS)
+    carplay_wifi_status_t wifi;
+    carplay_wifi_status(&wifi);
+    static carplay_style_role_t wifi_role = CARPLAY_STYLE_ICON_FAINT;
+    update_network_icon(dash_wifi, &wifi_role, wifi.enabled && wifi.connected, wifi.addressed);
+    wifi_update(&wifi);
+#endif
 
     if (have_status && status.wireless && status.pairing.kind &&
         status.stage != DEMO_CLOSING && status.stage != DEMO_FAILED)
@@ -2380,7 +2802,6 @@ void carplay_demo_launcher_init(void)
 
     carplay_ui_set_dark(carplay_preferences_get(CARPLAY_PREF_THEME, 1) != 0);
     carplay_ui_set_chinese(carplay_preferences_get(CARPLAY_PREF_LANGUAGE, 0) != 0);
-    theme_choice = carplay_ui_dark() ? 1U : 0U;
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
     display_choice = carplay_preferences_get(CARPLAY_PREF_DISPLAY, CARPLAY_FUSION) ==
                              CARPLAY_FULLSCREEN
@@ -2430,6 +2851,9 @@ void carplay_demo_launcher_init(void)
     if (touch != RTCP_OK)
         rt_kprintf("[carplay-demo] launch page touch error=%d\n", touch);
     int result = carplay_connection_manager_start();
+#if defined(RTCARPLAY_OTA)
+    ota_hmi_ready = pointer && touch == RTCP_OK && result == RTCP_OK;
+#endif
     if (result != RTCP_OK)
         rt_kprintf("[carplay-demo] connection manager error=%d\n", result);
 }

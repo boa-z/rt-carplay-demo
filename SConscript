@@ -43,6 +43,12 @@ if GetDepend('RTCARPLAY_INTERNET_SHARE'):
     src += Glob('platform/internet_share_lubanlite.c')
 if GetDepend('RTCARPLAY_OTA'):
     src += Glob('platform/ota_lubanlite.c')
+    if GetDepend('AIC_WLAN_REALTEK'):
+        src += Glob('platform/wifi_sta_lubanlite.c')
+if GetDepend('RTCARPLAY_OTA') or GetDepend('RTCARPLAY_INTERNET_SHARE'):
+    src += Glob('app/network_manager.c')
+if GetDepend('RTCARPLAY_NETWORK_TIME'):
+    src += Glob('platform/network_time_lubanlite.c')
 cpppath = [cwd, cwd + '/app', cwd + '/platform']
 if GetDepend('RTCARPLAY_USB_FILE_SYNC'):
     # Application composition: reuse the upstream class, sync service, DFS

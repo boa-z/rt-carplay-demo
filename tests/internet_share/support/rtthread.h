@@ -14,6 +14,8 @@ struct rt_semaphore
 #define RT_EOK             0
 #define RT_ENOMEM          12
 #define RT_ERROR           1
+#define RT_EBUSY           16
+#define RT_EINVAL          22
 #define RT_IPC_FLAG_FIFO   0
 #define RT_WAITING_FOREVER (-1)
 rt_device_t rt_device_find(const char *);
@@ -26,8 +28,9 @@ rt_thread_t rt_thread_create(const char *, void (*)(void *), void *, unsigned, u
 int rt_thread_startup(rt_thread_t);
 int rt_thread_delete(rt_thread_t);
 void rt_thread_mdelay(int);
-#define INIT_APP_EXPORT(fn)      static void *init_ref __attribute__((unused)) = (void *)&fn
-#define MSH_CMD_EXPORT(fn, desc) static void *shell_ref __attribute__((unused)) = (void *)&fn
+#define INIT_APP_EXPORT(fn)                   static void *init_ref __attribute__((unused)) = (void *)&fn
+#define MSH_CMD_EXPORT(fn, desc)              static void *shell_ref __attribute__((unused)) = (void *)&fn
+#define MSH_CMD_EXPORT_ALIAS(fn, alias, desc) MSH_CMD_EXPORT(fn, desc)
 
 typedef long rt_base_t;
 rt_base_t rt_hw_interrupt_disable(void);

@@ -6,10 +6,13 @@
 #include "../../platform/internet_share_lubanlite.c"
 #include "lwip/init.h"
 #include "lwip/ip4.h"
+#include "lwip/dhcp.h"
+#include "lwip/prot/dhcp.h"
+#include "network_manager.h"
 #include <assert.h>
-static struct netif lan, wan;
-static struct eth_device lan_device, wan_device;
-static struct rt_device radio;
+static struct netif lan, wan, sta, ncm;
+static struct eth_device lan_device, wan_device, sta_device, ncm_device;
+static struct rt_device radio, sta_radio;
 static ip_addr_t resolver;
 static u32_t clock_ms;
 static const char *http_response;
@@ -39,8 +42,13 @@ err_t dhcp_start(struct netif *n)
 }
 rt_device_t rt_device_find(const char *name)
 {
-    return !strcmp(name, "e0") ? &wan_device.parent : !strcmp(name, "ap0") ? &radio
-                                                                           : NULL;
+    if (!strcmp(name, "e0"))
+        return &wan_device.parent;
+    if (!strcmp(name, RT_WLAN_DEVICE_AP_NAME))
+        return &radio;
+    if (!strcmp(name, RT_WLAN_DEVICE_STA_NAME))
+        return &sta_radio;
+    return NULL;
 }
 rt_base_t rt_hw_interrupt_disable(void)
 {
@@ -243,18 +251,42 @@ int main(void)
 {
     lwip_init();
     lan_device.parent.user_data = &radio;
+    sta_device.parent.user_data = &sta_radio;
     add(&lan, &lan_device, "192.168.4.1", "0.0.0.0", 'w');
     add(&wan, &wan_device, "10.2.0.9", "10.2.0.1", 'e');
+    add(&sta, &sta_device, "192.168.5.2", "192.168.5.1", 'w');
+    add(&ncm, &ncm_device, "192.168.6.1", "192.168.6.254", 'u');
     ip_addr_set_ip4_u32(&resolver, address("8.8.8.8").addr);
     existing_client.state = DHCP_STATE_BOUND;
+    netif_set_default(&ncm);
+    assert(carplay_network_wan() == CARPLAY_WAN_ETHERNET && netif_default == &wan);
+    netif_set_link_down(&wan);
+    assert(carplay_network_wan() == CARPLAY_WAN_STA && netif_default == &sta);
+    netif_set_link_down(&sta);
+    netif_set_gw(&lan, netif_ip4_gw(&sta));
+    assert(carplay_network_wan() == CARPLAY_WAN_NONE && netif_default == NULL);
+    netif_set_gw(&lan, IP4_ADDR_ANY4);
+    netif_set_link_up(&wan);
+    ip4_addr_t wan_ip = *netif_ip4_addr(&wan);
+    netif_set_ipaddr(&wan, IP4_ADDR_ANY4);
+    assert(carplay_network_wan() == CARPLAY_WAN_NONE);
     u8_t options[12];
     result(0);
     assert(!share.sharing && !carplay_dhcp_internet_options(&lan, options));
     assert(!dhcp_starts); /* Do not restart an SDK-owned lease or discovery. */
     existing_client.state = DHCP_STATE_OFF;
-    share.dhcp_started = 0;
-    result(0);
+    assert(carplay_network_wan() == CARPLAY_WAN_NONE);
     assert(dhcp_starts == 1);
+    netif_set_ipaddr(&wan, &wan_ip);
+    assert(carplay_network_wan() == CARPLAY_WAN_ETHERNET && netif_default == &wan);
+    ip4_addr_t wan_gateway = *netif_ip4_gw(&wan);
+    netif_set_gw(&wan, IP4_ADDR_ANY4);
+    assert(!carplay_network_acquire(false));
+    assert(carplay_network_acquire(true) && carplay_network_valid() && netif_default == &wan);
+    carplay_network_release();
+    assert(netif_default == NULL);
+    netif_set_gw(&wan, &wan_gateway);
+    assert(carplay_network_wan() == CARPLAY_WAN_ETHERNET);
     result(1);
     assert(share.sharing && carplay_dhcp_internet_options(&lan, options) == 12);
     assert(options[0] == 3 && options[6] == 6 && !memcmp(options + 2, &netif_ip4_addr(&lan)->addr, 4) && !memcmp(options + 8, &ip_2_ip4(&resolver)->addr, 4));

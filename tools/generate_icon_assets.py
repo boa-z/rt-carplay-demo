@@ -41,6 +41,8 @@ ICONS = (
     ("info_26", "info", 0xE0FE, 26),
     ("languages_24", "languages", 0xE103, 24),
     ("map_pin_24", "map-pin", 0xE114, 24),
+    ("wifi_20", "wifi", 0xE1AD, 20),
+    ("ethernet_20", "ethernet-port", 0xE624, 20),
 )
 
 SUPERSAMPLE = 8

@@ -6,6 +6,8 @@ uint32_t rt_tick_get_millisecond(void);
 typedef void *rt_mutex_t;
 typedef void *rt_thread_t;
 #define RT_EOK             0
+#define RT_EBUSY           7
+#define RT_EINVAL          10
 #define RT_WAITING_FOREVER (-1)
 #define RT_WAITING_NO      0
 #define RT_IPC_FLAG_PRIO   1

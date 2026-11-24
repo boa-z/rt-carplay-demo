@@ -261,6 +261,15 @@ bool carplay_app_is_running(void)
 {
     return receiver;
 }
+bool carplay_app_maintenance_begin(void)
+{
+    return true;
+}
+
+void carplay_app_maintenance_end(void)
+{
+}
+
 int carplay_app_stop(void)
 {
     assert(!radio && !usb_session);

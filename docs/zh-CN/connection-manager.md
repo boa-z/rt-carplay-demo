@@ -1,5 +1,7 @@
 [English](../connection-manager.md) | [简体中文](connection-manager.md)
 
+连接管理器也为 [Wi-Fi STA](network-manager.md) 和[固件安装](ota.md)提供临时维护独占。管理器先关闭有线和无线会话，再确认可以交接。释放独占后恢复用户选择的连接策略。
+
 # 应用自动连接管理器
 
 ## 职责

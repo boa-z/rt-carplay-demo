@@ -61,7 +61,7 @@ The Settings page writes the display mode through `carplay_connection_set_displa
 
 ## OTA
 
-The page reads and controls the existing `carplay_ota_*` service only (`platform/ota_lubanlite.c`). It shows the firmware-provided installed version and slot, and the service's checking/up-to-date/available/downloading/applying/rebooting/failed states with progress when known. Check and install are queued, never waited on inside the LVGL task, and Install asks for confirmation with the target version. When the build has no OTA service, or the device has no network, the controls are disabled and the backend line says unavailable. No endpoint, partition or signature check is invented, and no UI timer fabricates a successful flash.
+The page controls `carplay_ota_*` in `platform/ota_lubanlite.c`. It shows the installed version, slot, saved `.img` URL, and download and installation progress when available. Download, image verification and installation run in a worker. The page asks for confirmation with the verified target version before installation. See [Firmware updates](ota.md).
 
 ## Phone Controls
 

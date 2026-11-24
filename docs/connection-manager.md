@@ -1,5 +1,7 @@
 [English](connection-manager.md) | [简体中文](zh-CN/connection-manager.md)
 
+The manager also owns the temporary maintenance lease used by [Wi-Fi STA](network-manager.md) and [firmware installation](ota.md). It closes USB and wireless session owners and acknowledges quiescence before another service takes the resource. Releasing the lease resumes the selected connection policy.
+
 # Automatic application connection manager
 
 ## Responsibility

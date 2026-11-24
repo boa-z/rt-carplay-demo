@@ -110,39 +110,29 @@ config RTCARPLAY_INTERNET_PROBE_HOST
       Choose a reachable endpoint in the deployment network. A failed or
       redirected probe closes sharing even if some other sites are reachable.
 
+config RTCARPLAY_NETWORK_TIME
+    bool "Network time synchronization in Date & time"
+    default y
+    depends on RTCARPLAY_DEMO_LAUNCHER && RT_USING_RTC
+    depends on RT_USING_LWIP212 && RT_LWIP_DNS && RT_USING_DFS
+    depends on RTCARPLAY_INTERNET_SHARE || RTCARPLAY_OTA
+
+config RTCARPLAY_NTP_SERVER
+    string "Default network time server"
+    default "time.cloudflare.com"
+    depends on RTCARPLAY_NETWORK_TIME
+
 config RTCARPLAY_OTA
-    bool "Wired network A/B OTA command and nightly update check"
+    bool "HTTP/HTTPS A/B OTA command and update settings"
     default y
     depends on LPKG_USING_OTA_DOWNLOADER && LPKG_USING_WEBCLIENT
     depends on AIC_AB_SYSTEM_INTERFACE
+    depends on RTCARPLAY_AUTO_CONNECT && RT_USING_WIFI && RT_USING_RTC
     depends on RT_USING_DFS && RT_USING_LWIP && WEBCLIENT_USING_MBED_TLS
-    depends on !OTA_RODATA_DIRECT
+    depends on AIC_SPINAND_DRV && !OTA_RODATA_DIRECT
     help
-      Add the carplay_ota shell command and the Settings firmware section.
-      The nightly channel compares the commit hash compiled into the running
-      image with the published manifest; any different hash counts as a new
-      build. Installation requires screen confirmation or an explicit CLI install.
-      Require e0 as the default route. Stage the package in /data, verify
-      its manifest size and SHA256, then use the SDK inactive-slot updater.
-      Disconnect CarPlay before installing and keep power connected.
-
-config RTCARPLAY_OTA_URL
-    string "Default OTA package URL"
-    default "https://github.com/boa-z/luban-lite-carplay/releases/download/preview/ota.cpio"
-    depends on RTCARPLAY_OTA
-
-config RTCARPLAY_OTA_VERSION_URL
-    string "Release manifest URL"
-    default "https://github.com/boa-z/luban-lite-carplay/releases/download/preview/version.txt"
-    depends on RTCARPLAY_OTA
-    help
-      Small text manifest holding the published version and commit hash:
-        version=1.0.0
-        commit=<40-digit sha>
-        board=d21x_demo128-nand-carplay
-        size=<package bytes>
-        sha256=<64-digit hash>
-      The confirmed commit, size and SHA256 bind installation to one package.
+      Stage and validate a D213 CarPlay .img from an HTTP or HTTPS URL.
+      Explicit confirmation writes the verified OS and Rodata to inactive slots.
 
 config RTCARPLAY_INTERNET_PROBE_PATH
     string "HTTP 204 connectivity probe path"

@@ -20,6 +20,31 @@ text = text.replace(include, '''/* Application compatibility with the current ne
 #endif
 ''' + include)
 text = text.replace(assignment, 'buf->st_mtime = RTCARPLAY_STAT_MTIME(st);')
+mutators = (
+    ('mkdir', 'const char *path', 'path', False),
+    ('rmdir', 'const char *path', 'path', False),
+    ('unlink', 'const char *path', 'path', False),
+    ('open', 'const char *path, uint8_t mode', 'path, mode', True),
+    ('write', 'int fd, const void *buf, size_t len', 'fd, buf, len', False),
+)
+for name, parameters, arguments, read_only_open in mutators:
+    original = 'int vfs_{}({})'.format(name, parameters)
+    if text.count(original) != 1:
+        raise RuntimeError('CherryUSB DFS API changed: ' + original)
+    text = text.replace(original,
+                        '#ifdef RTCARPLAY_OTA\nstatic int stage_vfs_{}({})\n#else\n{}\n#endif'
+                        .format(name, parameters, original))
+text += '\n#ifdef RTCARPLAY_OTA\n#include "ota_lubanlite.h"\n'
+for name, parameters, arguments, read_only_open in mutators:
+    text += '\nint vfs_{}({})\n{{\n'.format(name, parameters)
+    if read_only_open:
+        text += '    if (mode == VFS_O_RDONLY)\n        return stage_vfs_open(path, mode);\n'
+    text += ('    if (!carplay_ota_file_write_begin())\n'
+             '        return VFS_ERR_AGAIN;\n'
+             '    int result = stage_vfs_{}({});\n'
+             '    carplay_ota_file_write_end();\n'
+             '    return result;\n}}\n').format(name, arguments)
+text += '#endif\n'
 directory = os.path.dirname(sys.argv[2])
 if not os.path.isdir(directory):
     os.makedirs(directory)
