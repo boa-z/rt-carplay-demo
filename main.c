@@ -2,8 +2,8 @@
 /*
  * Luban-Lite application entry for rt-carplay.
  *
- * Copy this directory to application/rt-thread/rtcarplay/ and select the
- * matching _rtcarplay_defconfig.  Without RTCARPLAY_AUTO_START the receiver
+ * Initialize the application/rt-thread/rt-carplay-demo submodule and select
+ * the matching hardware defconfig. Without RTCARPLAY_AUTO_START the receiver
  * waits for the carplay_start MSH command, which is the recommended order
  * for first bring-up (the console then shows the pairing PIN).
  */

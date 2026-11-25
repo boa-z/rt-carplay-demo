@@ -1,20 +1,31 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Compile actual port options with the GUI defconfig and legacy defaults."""
 from pathlib import Path
+import json
 import os
 import re
 import subprocess
 import tempfile
 root = Path(os.environ.get('SDK_ROOT', Path(__file__).resolve().parents[5])).resolve()
 port = root / 'kernel/rt-thread/components/net/lwip/port'
-for variant in ('rtcarplay_rtl8733bs', 'rtcarplay_aic8800d40', 'legacy', 'aic8800'):
+modules = ('rtl8733bs', 'aic8800d40')
+registry = root / '.ci/hardware-targets.json'
+if registry.is_file():
+    targets = json.loads(registry.read_text())
+    profiles = {module: targets[f'd213-demo128-nand-carplay-{module}']['defconfig']
+                for module in modules}
+else:
+    profiles = {module: f'd21x_demo128-nand_rt-thread_rtcarplay_{module}_defconfig'
+                for module in modules}
+
+for variant in (*profiles, 'legacy', 'aic8800'):
     with tempfile.TemporaryDirectory() as directory:
         work = Path(directory)
         (work/'sys').mkdir()
         (work/'sys/errno.h').write_text('#include <errno.h>\n')
         config = ''
-        if variant.startswith('rtcarplay'):
-            text = (root/('target/configs/d21x_demo128-nand_rt-thread_' + variant + '_defconfig')).read_text()
+        if variant in profiles:
+            text = (root / 'target/configs' / profiles[variant]).read_text()
             for name in ('RT_LWIP_UDP_RECVMBOX_SIZE', 'RT_LWIP_RECV_BUFSIZE'):
                 value = re.search(r'^CONFIG_' + name + r'=(\d+)$', text, re.M)
                 assert value, name

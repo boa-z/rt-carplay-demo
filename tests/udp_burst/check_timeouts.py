@@ -17,7 +17,9 @@ with tempfile.TemporaryDirectory() as directory:
     (work / 'sys/errno.h').write_text('#include <errno.h>\n')
     (work / 'rtthread.h').write_text('#include <string.h>\n#define rt_memcpy memcpy\n')
     (work / 'rtconfig.h').write_text('''
+#define RT_USING_LWIP212 1
 #define RT_USING_LWIP_IPV6 1
+#define RT_LWIP_MDNS 1
 #define RT_LWIP_TCP 1
 #define RT_LWIP_UDP 1
 #define RT_LWIP_DHCP 1
