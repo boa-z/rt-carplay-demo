@@ -42,7 +42,7 @@ target_compile_definitions(launcher_preview PRIVATE
     RTCARPLAY_INTERNET_SHARE RTCARPLAY_MICROPHONE RTCARPLAY_IAP2 RT_USING_RTC
     LPKG_RT_CARPLAY_LUBANLITE_WIFI RTCARPLAY_OTA AIC_WLAN_REALTEK RTCARPLAY_NETWORK_TIME
     LPKG_BT_DEVICE_NAME_DYNAMIC CARPLAY_PREFERENCES_EXTERNAL_PROVIDER
-    CARPLAY_PREVIEW_JPEG="${SDK_ROOT}/doc/webhelp/template/resources/images/hesa720.jpg")
+    CARPLAY_PREVIEW_JPEG="${CMAKE_CURRENT_SOURCE_DIR}/cover-fixture.jpg")
 target_compile_options(launcher_preview PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(launcher_preview PRIVATE lvgl m)
 
