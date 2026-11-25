@@ -1,12 +1,12 @@
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-# D213 CarPlay integration
+# rt-carplay-demo
 
-This application runs the portable rt-carplay SDK on an ArtInChip D213 with RT-Thread. The default firmware uses a 1024×600 LVGL launcher and automatically accepts USB and wireless CarPlay. Start with the [SDK integration guide](../../../packages/third-party/rt-carplay/docs/receiver-api.md) for the portable API and the [Classic capability matrix](../../../packages/third-party/rt-carplay/docs/classic-capability-audit.md) for feature status and physical acceptance.
+This C and LVGL reference application integrates and validates the [rt-carplay SDK](https://github.com/boa-z/rt-carplay). The D213 baseline runs RT-Thread with RTL8733BS and a 1024×600 launcher for USB and wireless CarPlay. Linux currently has Host models and an LVGL Preview. A Linux Receiver is planned.
 
 ## Build and connect
 
-From the repository root, initialize the pinned dependencies and build the bootloader and IMG. Use the [build and CI guide](docs/ci.md#firmware-builds) for Linux prerequisites, output names and artifacts.
+From the [Luban-Lite integration checkout](https://github.com/boa-z/luban-lite-carplay), initialize the pinned submodules and build the bootloader, IMG and OTA CPIO. The [build and CI guide](docs/ci.md#firmware-builds) lists prerequisites and artifacts.
 
 ```sh
 git submodule update --init --recursive
@@ -27,14 +27,14 @@ carplay_iap2 status
 
 | Layer | Starting point | Owns |
 | --- | --- | --- |
-| Portable SDK | [rt-carplay](../../../packages/third-party/rt-carplay/README.md) | RTSP, pairing, encrypted media, iAP2, HID and the Receiver lifecycle |
+| Portable SDK | [rt-carplay](https://github.com/boa-z/rt-carplay) | RTSP, pairing, encrypted media, iAP2, HID and the Receiver lifecycle |
 | Application | [`app/carplay_app.c`](app/carplay_app.c), [`app/connection_manager.c`](app/connection_manager.c) | Single Receiver owner, transport arbitration, pairing storage, session snapshots and command queues |
 | Board adapters | [`platform/`](platform/) | Bluetooth, Wi-Fi, USB, MFi, MPP/DE, speaker, microphone and touch |
 | User interface | [`ui/lvgl_launcher.c`](ui/lvgl_launcher.c) | LVGL settings and dashboard, projection view and user requests |
 
 The connection manager chooses a transport. The application poll worker owns Receiver calls. Media callbacks hand off to board workers, and the UI reads copied snapshots and queues user commands. USB networking is provided by the independently maintained `cherryusb-ipheth` or native NCM adapter. See [session snapshots](docs/session-snapshots.md) for ownership during teardown.
 
-The local `Kconfig` and `SConscript` select board features. SDK protocol switches belong to the SDK's `Kconfig`. Keep device drivers and UI out of the portable Receiver and leave capability declarations aligned with installed backends.
+The local `Kconfig` and `SConscript` select board features. SDK protocol switches belong to the SDK's `Kconfig`. See the [platform guide](docs/platform.md) for ownership, internal dependencies and the Linux and wireless roadmap.
 
 ## Use and diagnose
 
@@ -50,14 +50,15 @@ The local `Kconfig` and `SConscript` select board features. SDK protocol switche
 ## Verify changes
 
 ```sh
-make -C packages/third-party/rt-carplay -j8 check
-make -C application/rt-thread/rtcarplay -j8 check
-make -C application/rt-thread/rtcarplay check-docs
+export SDK_ROOT=/path/to/luban-lite-carplay
+bash "$SDK_ROOT/packages/third-party/rt-carplay/scripts/fetch-mbedtls.sh"
+make -j8 check
+make check-docs
 ```
 
-The SDK suite checks protocol and API behavior. The integration suite uses production source with Host device stubs. CI also renders the real LVGL launcher and Fusion strip. A build or Host check does not establish D213 and iPhone interoperability. Record physical tests against the firmware commit and identify wired and wireless results separately.
+See the [validation guide](docs/validation.md) for the hardware matrix and physical acceptance checklist. The [CI guide](docs/ci.md#standalone-host-validation) describes pinned dependencies and Preview.
 
-Update both languages for changes to public APIs, configuration or user-visible behavior. Update capability status in the SDK matrix and keep board procedures in the relevant integration guide.
+Demo releases have their own version and Git tags. Use the integration and dependency commits in the firmware manifest to identify a build. Update both languages when public APIs, configuration or user-visible behavior changes. See [NOTICE](NOTICE) and [COPYING](COPYING) for licensing and attribution.
 
 ## Investigations
 

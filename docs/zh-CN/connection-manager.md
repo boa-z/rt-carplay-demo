@@ -59,4 +59,4 @@ Host ASan/UBSan、LVGL 渲染与 GUI/Headless 交叉编译属于独立证据。�
 
 ## Receiver 集成
 
-宿主组合公共 `rtcp_receiver_config_t.platform`、`.media`、`.iap2` 描述，并将 HID、Siri 和隧道 iAP2 排队交给 Poll Owner。`carplay_app_session_state()` 复制 Owner 发布的公共状态，不借用协议对象。视频保持 Annex-B H.264，音频保持 LPCM/AAC/Opus 元数据和时间戳。SDK 保持独立，cherryusb-ipheth 保持独立驱动。参见 SDK [Receiver API](../../../../../packages/third-party/rt-carplay/docs/receiver-api.md)和[生命周期契约](../../../../../packages/third-party/rt-carplay/docs/lifecycle-and-ownership.md)。
+宿主组合公共 `rtcp_receiver_config_t.platform`、`.media`、`.iap2` 描述，并将 HID、Siri 和隧道 iAP2 排队交给 Poll Owner。`carplay_app_session_state()` 复制 Owner 发布的公共状态，不借用协议对象。视频保持 Annex-B H.264，音频保持 LPCM/AAC/Opus 元数据和时间戳。SDK 保持独立，cherryusb-ipheth 保持独立驱动。参见 SDK [Receiver API](https://github.com/boa-z/rt-carplay/blob/54df9892d618a4ac30af839c2a1636acf2217314/docs/receiver-api.md)和[生命周期契约](https://github.com/boa-z/rt-carplay/blob/54df9892d618a4ac30af839c2a1636acf2217314/docs/lifecycle-and-ownership.md)。

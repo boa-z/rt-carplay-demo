@@ -56,7 +56,7 @@ Run the CarPlay host regressions and LVGL previews, build the D213 bootloader an
 
 ## Firmware builds
 
-The `D213 firmware` GitHub Actions workflow runs on pushes to `carplay-oss` and supports manual dispatch. It runs the SDK and application Host regressions and both LVGL previews, builds the firmware, and publishes the complete IMG as a rolling `nightly` GitHub prerelease. A push with `[ultra-dev]` in its commit message still builds and uploads an Actions artifact for review and skips the release. The checkout uses Git LFS and recursive submodules for the Xuantie V2.6.1 Linux toolchain and Realtek library.
+Run these commands in the integration checkout after `git submodule update --init --recursive`. Its `D213 firmware` workflow validates pull requests, pushes to `carplay-oss` and manual builds. Only `carplay-oss` publishes `nightly`. A push with `[ultra-dev]` still uploads Actions artifacts and skips the release. Git LFS supplies the Xuantie V2.6.1 Linux toolchain and Realtek library.
 
 ```sh
 python3 -m venv .ci-venv
@@ -91,8 +91,19 @@ The tests compile actual adapter sources with ASan/UBSan. They verify software c
 
 Run `make -C application/rt-thread/rtcarplay check-lubanlite-video SDK_ROOT="$PWD"` when changing the video path. This covers the actual MPP sink and host UI policy, including the SDK framebuffer command ABI. Verify first-frame handoff, local UI restoration and touch on the [physical panel](single-screen-fusion.md).
 
-## Host-owned platform regression suite
+## Standalone Host validation
 
-Run `make -C application/rt-thread/rtcarplay -j8 check` under ASan/UBSan after fetching the SDK's pinned mbedTLS. It includes the relocated receiver/audio/pairing tests and the existing video, touch, launcher, bonds, USB DMA, handoff, reconnect and capability tests. The SDK's standalone suite no longer compiles board sources. Generic SDK switches are sourced once from its Kconfig; the application owns hardware selection and source collection. See the SDK [migration guide](../../../../packages/third-party/rt-carplay/docs/luban-lite-migration.md). These are Host device/scheduler models, not physical board acceptance.
+The Demo Host workflow uses `.ci/dependencies.env` to pin the integration checkout, rt-carplay and cherryusb-ipheth. It verifies all three commits and runs formatting, bilingual documentation checks, SDK and Demo ASan/UBSan regressions, and both LVGL renders. Initialize the BSP submodules recursively and update the three pins together after qualifying a dependency change.
 
-CI also runs the application OTA worker against the generated IMG using modeled HTTP and NAND, covering validation and the inactive OS/Rodata write mapping.
+From the standalone Demo checkout, point `SDK_ROOT` to the pinned integration checkout. For Host builds, `RTCP_ROOT`, `CHERRYUSB_ROOT`, `IPHETH_ROOT` and `LVGL_ROOT` override the corresponding dependency paths. Use absolute paths for overrides. For firmware, `RTCARPLAY_DIR` accepts an external rt-carplay source path and the application selects that single SDK build. Keep its Kconfig compatible with the pinned integration package.
+
+```sh
+export SDK_ROOT=/path/to/luban-lite-carplay
+cmake -S tests/launcher_preview -B build/preview -DSDK_ROOT="$SDK_ROOT"
+cmake --build build/preview -j8
+mkdir -p build/screens
+build/preview/launcher_preview build/screens
+build/preview/fusion_preview build/screens
+```
+
+Firmware CI also runs the Demo OTA worker against the generated CPIO with modeled HTTP and NAND, including validation and the inactive OS/Rodata write mapping.

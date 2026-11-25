@@ -2,7 +2,7 @@
 
 # D213 上的 CarPlay Ultra 实验
 
-D213 Demo 通过[单屏融合](single-screen-fusion.md)组合 Classic CarPlay 视频和本地 LVGL 仪表。可移植 SDK 的[实验协议基础](../../../../../packages/third-party/rt-carplay/docs/zh-CN/ultra-foundation.md)单独说明 Vehicle State、UI Sync 和独立 Type 111 传输。
+D213 Demo 通过[单屏融合](single-screen-fusion.md)组合 Classic CarPlay 视频和本地 LVGL 仪表。可移植 SDK 的[实验协议基础](https://github.com/boa-z/rt-carplay/blob/54df9892d618a4ac30af839c2a1636acf2217314/docs/ultra-foundation.md)单独说明 Vehicle State、UI Sync 和独立 Type 111 传输。
 
 ## 当前范围与验收
 
@@ -14,10 +14,10 @@ D213 Demo 通过[单屏融合](single-screen-fusion.md)组合 Classic CarPlay �
 
 ## 硬件边界
 
-D213 使用 MPP H.264、DE 硬件图层和 LVGL。[MPP 解码器工厂](../../../../../packages/artinchip/mpp/ve/decoder/mpp_decoder.c)没有 HEVC 路径，[GE 接口](../../../../../packages/artinchip/mpp/include/mpp_ge.h)提供二维图形操作。官方 Ultra 需要合适的 HEVC 和 OpenGL 渲染路径、资产、呈现集成和资格认证。参见 [Apple 公开架构演讲](https://developer.apple.com/videos/play/wwdc2024/10111/)。
+D213 使用 MPP H.264、DE 硬件图层和 LVGL。[MPP 解码器工厂](https://github.com/boa-z/luban-lite-carplay/blob/c470ef170e2cac001316615e209a5dc2646bedde/packages/artinchip/mpp/ve/decoder/mpp_decoder.c)没有 HEVC 路径，[GE 接口](https://github.com/boa-z/luban-lite-carplay/blob/c470ef170e2cac001316615e209a5dc2646bedde/packages/artinchip/mpp/include/mpp_ge.h)提供二维图形操作。官方 Ultra 需要合适的 HEVC 和 OpenGL 渲染路径、资产、呈现集成和资格认证。参见 [Apple 公开架构演讲](https://developer.apple.com/videos/play/wwdc2024/10111/)。
 
 ## 复现与记录
 
 按[固件构建和 CI 指南](ci.md)操作。仅在模拟 Vehicle State 实验中启用 `RTCARPLAY_VEHICLE_PROTOCOL_DEMO`。记录镜像 SHA-256、SDK gitlink、开发板和 iPhone/iOS 版本、传输方式及原始日志。分别检查视频几何、本机和手机输入归属、断线重连，以及协议协商和应答。
 
-Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI)。源码署名和第三方声明见 [SDK NOTICE](../../../../../packages/third-party/rt-carplay/NOTICE)。
+Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI)。源码署名和第三方声明见 [SDK NOTICE](https://github.com/boa-z/rt-carplay/blob/54df9892d618a4ac30af839c2a1636acf2217314/NOTICE)。

@@ -56,7 +56,7 @@ git range-diff "$old_carplay..$old_projection" "$new_carplay..$new_projection"
 
 ## 固件构建
 
-`D213 firmware` GitHub Actions 工作流在推送到 `carplay-oss` 时运行，也支持手动触发。它运行 SDK 与应用 Host 回归及两个 LVGL 预览，构建固件后把完整 IMG 发布到滚动 `nightly` 预发布版本。提交信息含 `[ultra-dev]` 的推送仍会构建并上传 Actions 产物供复核，但跳过 Release 发布。检出启用 Git LFS 和递归子模块，以取得 Xuantie V2.6.1 Linux 工具链和 Realtek 库。
+在集成仓库执行 `git submodule update --init --recursive` 后运行以下命令。其 `D213 firmware` 工作流验证 PR、推送到 `carplay-oss` 的提交和手动构建。只有 `carplay-oss` 发布 `nightly`。提交信息含 `[ultra-dev]` 时仍上传 Actions 产物，跳过 Release 发布。Git LFS 提供 Xuantie V2.6.1 Linux 工具链和 Realtek 库。
 
 ```sh
 python3 -m venv .ci-venv
@@ -91,8 +91,19 @@ bash packages/third-party/cherryusb-luban/tests/run_control_probe.sh
 
 修改视频链路时执行 `make -C application/rt-thread/rtcarplay check-lubanlite-video SDK_ROOT="$PWD"`，覆盖实际 MPP Sink 和宿主 UI 策略，包括 SDK framebuffer 命令 ABI。还需在[实际面板](single-screen-fusion.md)验证首帧交接、本地界面恢复和触摸。
 
-## 宿主持有的平台回归测试集
+## 独立 Host 验证
 
-获取 SDK 固定版本的 mbedTLS 后，在 ASan/UBSan 下执行 `make -C application/rt-thread/rtcarplay -j8 check`，包括迁移的 Receiver、音频、配对测试，以及已有视频、触摸、启动页、Bond、USB DMA、Handoff、重连和能力测试。SDK 独立测试集不再编译板级源码。通用 SDK 开关只从其 Kconfig Source 一次，硬件选择与源码收集由应用负责。参见 SDK [迁移说明](../../../../../packages/third-party/rt-carplay/docs/zh-CN/luban-lite-migration.md)。这些验证使用 Host 设备、调度模型，不是实机验收。
+Demo Host 工作流使用 `.ci/dependencies.env` 固定集成仓库、rt-carplay 和 cherryusb-ipheth。工作流核对三个提交，执行格式、双语文档检查、SDK 和 Demo ASan/UBSan 回归以及两个 LVGL 渲染。递归初始化 BSP 子模块，依赖变更完成验证后同步更新三处固定值。
 
-CI 还使用模拟 HTTP 和 NAND 让应用层 OTA 工作线程读取真实构建生成的 IMG，覆盖镜像校验及非活动 OS/Rodata 写入映射。
+在独立 Demo 检出中用 `SDK_ROOT` 指定固定提交的集成仓库。Host 构建允许通过 `RTCP_ROOT`、`CHERRYUSB_ROOT`、`IPHETH_ROOT` 和 `LVGL_ROOT` 覆盖对应依赖，使用绝对路径。固件中的 `RTCARPLAY_DIR` 可指定外部 rt-carplay 源码，应用只构建选中的 SDK。外部 SDK 的 Kconfig 需兼容集成仓库固定版本。
+
+```sh
+export SDK_ROOT=/path/to/luban-lite-carplay
+cmake -S tests/launcher_preview -B build/preview -DSDK_ROOT="$SDK_ROOT"
+cmake --build build/preview -j8
+mkdir -p build/screens
+build/preview/launcher_preview build/screens
+build/preview/fusion_preview build/screens
+```
+
+固件 CI 也让 Demo 的 OTA 工作线程通过模拟 HTTP 和 NAND 读取生成的 CPIO，覆盖校验及非活动 OS/Rodata 写入映射。

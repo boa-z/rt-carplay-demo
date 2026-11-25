@@ -1,0 +1,28 @@
+rt-carplay-demo source provenance
+
+Application history was extracted from boa-z/luban-lite-carplay,
+carplay-oss commit c470ef170e2cac001316615e209a5dc2646bedde,
+application/rt-thread/rtcarplay. Git history records the original authors
+and contributors. Board adaptation brought into that directory by commit
+2ddeb757 was previously maintained in boa-z/rt-carplay.
+Source SPDX and copyright notices continue to apply. COPYING supplies the
+GPL version 3 text for sources marked GPL-3.0-or-later.
+
+The checked-in OEM mark and its generated PNG data are project assets
+introduced together in the source application. The generator is
+tools/generate_oem_icon.py.
+The Host Preview cover-fixture.jpg is synthetic test artwork generated for
+this repository. Historical Preview screenshots use modeled device state.
+The historical audio test fixture contains a synthetic CC0-1.0 sine tone.
+
+Generated UI font assets derive from Noto Sans SC (Adobe, 2014–2021) and
+Inter (The Inter Project Authors, 2016) under SIL OFL 1.1. See
+ui/fonts/OFL.txt and the generated source notices. The Montserrat wrapper
+uses the LVGL dependency's font sources and associated license notices.
+
+Generated Lucide icons retain the upstream ISC and Feather/MIT notices in
+ui/icons/LICENSE. LVGL, BSP, rt-carplay and cherryusb-ipheth are provided in
+their own dependency checkouts under their respective licenses.
+
+The experimental protocol documentation credits LIVI by Lasse Heitgres.
+See the rt-carplay SDK NOTICE for protocol implementation attribution.

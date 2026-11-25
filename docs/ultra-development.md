@@ -2,7 +2,7 @@
 
 # CarPlay Ultra experiments on D213
 
-The D213 Demo combines Classic CarPlay video and local LVGL instruments through [single-screen fusion](single-screen-fusion.md). The portable SDK documents its separate [experimental protocol foundations](../../../../packages/third-party/rt-carplay/docs/ultra-foundation.md), including Vehicle State, UI Sync and independent Type 111 transport.
+The D213 Demo combines Classic CarPlay video and local LVGL instruments through [single-screen fusion](single-screen-fusion.md). The portable SDK documents its separate [experimental protocol foundations](https://github.com/boa-z/rt-carplay/blob/54df9892d618a4ac30af839c2a1636acf2217314/docs/ultra-foundation.md), including Vehicle State, UI Sync and independent Type 111 transport.
 
 ## Current scope and acceptance
 
@@ -14,10 +14,10 @@ The D213 Demo combines Classic CarPlay video and local LVGL instruments through 
 
 ## Hardware boundaries
 
-The D213 path uses MPP H.264, DE hardware layers and LVGL. The [MPP decoder factory](../../../../packages/artinchip/mpp/ve/decoder/mpp_decoder.c) lacks an HEVC path, and the [GE interface](../../../../packages/artinchip/mpp/include/mpp_ge.h) exposes 2D graphics operations. Official Ultra requires an appropriate HEVC and OpenGL rendering path, assets, presentation integration and qualification. See [Apple's public architecture presentation](https://developer.apple.com/videos/play/wwdc2024/10111/).
+The D213 path uses MPP H.264, DE hardware layers and LVGL. The [MPP decoder factory](https://github.com/boa-z/luban-lite-carplay/blob/c470ef170e2cac001316615e209a5dc2646bedde/packages/artinchip/mpp/ve/decoder/mpp_decoder.c) lacks an HEVC path, and the [GE interface](https://github.com/boa-z/luban-lite-carplay/blob/c470ef170e2cac001316615e209a5dc2646bedde/packages/artinchip/mpp/include/mpp_ge.h) exposes 2D graphics operations. Official Ultra requires an appropriate HEVC and OpenGL rendering path, assets, presentation integration and qualification. See [Apple's public architecture presentation](https://developer.apple.com/videos/play/wwdc2024/10111/).
 
 ## Reproduce and report
 
 Use the standard [firmware build and CI guide](ci.md). Enable `RTCARPLAY_VEHICLE_PROTOCOL_DEMO` only for the simulated Vehicle State bench. Record the image SHA-256, SDK gitlink, board and iPhone/iOS versions, transport and raw logs. Check video geometry, local and phone input ownership and disconnect/reconnect separately from protocol negotiation and received responses.
 
-Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI). Source attribution and third-party notices are maintained in the [SDK NOTICE](../../../../packages/third-party/rt-carplay/NOTICE).
+Based on LIVI by Lasse Heitgres (https://github.com/f-io/LIVI). Source attribution and third-party notices are maintained in the [SDK NOTICE](https://github.com/boa-z/rt-carplay/blob/54df9892d618a4ac30af839c2a1636acf2217314/NOTICE).

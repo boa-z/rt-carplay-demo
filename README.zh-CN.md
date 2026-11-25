@@ -1,12 +1,12 @@
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-# D213 CarPlay 集成
+# rt-carplay-demo
 
-本应用在 ArtInChip D213 的 RT-Thread 上运行可移植的 rt-carplay SDK。默认固件使用 1024×600 的 LVGL 启动器，自动接受 USB 和无线 CarPlay。可移植 API 见 [SDK 接入指南](../../../packages/third-party/rt-carplay/docs/zh-CN/receiver-api.md)，功能状态及实机验收见 [Classic 能力矩阵](../../../packages/third-party/rt-carplay/docs/zh-CN/classic-capability-audit.md)。
+本项目是 [rt-carplay SDK](https://github.com/boa-z/rt-carplay) 的 C 与 LVGL 参考应用，用于 Receiver 集成和验证。D213 基线使用 RT-Thread、RTL8733BS 和 1024×600 启动器，支持 USB 与无线 CarPlay。Linux 目前提供 Host 模型与 LVGL Preview，完整 Receiver 为后续计划。
 
 ## 构建和连接
 
-在仓库根目录初始化指定版本的依赖，然后构建 Bootloader 和 IMG。Linux 依赖、输出文件名和产物见[构建与 CI 指南](docs/zh-CN/ci.md#固件构建)。
+在 [Luban-Lite 集成仓库](https://github.com/boa-z/luban-lite-carplay) 中初始化固定版本的子模块，再构建 Bootloader、IMG 和 OTA CPIO。依赖和产物见[构建与 CI 指南](docs/zh-CN/ci.md#固件构建)。
 
 ```sh
 git submodule update --init --recursive
@@ -27,14 +27,14 @@ carplay_iap2 status
 
 | 层 | 代码入口 | 职责 |
 | --- | --- | --- |
-| 可移植 SDK | [rt-carplay](../../../packages/third-party/rt-carplay/README.zh-CN.md) | RTSP、配对、加密媒体、iAP2、HID 和 Receiver 生命周期 |
+| 可移植 SDK | [rt-carplay](https://github.com/boa-z/rt-carplay) | RTSP、配对、加密媒体、iAP2、HID 和 Receiver 生命周期 |
 | 应用层 | [`app/carplay_app.c`](app/carplay_app.c)、[`app/connection_manager.c`](app/connection_manager.c) | Receiver 单线程归属、传输仲裁、配对存储、会话快照和命令队列 |
 | 板级适配 | [`platform/`](platform/) | 蓝牙、Wi-Fi、USB、MFi、MPP/DE、扬声器、麦克风和触摸 |
 | 用户界面 | [`ui/lvgl_launcher.c`](ui/lvgl_launcher.c) | LVGL 设置和仪表、投屏显示及用户请求 |
 
 连接管理器选择传输方式。应用的轮询线程拥有 Receiver 的调用权。媒体回调把数据交给板级线程，UI 读取复制后的快照并提交命令。USB 网络由独立维护的 `cherryusb-ipheth` 或原生 NCM 适配器提供。停止过程中的数据和资源归属见[会话快照](docs/zh-CN/session-snapshots.md)。
 
-本地 `Kconfig` 和 `SConscript` 选择板级功能，SDK 协议开关由 SDK 的 `Kconfig` 管理。设备驱动和 UI 留在宿主，能力声明要与实际接入的后端一致。
+本地 `Kconfig` 和 `SConscript` 选择板级功能，SDK 协议开关由 SDK 的 `Kconfig` 管理。职责、内部依赖、Linux 和无线演进见[平台指南](docs/zh-CN/platform.md)。
 
 ## 使用和排查
 
@@ -50,14 +50,15 @@ carplay_iap2 status
 ## 验证改动
 
 ```sh
-make -C packages/third-party/rt-carplay -j8 check
-make -C application/rt-thread/rtcarplay -j8 check
-make -C application/rt-thread/rtcarplay check-docs
+export SDK_ROOT=/path/to/luban-lite-carplay
+bash "$SDK_ROOT/packages/third-party/rt-carplay/scripts/fetch-mbedtls.sh"
+make -j8 check
+make check-docs
 ```
 
-SDK 回归验证协议和 API。集成回归使用生产源码和 Host 设备替身，CI 还渲染实际 LVGL 启动器和融合仪表条。D213 与 iPhone 的互操作需要实机验证，请按固件提交记录，并分别标明有线和无线结果。
+硬件矩阵和上板验收项见[验证指南](docs/zh-CN/validation.md)。依赖锁定与 Preview 见 [CI 指南](docs/zh-CN/ci.md#独立-host-验证)。
 
-公共 API、配置或用户可见行为变化时同步更新中英说明。能力状态统一更新到 SDK 矩阵，板端操作步骤记录在对应集成指南。
+Demo 独立管理版本与 Git 标签。通过固件清单中的集成及依赖提交识别构建。公共 API、配置或用户可见行为变化时同步更新中英说明。授权和署名见 [NOTICE](NOTICE) 与 [COPYING](COPYING)。
 
 ## 调查记录
 
