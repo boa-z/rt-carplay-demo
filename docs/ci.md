@@ -2,10 +2,10 @@
 
 # Repository, firmware CI and upstream
 
-The maintained SDK integration is [boa-z/luban-lite-carplay](https://github.com/boa-z/luban-lite-carplay), an independent repository with `carplay-oss` as its default branch. `codex/androidauto-integration` builds on `carplay-oss`. The upstream for both branches is the SDK snapshot mirror at `boa-z/luban-lite`.
+The maintained SDK integration is [boa-z/luban-lite-carplay](https://github.com/boa-z/luban-lite-carplay), an independent repository with `carplay` as its default branch. `codex/androidauto-integration` shares the original CarPlay baseline. The upstream for both branches is the SDK snapshot mirror at `boa-z/luban-lite`.
 
 ```sh
-git clone --branch carplay-oss --recurse-submodules https://github.com/boa-z/luban-lite-carplay.git
+git clone --branch carplay --recurse-submodules https://github.com/boa-z/luban-lite-carplay.git
 cd luban-lite-carplay
 git remote add upstream https://github.com/boa-z/luban-lite.git
 git fetch upstream master
@@ -18,7 +18,7 @@ The Luban-Lite v1.3.3 baseline is mirror commit `90a740fe9c1b663ea52ec3f7e1af35a
 The mirror can replace `master` with an unrelated root commit. Keep each reviewed SDK snapshot under an immutable mirror tag keyed by its Gitee commit so collaborators can fetch it after `master` moves. Before fetching, record the SDK root of the current CarPlay branch and both product tips. Keep the old tips under backup refs or tags until verification and publication are complete. Use a disposable checkout on a case-sensitive filesystem, such as the Linux filesystem in WSL. This keeps build-generated configuration and bootloader files out of the active checkout and allows both upstream README paths to be checked out.
 
 ```sh
-old_carplay=$(git rev-parse carplay-oss)
+old_carplay=$(git rev-parse carplay)
 old_projection=$(git rev-parse codex/androidauto-integration)
 old_sdk=$(git rev-list --max-parents=0 "$old_carplay")
 git merge-base --is-ancestor "$old_carplay" "$old_projection"
@@ -52,11 +52,11 @@ git range-diff "$old_carplay..$old_projection" "$new_carplay..$new_projection"
 
 Verify that the new SDK is an ancestor of `new_carplay` and that `new_carplay` is an ancestor of `new_projection`. Review any changed or dropped patches in `range-diff`. Check that both branch tips contain `README.md` and `README.zh-CN.md`, and compare each branch's submodule gitlinks against its previous tip. Initialize the pinned submodules and materialize Git LFS objects before building. Update submodule pins in separate product commits when required.
 
-Run the CarPlay host regressions and LVGL previews, build the D213 bootloader and CarPlay image, and build both `rtprojection` and `rtprojection_wireless` when rebasing the Android Auto branch. Record the SDK commit, product commit, submodule commits, defconfig, and build and board results. Coordinate any rewrite of published branches with collaborators and check the expected remote tips before a lease-protected force push. A push to `carplay-oss` can replace the rolling `nightly` release.
+Run the CarPlay host regressions and LVGL previews, build the D213 bootloader and CarPlay image, and build both `rtprojection` and `rtprojection_wireless` when rebasing the Android Auto branch. Record the SDK commit, product commit, submodule commits, defconfig, and build and board results. Coordinate any rewrite of published branches with collaborators and check the expected remote tips before a lease-protected force push. A push to `carplay` can replace the rolling `nightly` release.
 
 ## Firmware builds
 
-Run these commands in the integration checkout after `git submodule update --init --recursive`. Its `D213 firmware` workflow validates pull requests, pushes to `carplay-oss` and manual builds. Only `carplay-oss` publishes `nightly`. A push with `[ultra-dev]` still uploads Actions artifacts and skips the release. Git LFS supplies the Xuantie V2.6.1 Linux toolchain and Realtek library.
+Run these commands in the integration checkout after `git submodule update --init --recursive`. Its `D213 firmware` workflow validates pull requests, pushes to `carplay` and manual builds. Only `carplay` publishes `nightly`. A push with `[ultra-dev]` still uploads Actions artifacts and skips the release. Git LFS supplies the Xuantie V2.6.1 Linux toolchain and Realtek library.
 
 ```sh
 python3 -m venv .ci-venv

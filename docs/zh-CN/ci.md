@@ -2,10 +2,10 @@
 
 # 仓库、固件 CI 与上游
 
-SDK 集成在独立仓库 [boa-z/luban-lite-carplay](https://github.com/boa-z/luban-lite-carplay) 中维护，默认分支为 `carplay-oss`。`codex/androidauto-integration` 在 `carplay-oss` 上继续集成 Android Auto。两个分支共用 `boa-z/luban-lite` 的 SDK 快照镜像作为上游。
+SDK 集成在独立仓库 [boa-z/luban-lite-carplay](https://github.com/boa-z/luban-lite-carplay) 中维护，默认分支为 `carplay`。`codex/androidauto-integration` 与该分支共用最初的 CarPlay 基线。两个分支共用 `boa-z/luban-lite` 的 SDK 快照镜像作为上游。
 
 ```sh
-git clone --branch carplay-oss --recurse-submodules https://github.com/boa-z/luban-lite-carplay.git
+git clone --branch carplay --recurse-submodules https://github.com/boa-z/luban-lite-carplay.git
 cd luban-lite-carplay
 git remote add upstream https://github.com/boa-z/luban-lite.git
 git fetch upstream master
@@ -18,7 +18,7 @@ Luban-Lite v1.3.3 基线为镜像提交 `90a740fe9c1b663ea52ec3f7e1af35acde200ae
 镜像的 `master` 可能被更新为无共同祖先的新根提交。建议在镜像仓库为每个评审过的 SDK 快照保留以 Gitee 提交号标识的固定标签，便于在 `master` 更新后继续获取。获取更新前，记录 CarPlay 分支的 SDK 根提交和两个产品分支的当前提交。用备份引用或标签保留原分支提交，直到完成验证和发布。在区分大小写的文件系统上使用临时检出目录，例如 WSL 的 Linux 文件系统，便于同时检出上游的两个 README 文件，也能避免构建生成的配置和 Bootloader 写入日常工作区。
 
 ```sh
-old_carplay=$(git rev-parse carplay-oss)
+old_carplay=$(git rev-parse carplay)
 old_projection=$(git rev-parse codex/androidauto-integration)
 old_sdk=$(git rev-list --max-parents=0 "$old_carplay")
 git merge-base --is-ancestor "$old_carplay" "$old_projection"
@@ -52,11 +52,11 @@ git range-diff "$old_carplay..$old_projection" "$new_carplay..$new_projection"
 
 核对新 SDK 是 `new_carplay` 的祖先，`new_carplay` 是 `new_projection` 的祖先。检查 `range-diff` 中有变化或被跳过的补丁，确认两个分支都包含 `README.md` 和 `README.zh-CN.md`，并逐一核对变基前后的子模块 gitlink。构建前初始化锁定版本的子模块并取回 Git LFS 文件。需要升级子模块时，使用独立的产品提交。
 
-运行 CarPlay 的 Host 回归和 LVGL 预览，构建 D213 Bootloader 与 CarPlay 镜像。变基 Android Auto 分支时，同时构建 `rtprojection` 和 `rtprojection_wireless`。记录 SDK、产品和子模块提交号、defconfig、构建结果及板端验证结果。重写已发布分支前先与协作者协调，确认预期的远端提交后再用带租约保护的强制推送。推送 `carplay-oss` 可能更新滚动 `nightly` 发布。
+运行 CarPlay 的 Host 回归和 LVGL 预览，构建 D213 Bootloader 与 CarPlay 镜像。变基 Android Auto 分支时，同时构建 `rtprojection` 和 `rtprojection_wireless`。记录 SDK、产品和子模块提交号、defconfig、构建结果及板端验证结果。重写已发布分支前先与协作者协调，确认预期的远端提交后再用带租约保护的强制推送。推送 `carplay` 可能更新滚动 `nightly` 发布。
 
 ## 固件构建
 
-在集成仓库执行 `git submodule update --init --recursive` 后运行以下命令。其 `D213 firmware` 工作流验证 PR、推送到 `carplay-oss` 的提交和手动构建。只有 `carplay-oss` 发布 `nightly`。提交信息含 `[ultra-dev]` 时仍上传 Actions 产物，跳过 Release 发布。Git LFS 提供 Xuantie V2.6.1 Linux 工具链和 Realtek 库。
+在集成仓库执行 `git submodule update --init --recursive` 后运行以下命令。其 `D213 firmware` 工作流验证 PR、推送到 `carplay` 的提交和手动构建。只有 `carplay` 发布 `nightly`。提交信息含 `[ultra-dev]` 时仍上传 Actions 产物，跳过 Release 发布。Git LFS 提供 Xuantie V2.6.1 Linux 工具链和 Realtek 库。
 
 ```sh
 python3 -m venv .ci-venv
