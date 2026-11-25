@@ -13,7 +13,7 @@ git submodule update --init --recursive
 bash .ci/build-firmware.sh
 ```
 
-默认配置为 `d21x_demo128-nand_rt-thread_rtcarplay_defconfig`，选定后运行 `scons -j8` 即可增量构建。镜像适用于带 128 MiB SPI NAND 的 D213 `demo128-nand-carplay` 板。刷机后可插入 USB 或通过蓝牙配对。[连接管理器](docs/zh-CN/connection-manager.md)管理唯一活动投屏会话，同时可保持另一种传输可用。关闭自动连接后需要单独调试时，参见[有线启动](docs/zh-CN/wired-startup.md)。
+默认配置为 `d21x_demo128-nand_rt-thread_rtcarplay_rtl8733bs_defconfig`。AIC8800D40 使用 `bash .ci/build-firmware.sh aic8800d40` 构建。SDK 生成的 IMG 文件名包含模组名。AIC8800D40 的实机验证为 `NOT_RUN`，该配置关闭在线 OTA。选定配置后运行 `scons -j8` 即可增量构建。镜像适用于带 128 MiB SPI NAND 的 D213 `demo128-nand-carplay` 板。刷机后可插入 USB 或通过蓝牙配对。[连接管理器](docs/zh-CN/connection-manager.md)管理唯一活动投屏会话，同时可保持另一种传输可用。关闭自动连接后需要单独调试时，参见[有线启动](docs/zh-CN/wired-startup.md)。
 
 ```text
 carplay_connection status

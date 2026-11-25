@@ -65,7 +65,7 @@ pip install -r .ci/requirements.txt
 bash .ci/build-firmware.sh
 ```
 
-Install `build-essential`, `patch`, `dosfstools`, `mtools`, `device-tree-compiler`, `u-boot-tools` and `cpio` on Ubuntu. The build script compiles `d21x_demo128-nand-carplay_baremetal_bootloader_defconfig` and verifies that the packaged Bootloader matches the new binary. It then applies `d21x_demo128-nand_rt-thread_rtcarplay_defconfig` to produce the factory `.img` and SDK `ota.cpio`. CI checks the IMG component bounds and CRC32, matches the version and OS/Rodata payloads across both files, then feeds the generated CPIO through the actual SDK downloader with modeled NAND.
+Install `build-essential`, `patch`, `dosfstools`, `mtools`, `device-tree-compiler`, `u-boot-tools` and `cpio` on Ubuntu. The build script compiles `d21x_demo128-nand-carplay_baremetal_bootloader_defconfig` and verifies that the packaged Bootloader matches the new binary. It then applies the `d21x_demo128-nand_rt-thread_rtcarplay_rtl8733bs_defconfig` or `d21x_demo128-nand_rt-thread_rtcarplay_aic8800d40_defconfig` profile. The SDK writes the module name into the IMG filename, and CI checks component bounds and CRC32. RTL8733BS also produces `ota.cpio`. CI compares its version and OS/Rodata payloads with the IMG and runs the SDK downloader against modeled NAND.
 
 The release keeps the SDK filenames for both the USB IMG and [OTA package](ota.md). `SHA256SUMS` covers both files and `source-manifest.txt`. After downloading the assets, run `sha256sum -c SHA256SUMS` to verify them.
 

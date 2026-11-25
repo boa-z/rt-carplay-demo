@@ -22,11 +22,16 @@
 
 #include "rtcp/rtcp.h"
 
-#ifdef AIC_WLAN_REALTEK
+#if defined(AIC_WLAN_REALTEK) || defined(AIC8800_AP_VENDOR_IE)
 
+#if defined(AIC_WLAN_REALTEK)
 #include <stdio.h>
 #include <wifi_conf.h>
 #include <wifi_util.h>
+#else
+#include <aic8800_wlan_ap.h>
+#include "airplay_vendor_ie.h"
+#endif
 #include <wlan_mgnt.h>
 
 #if defined(RT_USING_LWIP)
@@ -39,7 +44,11 @@
 
 #define AP_START_WAIT_MS 15000U
 
+#if defined(AIC_WLAN_REALTEK)
 static const char *s_ifname;
+#else
+static bool s_ap_has_vendor_ie;
+#endif
 
 /*
  * Start the AP through the RT-Thread WLAN framework.  Do NOT call
@@ -54,6 +63,9 @@ static int wifi_ap_start(const char *ssid, const char *pass, uint8_t channel)
     if (ssid == NULL || ssid[0] == '\0')
         return RTCP_EINVAL;
 
+#if defined(AIC8800_AP_VENDOR_IE) && !defined(AIC_WLAN_REALTEK)
+    s_ap_has_vendor_ie = false;
+#endif
     struct rt_wlan_info info;
     memset(&info, 0, sizeof(info));
     int is_open = (pass == NULL || pass[0] == '\0');
@@ -82,7 +94,16 @@ static int wifi_ap_start(const char *ssid, const char *pass, uint8_t channel)
     {
         return RTCP_EIO;
     }
-    if (rt_wlan_start_ap_adv(&info, is_open ? RT_NULL : pass) != RT_EOK)
+#if defined(AIC_WLAN_REALTEK)
+    rt_err_t result = rt_wlan_start_ap_adv(&info, is_open ? RT_NULL : pass);
+#else
+    size_t ie_len = 0;
+    const uint8_t *ie = airplay_vendor_ie(&ie_len);
+    rt_err_t result = aic8800_wlan_start_ap_with_ie(&info, is_open ? RT_NULL : pass,
+                                                    ie, ie_len);
+    s_ap_has_vendor_ie = result == RT_EOK;
+#endif
+    if (result != RT_EOK)
     {
         return RTCP_EIO;
     }
@@ -98,6 +119,9 @@ static int wifi_ap_start(const char *ssid, const char *pass, uint8_t channel)
 
 static int wifi_ap_stop(void)
 {
+#if defined(AIC8800_AP_VENDOR_IE) && !defined(AIC_WLAN_REALTEK)
+    s_ap_has_vendor_ie = false;
+#endif
     /* The WLAN framework stops its own DHCP instance on AP_STOP. The
      * explicit server started by this seam shares that instance. */
     return rt_wlan_ap_stop() == RT_EOK ? RTCP_OK : RTCP_EIO;
@@ -108,6 +132,7 @@ static int wifi_set_vendor_ie(const uint8_t *ie, size_t len)
     if (ie == NULL || len == 0U || len > 255U)
         return RTCP_EINVAL;
 
+#if defined(AIC_WLAN_REALTEK)
     /* Replacing the list is not supported by the driver: clear it first. */
     const char *interface = s_ifname ? s_ifname : wifi_ap_interface_name();
     (void)wext_del_custom_ie(interface);
@@ -118,6 +143,13 @@ static int wifi_set_vendor_ie(const uint8_t *ie, size_t len)
     if (wext_add_custom_ie(interface, &custom, 1) != 0)
         return RTCP_EIO;
     return RTCP_OK;
+#else
+    size_t current_len = 0;
+    const uint8_t *current_ie = airplay_vendor_ie(&current_len);
+    if (!s_ap_has_vendor_ie || !rt_wlan_ap_is_active())
+        return RTCP_ESTATE;
+    return len == current_len && memcmp(ie, current_ie, len) == 0 ? RTCP_OK : RTCP_ENOTSUP;
+#endif
 }
 
 static int wifi_sta_info(struct rtcp_sta_info *out)
@@ -130,10 +162,15 @@ static int wifi_sta_info(struct rtcp_sta_info *out)
 
 void rtcp_wifi_lubanlite_set_interface(const char *name)
 {
+#if defined(AIC_WLAN_REALTEK)
     if (name != NULL && name[0] != '\0')
         s_ifname = name;
+#else
+    (void)name;
+#endif
 }
 
+#if defined(AIC_WLAN_REALTEK)
 static int parse_mac(const char *text, uint8_t mac[6])
 {
     unsigned values[6];
@@ -154,11 +191,13 @@ static int parse_mac(const char *text, uint8_t mac[6])
     }
     return RTCP_OK;
 }
+#endif
 
 int rtcp_wifi_lubanlite_get_mac(uint8_t mac[6])
 {
     if (mac == NULL)
         return RTCP_EINVAL;
+#if defined(AIC_WLAN_REALTEK)
     char text[32] = { 0 };
     if (!strcmp(wifi_ap_interface_name(), "wlan0"))
     {
@@ -169,6 +208,12 @@ int rtcp_wifi_lubanlite_get_mac(uint8_t mac[6])
     if (wext_get_bssid(wifi_ap_interface_name(), mac) != 0)
         return RTCP_EIO;
     return RTCP_OK;
+#else
+    if (!rt_wlan_ap_is_active())
+        return RTCP_ESTATE;
+    struct rt_wlan_device *ap = (struct rt_wlan_device *)rt_device_find(RT_WLAN_DEVICE_AP_NAME);
+    return ap && rt_wlan_dev_get_mac(ap, mac) == RT_EOK ? RTCP_OK : RTCP_EIO;
+#endif
 }
 
 #if defined(RT_USING_LWIP)
@@ -220,7 +265,7 @@ int rtcp_wifi_lubanlite_start_dhcpd(void)
 #endif
 }
 
-#else /* !AIC_WLAN_REALTEK */
+#else
 
 static int wifi_ap_start(const char *ssid, const char *pass, uint8_t channel)
 {
@@ -270,7 +315,7 @@ int rtcp_wifi_lubanlite_start_dhcpd(void)
     return RTCP_ENOTSUP;
 }
 
-#endif /* AIC_WLAN_REALTEK */
+#endif
 
 const struct rtcp_wifi rtcp_wifi_lubanlite = {
     .ap_start = wifi_ap_start,

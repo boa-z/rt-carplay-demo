@@ -325,7 +325,7 @@ config RTCARPLAY_SDK_INTEGRATION
 config LPKG_RT_CARPLAY_LUBANLITE_WIFI
     bool
     default y
-    depends on AIC_WLAN_REALTEK
+    depends on AIC_WLAN_REALTEK || AIC8800_AP_VENDOR_IE
 
 config LPKG_RT_CARPLAY_LUBANLITE_BT
     bool

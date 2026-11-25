@@ -65,7 +65,7 @@ pip install -r .ci/requirements.txt
 bash .ci/build-firmware.sh
 ```
 
-Ubuntu 需要安装 `build-essential`、`patch`、`dosfstools`、`mtools`、`device-tree-compiler`、`u-boot-tools` 和 `cpio`。构建脚本编译 `d21x_demo128-nand-carplay_baremetal_bootloader_defconfig` 并逐字节核对打包使用的 Bootloader，再应用 `d21x_demo128-nand_rt-thread_rtcarplay_defconfig` 生成完整 `.img` 和 SDK 的 `ota.cpio`。CI 检查 IMG 的组件边界和 CRC32，确认两种产物的版本及 OS、Rodata 内容一致，并用模拟 NAND 让原厂 OTA 组件处理实际生成的 CPIO。
+Ubuntu 需要安装 `build-essential`、`patch`、`dosfstools`、`mtools`、`device-tree-compiler`、`u-boot-tools` 和 `cpio`。构建脚本编译 `d21x_demo128-nand-carplay_baremetal_bootloader_defconfig` 并逐字节核对打包使用的 Bootloader，再应用 `d21x_demo128-nand_rt-thread_rtcarplay_rtl8733bs_defconfig` 或 `d21x_demo128-nand_rt-thread_rtcarplay_aic8800d40_defconfig`。SDK 生成带模组名的 IMG，CI 检查组件边界和 CRC32。RTL8733BS 还会生成 `ota.cpio`，CI 会核对它和 IMG 的版本及 OS、Rodata 内容，并使用模拟 NAND 验证 SDK OTA 组件。
 
 发布保留 USB IMG 和 [OTA 更新包](ota.md)的 SDK 原始文件名。`SHA256SUMS` 覆盖两份固件和 `source-manifest.txt`，下载后可执行 `sha256sum -c SHA256SUMS` 校验。
 

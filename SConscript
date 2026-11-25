@@ -100,19 +100,22 @@ if (GetDepend('LPKG_RT_CARPLAY_LUBANLITE_WIFI') or
         GetDepend('LPKG_RT_CARPLAY_LUBANLITE_USB')):
     cpppath.append(cwd + '/platform')
 
-# Luban-Lite Wi-Fi seam (Realtek RTL8733BS SoftAP + vendor IE).
+# Luban-Lite Wi-Fi seam (SoftAP + vendor IE).
 if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_WIFI'):
     src += Glob('platform/rtcp_wifi_lubanlite.c')
 
     # The Realtek API headers live outside the SDK's global include path;
     # the driver SConscript adds them only to its own group.
     aic_root = os.environ.get('AIC_ROOT', '')
-    if aic_root:
+    if aic_root and GetDepend('AIC_WLAN_REALTEK'):
         realtek = os.path.join(aic_root, 'bsp', 'peripheral', 'wireless',
                                'realtek')
         for sub in ('api/wifi', 'api', 'include', 'os/os_dep/include',
                     'platform/include', 'platform/rtwlan_bsp'):
             cpppath.append(os.path.join(realtek, sub))
+    if GetDepend('AIC8800_AP_VENDOR_IE'):
+        cpppath.append(os.path.join(sdk_root, 'bsp', 'peripheral', 'wireless',
+                                    'aic8800', 'platform', 'wifi'))
 
 # CE TRNG, used for AirPlay pairing and for the wired lockdown pair record.
 if (GetDepend('LPKG_RT_CARPLAY_LUBANLITE_WIFI') or

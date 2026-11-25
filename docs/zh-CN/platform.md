@@ -19,9 +19,9 @@
 
 ## 无线硬件变体
 
-Realtek 基线在 `platform/rtcp_wifi_lubanlite.c` 使用 `wifi_conf.h` 和 `wifi_util.h`，在 `platform/wifi_sta_lubanlite.c` 使用 AP/STA 并发。蓝牙依赖配置的 HCI 传输、Zephyr Classic BR/EDR、SDP、RFCOMM 和配对持久化。接入 AIC8800 时核对 Vendor IE 增删、AP 信道及 STA 共存、HCI 传输与固件启动顺序、Bond 恢复以及实际能力声明。
+Realtek 基线在 `platform/rtcp_wifi_lubanlite.c` 使用 `wifi_conf.h` 和 `wifi_util.h`，在 `platform/wifi_sta_lubanlite.c` 使用 AP/STA 并发，蓝牙使用 Zephyr H:5、Classic BR/EDR、SDP、RFCOMM 和配对持久化。AIC8800D40 使用 SDK 的 SDIO WLAN 和蓝牙固件初始化，蓝牙传输采用 Zephyr H:4。RT-Thread SoftAP 启用前通过 SDK 设置 Apple Vendor IE。上板需验证启动顺序、Beacon 和 Probe Response 中的 Vendor IE、BR/EDR 配对及配对恢复，以及无线 CarPlay 重连。
 
-确认 AIC8800 型号、总线、固件和再分发许可。同一应用分支使用独立 defconfig、CI Matrix 项和固件目标标识。发布更新通道前，在包元数据中写入兼容的目标标识，并验证不同无线变体之间的 OTA 会被拒绝。
+AIC8800D40 在同一应用分支使用独立 defconfig、CI Matrix 项和固件目标标识。该配置关闭在线 OTA。为该模组开通更新通道前，在包元数据中写入兼容的目标标识，并验证不同无线变体之间的 OTA 会被拒绝。
 
 ## Linux 移植
 
