@@ -150,10 +150,10 @@ config RTCARPLAY_AUTO_START
 
 config RTCARPLAY_DIR
     string "rt-carplay repository path"
-    default "../../../packages/third-party/rt-carplay"
+    default ""
     help
       Path to the rt-carplay checkout, relative to this directory or
-      absolute.  The default points at the bundled git submodule in
+      absolute.  An empty value uses the integration checkout's submodule in
       packages/third-party/rt-carplay; initialise it with
       "git submodule update --init packages/third-party/rt-carplay".
       Override only when building against a separate checkout.

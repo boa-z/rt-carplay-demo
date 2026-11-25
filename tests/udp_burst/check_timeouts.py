@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 
 here = Path(__file__).resolve().parent
-root = here.parents[4]
+root = Path(os.environ.get('SDK_ROOT', here.parents[4])).resolve()
 lwip = root / 'kernel/rt-thread/components/net/lwip/lwip-2.1.2'
 port = root / 'kernel/rt-thread/components/net/lwip/port/lwipopts.h'
 resource.setrlimit(resource.RLIMIT_CORE, (0, 0))

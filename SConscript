@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Luban-Lite application integration for the bundled rt-carplay submodule.
-# The default RTCARPLAY_DIR points at packages/third-party/rt-carplay; override
-# it in menuconfig only when building against a separate checkout.
 import os
 from building import *
 
 cwd = GetCurrentDir()
+sdk_root = os.environ.get('AIC_ROOT') or os.path.normpath(
+    os.path.join(cwd, '..', '..', '..'))
 
 try:
     repo = GetConfigValue('RTCARPLAY_DIR')
@@ -15,7 +14,7 @@ except KeyError:
 repo = repo.strip('"')
 
 if not repo:
-    repo = os.path.join('..', '..', '..', 'packages', 'third-party', 'rt-carplay')
+    repo = os.path.join(sdk_root, 'packages', 'third-party', 'rt-carplay')
 if not os.path.isabs(repo):
     repo = os.path.join(cwd, repo)
 repo = os.path.normpath(repo)
@@ -50,10 +49,12 @@ if GetDepend('RTCARPLAY_OTA') or GetDepend('RTCARPLAY_INTERNET_SHARE'):
 if GetDepend('RTCARPLAY_NETWORK_TIME'):
     src += Glob('platform/network_time_lubanlite.c')
 cpppath = [cwd, cwd + '/app', cwd + '/platform']
+if GetDepend('RTCARPLAY_SINGLE_SCREEN_FUSION'):
+    cpppath.append(os.path.join(sdk_root, 'packages', 'artinchip', 'lvgl-ui',
+                                'lvgl_v9', 'lvgl', 'src', 'font'))
 if GetDepend('RTCARPLAY_USB_FILE_SYNC'):
     # Application composition: reuse the upstream class, sync service, DFS
     # adapter and development descriptors. Do not link its shell.
-    sdk_root = os.path.normpath(os.path.join(cwd, '..', '..', '..'))
     usb_root = os.path.join(sdk_root, 'packages', 'third-party', 'cherryusb')
     src += Glob('platform/usb_file_sync.c')
     for source in ('class/adb/usbd_adb.c', 'class/adb/usbd_adb_sync.c',
@@ -179,10 +180,7 @@ def firmware_version():
     board = GetDepend('PRJ_BOARD')
     if not isinstance(chip, str) or not isinstance(board, str):
         return 'unknown'
-    aic_root = os.environ.get('AIC_ROOT', '')
-    if not aic_root:
-        aic_root = os.path.normpath(os.path.join(cwd, '..', '..', '..'))
-    path = os.path.join(aic_root, 'target', chip.strip('"'), board.strip('"'),
+    path = os.path.join(sdk_root, 'target', chip.strip('"'), board.strip('"'),
                         'pack', 'image_cfg.json')
     try:
         import json
@@ -207,11 +205,12 @@ def build_commit():
             if not re.match(r'^[0-9a-f]{40}$', override):
                 raise ValueError('invalid RTCARPLAY_BUILD_COMMIT')
             return override
-        out = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=cwd)
+        out = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=sdk_root)
         if not isinstance(out, str):
             out = out.decode('ascii', 'replace')
         dirty = subprocess.check_output(
-            ['git', 'status', '--porcelain', '--untracked-files=no'], cwd=cwd)
+            ['git', 'status', '--porcelain', '--untracked-files=no'],
+            cwd=sdk_root)
         return out.strip() + ('-dirty' if dirty.strip() else '')
     except Exception as error:
         print('[rtcarplay] build commit unavailable: %s' % error)

@@ -6,6 +6,8 @@ CFLAGS ?= -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -MMD -MP
 SDK_ROOT ?= $(abspath ../../..)
 RTCP_ROOT ?= $(SDK_ROOT)/packages/third-party/rt-carplay
 CHERRYUSB_ROOT ?= $(SDK_ROOT)/packages/third-party/cherryusb
+IPHETH_ROOT ?= $(SDK_ROOT)/packages/third-party/cherryusb-ipheth
+LVGL_ROOT ?= $(SDK_ROOT)/packages/artinchip/lvgl-ui/lvgl_v9/lvgl
 BUILD ?= build
 
 .PHONY: check-native-ncm
@@ -27,7 +29,7 @@ LDLIBS := $(AUDIO_LIBS) -lm
 CPPFLAGS += $(addprefix -I$(RTCP_ROOT)/,include core core/mfi core/iap2/include core/airplay/include core/crypto/include core/media/include core/input/include core/discovery/include core/usb/include core/audio/include port/rtthread/include third_party/ed25519 port/linux/include third_party/mbedtls/include config) -Iapp -Iplatform
 CPPFLAGS += -DRTCP_AUDIO_CODECS -DMBEDTLS_CONFIG_FILE='"mbedtls_rtcp_host.h"'
 BOARD_BINS := $(addprefix $(BUILD)/,test_audio_capture test_audio_input test_audio_input_aec test_audio_sink test_pairing_files test_rtthread_app)
-export RTCP_ROOT RTCP_BUILD
+export SDK_ROOT RTCP_ROOT RTCP_BUILD IPHETH_ROOT
 $(BUILD):
 	@mkdir -p $@
 .PHONY: sdk-libraries check check-docs
@@ -36,7 +38,7 @@ sdk-libraries:
 $(BOARD_BINS): | sdk-libraries $(BUILD)
 $(LIB) $(PORT_LINUX_LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS): sdk-libraries
 check: $(BOARD_BINS) check-auto-connections check-internet-share check-udp-burst check-usb-file-sync check-ota check-native-ncm check-vehicle-protocol-demo check-launcher-preferences
-	@set -e; for t in $(BOARD_BINS); do ./$$t; done
+	@set -e; for t in $(BOARD_BINS); do "$$t"; done
 	$(MAKE) check-lubanlite-video check-lubanlite-touch check-lubanlite-demo check-lubanlite-bonds check-lubanlite-usb check-lubanlite-handoff check-lubanlite-reconnect check-lubanlite-capabilities check-wired-identity check-wired-trace check-iap2-endpoints check-usb-iap2-worker check-wireless-iap2-worker
 
 check-docs:
@@ -52,7 +54,7 @@ check-launcher-preferences: | $(BUILD)
 
 .PHONY: check-internet-share
 check-internet-share:
-	cmake -S tests/internet_share -B $(BUILD)/internet-share -DCMAKE_BUILD_TYPE=Debug
+	cmake -S tests/internet_share -B $(BUILD)/internet-share -DCMAKE_BUILD_TYPE=Debug -DSDK_ROOT="$(abspath $(SDK_ROOT))"
 	cmake --build $(BUILD)/internet-share -j2
 	ctest --test-dir $(BUILD)/internet-share --output-on-failure
 $(BUILD)/test_pairing_files: tests/unit/test_pairing_files.c app/pairing_files.c app/pairing_manager.c app/usb_pair_cache.c $(LIB) $(MBEDTLS_LIB)
@@ -155,7 +157,7 @@ check-lubanlite-video: check-fusion-display
 	$(BUILD)/test_lubanlite_video_fusion queue
 	$(CC) $(CFLAGS) $(CPPFLAGS) -Itests/support/lubanlite_video \
 	  -I$(SDK_ROOT)/bsp/artinchip/include/uapi \
-	  $(SDK_ROOT)/application/rt-thread/rtcarplay/tests/test_video_layer_policy.c \
+	  tests/test_video_layer_policy.c \
 	  -o $(BUILD)/test_host_video_policy
 	$(BUILD)/test_host_video_policy
 
@@ -189,16 +191,15 @@ check-lubanlite-demo:
 	@test -n "$(SDK_ROOT)" || (echo 'set SDK_ROOT to Luban-Lite checkout'; exit 1)
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -Itests/support/lubanlite_demo -Iplatform \
-	  -MF $(BUILD)/connection-manager-minimal.d -fsyntax-only $(SDK_ROOT)/application/rt-thread/rtcarplay/app/connection_manager.c
+	  -MF $(BUILD)/connection-manager-minimal.d -fsyntax-only app/connection_manager.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) -DRTCARPLAY_AUDIO -DRTCARPLAY_IAP2 -DLPKG_RT_CARPLAY_LUBANLITE_WIFI \
 	  -Itests/support/lubanlite_demo -Iplatform \
-	  -MF $(BUILD)/connection-manager-full.d -fsyntax-only $(SDK_ROOT)/application/rt-thread/rtcarplay/app/connection_manager.c
+	  -MF $(BUILD)/connection-manager-full.d -fsyntax-only app/connection_manager.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) -DLV_CONF_SKIP -DRTCARPLAY_VIDEO -DRTCARPLAY_AUDIO -DRTCARPLAY_IAP2 -DLPKG_RT_CARPLAY_LUBANLITE_WIFI \
 	  -Itests/support/lubanlite_demo -Iplatform \
-	  -I$(SDK_ROOT)/application/rt-thread/rtcarplay/app \
-	  -I$(SDK_ROOT)/packages/artinchip/lvgl-ui/lvgl_v9/lvgl \
-	  -DRTCP_CONNECTION_SOURCE='"$(abspath $(SDK_ROOT))/application/rt-thread/rtcarplay/app/connection_manager.c"' \
-	  -DRTCP_LAUNCHER_SOURCE='"$(abspath $(SDK_ROOT))/application/rt-thread/rtcarplay/ui/lvgl_launcher.c"' \
+	  -I$(LVGL_ROOT) \
+	  -DRTCP_CONNECTION_SOURCE='"$(abspath app/connection_manager.c)"' \
+	  -DRTCP_LAUNCHER_SOURCE='"$(abspath ui/lvgl_launcher.c)"' \
 	  -ffunction-sections -fdata-sections tests/unit/test_lubanlite_demo.c app/pairing_manager.c ui/icons/carplay_icons.c \
 	  -Wl,--gc-sections -o $(BUILD)/test_lubanlite_demo
 	$(BUILD)/test_lubanlite_demo

@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Compile actual port options with the GUI defconfig and legacy defaults."""
 from pathlib import Path
+import os
 import re
 import subprocess
 import tempfile
-root = Path(__file__).resolve().parents[5]
+root = Path(os.environ.get('SDK_ROOT', Path(__file__).resolve().parents[5])).resolve()
 port = root / 'kernel/rt-thread/components/net/lwip/port'
 for variant in ('rtcarplay', 'legacy', 'aic8800'):
     with tempfile.TemporaryDirectory() as directory:

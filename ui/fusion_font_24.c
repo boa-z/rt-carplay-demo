@@ -6,6 +6,6 @@
 #if !LV_FONT_MONTSERRAT_24
 #undef LV_FONT_MONTSERRAT_24
 #define LV_FONT_MONTSERRAT_24 1
-#include "../../../../packages/artinchip/lvgl-ui/lvgl_v9/lvgl/src/font/lv_font_montserrat_24.c"
+#include "lv_font_montserrat_24.c"
 #endif
 #endif

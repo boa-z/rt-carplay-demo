@@ -6,6 +6,6 @@
 #if !LV_FONT_MONTSERRAT_32
 #undef LV_FONT_MONTSERRAT_32
 #define LV_FONT_MONTSERRAT_32 1
-#include "../../../../packages/artinchip/lvgl-ui/lvgl_v9/lvgl/src/font/lv_font_montserrat_32.c"
+#include "lv_font_montserrat_32.c"
 #endif
 #endif

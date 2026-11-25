@@ -10,7 +10,7 @@ import tempfile
 import zlib
 
 app = Path(__file__).resolve().parents[1]
-sdk = app.parents[2]
+sdk = Path(os.environ.get("SDK_ROOT", app.parents[2])).resolve()
 headers = {
     "rtthread.h": """
 #pragma once

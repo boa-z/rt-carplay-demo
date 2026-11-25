@@ -7,7 +7,8 @@ import subprocess
 import tempfile
 
 app = Path(__file__).resolve().parents[1]
-driver = app.parents[2] / "packages/third-party/cherryusb-ipheth"
+sdk = Path(os.environ.get("SDK_ROOT", app.parents[2]))
+driver = Path(os.environ.get("IPHETH_ROOT", sdk / "packages/third-party/cherryusb-ipheth")).resolve()
 
 
 def function(path, signature):
