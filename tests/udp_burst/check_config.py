@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 root = Path(os.environ.get('SDK_ROOT', Path(__file__).resolve().parents[5])).resolve()
 port = root / 'kernel/rt-thread/components/net/lwip/port'
+configs = root / 'target/configs'
 modules = ('rtl8733bs', 'aic8800d40')
 registry = root / '.ci/hardware-targets.json'
 if registry.is_file():
@@ -15,17 +16,23 @@ if registry.is_file():
     profiles = {module: targets[f'd213-demo128-nand-carplay-{module}']['defconfig']
                 for module in modules}
 else:
-    profiles = {module: f'd21x_demo128-nand_rt-thread_rtcarplay_{module}_defconfig'
-                for module in modules}
+    prefix = 'd21x_demo128-nand_rt-thread_rtcarplay'
+    profiles = {}
+    for module in modules:
+        name = f'{prefix}_{module}_defconfig'
+        if (configs / name).is_file():
+            profiles[module] = name
+    if not profiles:
+        profiles['rtl8733bs'] = f'{prefix}_defconfig'
 
-for variant in (*profiles, 'legacy', 'aic8800'):
+for variant in (*profiles, 'legacy', 'aic8800d40l-defaults'):
     with tempfile.TemporaryDirectory() as directory:
         work = Path(directory)
         (work/'sys').mkdir()
         (work/'sys/errno.h').write_text('#include <errno.h>\n')
         config = ''
         if variant in profiles:
-            text = (root / 'target/configs' / profiles[variant]).read_text()
+            text = (configs / profiles[variant]).read_text()
             for name in ('RT_LWIP_UDP_RECVMBOX_SIZE', 'RT_LWIP_RECV_BUFSIZE'):
                 value = re.search(r'^CONFIG_' + name + r'=(\d+)$', text, re.M)
                 assert value, name
@@ -35,9 +42,10 @@ for variant in (*profiles, 'legacy', 'aic8800'):
             config += '#define RT_LWIP_QUEUED_INPUT 1\n'
             expected_input = 0
         else:
-            expected = (32 if variant == 'aic8800' else 1,8192)
+            expected = (32 if variant == 'aic8800d40l-defaults' else 1,8192)
             expected_input = 1
-            if variant == 'aic8800': config = '#define AIC_WLAN_AIC8800 1\n'
+            if variant == 'aic8800d40l-defaults':
+                config = '#define AIC_WLAN_AIC8800 1\n#define AIC_WLAN_AIC8800D40L 1\n'
         (work/'rtconfig.h').write_text(config)
         (work/'verify.c').write_text('#include "lwipopts.h"\n'
           '_Static_assert(DEFAULT_UDP_RECVMBOX_SIZE == %u, "UDP slots");\n'
