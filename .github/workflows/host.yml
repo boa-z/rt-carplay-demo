@@ -1,0 +1,64 @@
+name: Demo Host validation
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: demo-host-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read pinned dependency versions
+        id: pins
+        run: cat .ci/dependencies.env >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: boa-z/luban-lite-carplay
+          ref: ${{ steps.pins.outputs.LUBAN_LITE_REF }}
+          path: .deps/luban-lite
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate pinned SDK and Demo
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1
+        run: |
+          set -euo pipefail
+          . .ci/dependencies.env
+          export SDK_ROOT="$PWD/.deps/luban-lite"
+          rtcp="$SDK_ROOT/packages/third-party/rt-carplay"
+          ipheth="$SDK_ROOT/packages/third-party/cherryusb-ipheth"
+          mkdir -p build/reports/screens
+          test "$(git -C "$SDK_ROOT" rev-parse HEAD)" = "$LUBAN_LITE_REF"
+          test "$(git -C "$rtcp" rev-parse HEAD)" = "$RT_CARPLAY_REF"
+          test "$(git -C "$ipheth" rev-parse HEAD)" = "$IPHETH_REF"
+          cp .ci/dependencies.env build/reports/dependencies.txt
+          python3 -m pip install clang-format==23.1.1
+          python3 "$rtcp/scripts/format-code.py" --check
+          python3 "$rtcp/scripts/format-code.py" --root "$PWD" --check
+          make check-docs
+          bash "$rtcp/scripts/fetch-mbedtls.sh"
+          make -C "$rtcp" -j8 check 2>&1 | tee build/reports/sdk.log
+          make -j8 check 2>&1 | tee build/reports/demo.log
+      - name: Render the LVGL Launcher and Fusion strip
+        run: |
+          cmake -S tests/launcher_preview -B build/preview -DCMAKE_BUILD_TYPE=Debug \
+            -DSDK_ROOT="$PWD/.deps/luban-lite"
+          cmake --build build/preview -j8
+          build/preview/launcher_preview build/reports/screens
+          build/preview/fusion_preview build/reports/screens
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: carplay-demo-host-${{ github.sha }}
+          path: build/reports/
