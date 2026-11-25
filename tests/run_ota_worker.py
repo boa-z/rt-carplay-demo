@@ -259,13 +259,17 @@ static void download_and_expect(carplay_ota_state_t expected)
 
 int main(int argc, char **argv)
 {
-    assert(argc == 2);
+    assert(argc == 3);
+    unsigned char scratch[OTA_CHUNK];
+    struct update_archive rejected;
+    FILE *foreign = fopen(argv[2], "rb");
+    assert(foreign && !verify_archive(foreign, scratch, &rejected));
+    fclose(foreign);
     FILE *fixture = fopen(argv[1], "rb");
     assert(fixture && !fseek(fixture, 0, SEEK_END));
     body_size = (size_t)ftell(fixture);
     body = malloc(body_size);
     assert(!fseek(fixture, 0, SEEK_SET) && fread(body, 1, body_size, fixture) == body_size);
-    unsigned char scratch[OTA_CHUNK];
     assert(verify_archive(fixture, scratch, &fixture_archive));
     fclose(fixture);
     assert(!ota_service_init() && !status.source[0]);
@@ -287,7 +291,7 @@ int main(int argc, char **argv)
     download_and_expect(CARPLAY_OTA_FAILED);
     ++body_size;
     unsigned char *metadata = body + fixture_archive.info.payload;
-    const char board[] = "board = \"demo128-nand-carplay\";";
+    const char board[] = "board = \"" RTCARPLAY_OTA_COMPAT "\";";
     while (memcmp(metadata, board, sizeof(board)))
         ++metadata;
     *metadata ^= 1;
@@ -364,8 +368,8 @@ def cpio_entry(name, data, mode=0o100644):
     return header + b"\0" * (-len(header) % 4) + data + b"\0" * (-len(data) % 4)
 
 
-def cpio_fixture():
-    info = (b'[image]\0size = "";\0version = "1.0.1";\0board = "demo128-nand-carplay";\0'
+def cpio_fixture(board):
+    info = (b'[image]\0size = "";\0version = "1.0.1";\0board = "' + board.encode() + b'";\0'
             b'[file]\0ota_info.bin:file;\0d21x_os.itb:os;\0rodata.fatfs:rodata;\0\0')
     info = info.ljust(508, b"\xff")
     metadata = cpio_entry(b"ota_info.bin", struct.pack("<I", zlib.crc32(info)) + info)
@@ -378,6 +382,11 @@ def cpio_fixture():
         b"\xff" * (16 + len(size)), b"\xff" * 16, 1)
 
 
+legacy_compat = "demo128-nand-carplay"
+d40_compat = "d213-demo128-nand-carplay-aic8800d40"
+compat = sys.argv[2] if len(sys.argv) == 3 else legacy_compat
+other = d40_compat if compat == legacy_compat else legacy_compat
+
 with tempfile.TemporaryDirectory(prefix="carplay-ota-") as directory:
     path = Path(directory)
     for name, text in headers.items():
@@ -386,17 +395,20 @@ with tempfile.TemporaryDirectory(prefix="carplay-ota-") as directory:
         header.write_text(text)
     (path / "test.c").write_text(source)
     fixture = path / "ota.cpio"
-    fixture.write_bytes(cpio_fixture())
+    fixture.write_bytes(cpio_fixture(compat))
+    foreign = path / "foreign.cpio"
+    foreign.write_bytes(cpio_fixture(other))
     includes = (path, app / "app", app / "platform", sdk / "packages/third-party/rt-carplay/include",
                 sdk / "bsp/common/include", sdk / "packages/artinchip/env", sdk / "packages/artinchip/ota")
     subprocess.run([os.environ.get("CC", "cc"), "-std=c11", "-D_POSIX_C_SOURCE=200809L",
+                    '-DRTCARPLAY_OTA_COMPAT="{}"'.format(compat),
                     "-Wall", "-Wextra", "-Werror", "-Wno-unused-parameter", "-Wno-sign-compare",
                     "-Wno-pointer-sign", "-fsanitize=address,undefined",
                     "-fno-pie", "-no-pie", "-g", *["-I" + str(include) for include in includes],
                     str(path / "test.c"), str(sdk / "bsp/common/crc32/crc32.c"),
                     str(sdk / "packages/artinchip/ota/ota.c"),
                     "-o", str(path / "test")], check=True)
-    subprocess.run([str(path / "test"), str(fixture)], cwd=path, check=True)
-    if len(sys.argv) == 2:
+    subprocess.run([str(path / "test"), str(fixture), str(foreign)], cwd=path, check=True)
+    if len(sys.argv) >= 2:
         (path / "source.cfg").unlink()
-        subprocess.run([str(path / "test"), str(Path(sys.argv[1]).resolve())], cwd=path, check=True)
+        subprocess.run([str(path / "test"), str(Path(sys.argv[1]).resolve()), str(foreign)], cwd=path, check=True)

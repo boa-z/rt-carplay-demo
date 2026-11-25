@@ -346,7 +346,7 @@ static bool cpio_info(unsigned char *buffer, uint32_t length, struct update_arch
         return false;
     memcpy(archive->version, version, end - version);
     static const char mapping[] =
-        "\";\0board = \"demo128-nand-carplay\";\0[file]\0"
+        "\";\0board = \"" RTCARPLAY_OTA_COMPAT "\";\0[file]\0"
         "ota_info.bin:file;\0d21x_os.itb:os;\0rodata.fatfs:rodata;\0";
     if (memcmp(end, mapping, sizeof(mapping)))
         return false;

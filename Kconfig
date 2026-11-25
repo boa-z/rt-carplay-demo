@@ -134,6 +134,14 @@ config RTCARPLAY_OTA
       Stage and validate a D213 CarPlay .cpio from an HTTP or HTTPS URL.
       On confirmation the SDK OTA downloader updates inactive OS and Rodata slots.
 
+config RTCARPLAY_OTA_COMPAT
+    string "CPIO hardware compatibility identifier"
+    depends on RTCARPLAY_OTA
+    default "demo128-nand-carplay"
+    help
+      Must match the board field in the generated CPIO metadata. Use a distinct
+      identifier for targets which must never install each other's updates.
+
 config RTCARPLAY_INTERNET_PROBE_PATH
     string "HTTP 204 connectivity probe path"
     default "/generate_204"

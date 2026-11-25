@@ -13,7 +13,7 @@ git submodule update --init --recursive
 bash .ci/build-firmware.sh
 ```
 
-The default profile is `d21x_demo128-nand_rt-thread_rtcarplay_rtl8733bs_defconfig`. Run `bash .ci/build-firmware.sh aic8800d40` for the AIC8800D40 profile. The SDK includes the module name in each IMG filename. AIC8800D40 hardware validation is `NOT_RUN` and its profile has online OTA disabled. For incremental builds after selecting a profile, run `scons -j8`. The package is for the D213 `demo128-nand-carplay` board with 128 MiB SPI NAND. After flashing, connect by USB or pair over Bluetooth. The [connection manager](docs/connection-manager.md) owns the single active projection session and can keep the other transport available. For standalone bring-up with automatic connection disabled, use the [wired startup guide](docs/wired-startup.md).
+The two D213 `demo128-nand-carplay` profiles use 128 MiB SPI NAND. In the integration repository run `bash .ci/build-firmware.sh d213-demo128-nand-carplay-rtl8733bs` or use target `d213-demo128-nand-carplay-aic8800d40`. Each produces a target-specific IMG and A/B OTA CPIO. For incremental builds after selecting a defconfig, run `scons -j8`. After flashing, connect by USB or pair over Bluetooth. The [connection manager](docs/connection-manager.md) owns the single active projection session and can keep the other transport available. For standalone bring-up with automatic connection disabled, use the [wired startup guide](docs/wired-startup.md).
 
 ```text
 carplay_connection status

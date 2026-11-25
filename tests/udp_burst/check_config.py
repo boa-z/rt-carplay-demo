@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 root = Path(os.environ.get('SDK_ROOT', Path(__file__).resolve().parents[5])).resolve()
 port = root / 'kernel/rt-thread/components/net/lwip/port'
-for variant in ('rtcarplay', 'legacy', 'aic8800'):
+for variant in ('rtcarplay_rtl8733bs', 'rtcarplay_aic8800d40', 'legacy', 'aic8800'):
     with tempfile.TemporaryDirectory() as directory:
         work = Path(directory)
         (work/'sys').mkdir()
@@ -26,7 +26,7 @@ for variant in ('rtcarplay', 'legacy', 'aic8800'):
         else:
             expected = (32 if variant == 'aic8800' else 1,8192)
             expected_input = 1
-            if variant == 'aic8800': config = '#define AIC_WLAN_AIC8800D40L 1\n'
+            if variant == 'aic8800': config = '#define AIC_WLAN_AIC8800 1\n'
         (work/'rtconfig.h').write_text(config)
         (work/'verify.c').write_text('#include "lwipopts.h"\n'
           '_Static_assert(DEFAULT_UDP_RECVMBOX_SIZE == %u, "UDP slots");\n'

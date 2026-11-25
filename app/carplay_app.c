@@ -1975,8 +1975,7 @@ static int start_wifi(app_state_t *app)
     }
     app->ap_started = true;
 
-    /* This SDK's dhcpd_start changes the AP address to DHCPD_SERVER_IP.
-     * Read/announce the final address only after that operation. */
+#if !defined(RT_WLAN_PROT_LWIP_ENABLE) || !defined(LWIP_USING_DHCPD)
     result = RTCP_ESTATE;
     for (unsigned attempt = 0; attempt < IP_WAIT_TRIES && result == RTCP_ESTATE; ++attempt)
     {
@@ -1989,6 +1988,7 @@ static int start_wifi(app_state_t *app)
         APP_LOG("DHCP server unavailable rc=%d", result);
         return result;
     }
+#endif
 
     size_t ie_len = 0U;
     const uint8_t *ie = airplay_vendor_ie(&ie_len);

@@ -21,7 +21,7 @@ The platform sinks retain buffer ownership through asynchronous decode, presenta
 
 The Realtek baseline uses `wifi_conf.h` and `wifi_util.h` in `platform/rtcp_wifi_lubanlite.c`, concurrent AP/STA in `platform/wifi_sta_lubanlite.c`, and Zephyr H:5 with Classic BR/EDR, SDP, RFCOMM and persistent bonds. AIC8800D40 uses the SDK SDIO WLAN and Bluetooth firmware initialization with Zephyr H:4. The RT-Thread SoftAP path programs the Apple Vendor IE through the SDK before enabling the AP. On the board, verify startup order, the IE in Beacon and Probe Response frames, BR/EDR pairing and bond restoration, and wireless CarPlay reconnect.
 
-AIC8800D40 has its own defconfig, CI matrix entry and firmware target ID on the same application branch. Its profile disables online OTA. Before enabling an update channel for this module, persist a compatible target ID in the package metadata and verify rejection of OTA across radio variants.
+AIC8800D40 has a separate hardware target with A/B OTA. Its CPIO carries a specific compatibility ID. RTL8733BS retains its legacy ID, so each target rejects the other's CPIO before NAND writes.
 
 ## Linux path
 

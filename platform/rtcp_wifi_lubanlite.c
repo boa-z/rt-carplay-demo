@@ -241,7 +241,7 @@ int rtcp_wifi_lubanlite_get_ipv4(uint8_t address[4])
         return RTCP_EINVAL;
 #if defined(RT_USING_LWIP)
     struct netif *netif = find_ap_netif();
-    if (netif == NULL || netif_ip4_addr(netif)->addr == 0)
+    if (netif == NULL || !netif_is_link_up(netif) || netif_ip4_addr(netif)->addr == 0)
         return RTCP_ESTATE;
     memcpy(address, &netif_ip4_addr(netif)->addr, 4U);
     return RTCP_OK;
