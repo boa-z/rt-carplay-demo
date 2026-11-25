@@ -240,7 +240,7 @@ static int mfi_start_unlocked(const char *i2c_bus_name, uint8_t address)
     }
 
     s_mfi.ready = true;
-    RTCP_LOGI("mfi", "2.0C at %s 0x%02x: id=0x%08x version=%02x.%02x.%02x.%02x "
+    RTCP_LOGI("mfi", "coprocessor at %s 0x%02x: id=0x%08x version=%02x.%02x.%02x.%02x "
                      "cert=%u%s",
               i2c_bus_name, (unsigned)s_mfi.address,
               (unsigned)s_mfi.info.id32,
@@ -405,49 +405,17 @@ static int mfi_sign_unlocked(const uint8_t *challenge, size_t len, uint8_t *sig,
     if (!s_mfi.ready)
         return RTCP_ESTATE;
 
-    /* Bring-up visibility: the iAP2 MFiChallenge payload length is the first
-     * thing to check when signing fails (the 2.0C accepts exactly 20 bytes;
-     * a 32-byte challenge means the phone is speaking Auth 3.0 to a 2.0C). */
-    char challenge_head[3 * 8 + 1];
-    size_t shown = len < 8U ? len : 8U;
-    size_t pos = 0U;
-    for (size_t i = 0; i < shown; ++i)
-    {
-        int written = rt_snprintf(&challenge_head[pos],
-                                  sizeof(challenge_head) - pos, "%02X ",
-                                  challenge[i]);
-        if (written <= 0)
-            break;
-        pos += (size_t)written;
-    }
-    if (pos != 0U)
-        challenge_head[pos - 1U] = '\0';
-
     int result = rtcp_mfi2c_sign(&s_mfi.device, challenge, len, sig, sig_cap,
                                  sig_len);
     if (result != RTCP_OK)
     {
-        RTCP_LOGE("mfi", "sign failed rc=%d challenge len=%u head=%s",
-                  result, (unsigned)len, challenge_head);
+        RTCP_LOGE("mfi", "sign failed rc=%d id=0x%08x challenge len=%u",
+                  result, (unsigned)s_mfi.info.id32, (unsigned)len);
         return result;
     }
 
-    pos = 0U;
-    shown = *sig_len < 8U ? *sig_len : 8U;
-    for (size_t i = 0; i < shown; ++i)
-    {
-        int written = rt_snprintf(&challenge_head[pos],
-                                  sizeof(challenge_head) - pos, "%02X ",
-                                  sig[i]);
-        if (written <= 0)
-            break;
-        pos += (size_t)written;
-    }
-    if (pos != 0U)
-        challenge_head[pos - 1U] = '\0';
-
-    RTCP_LOGI("mfi", "signature %u bytes (challenge %u bytes; signature head=%s)",
-              (unsigned)*sig_len, (unsigned)len, challenge_head);
+    RTCP_LOGI("mfi", "signature %u bytes (challenge %u bytes)",
+              (unsigned)*sig_len, (unsigned)len);
     return RTCP_OK;
 }
 
