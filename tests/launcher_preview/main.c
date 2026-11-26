@@ -1,13 +1,18 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-/* Actual LVGL 9 rendering of the V4 pages. Connection, audio, backlight and
+/* Actual LVGL 9 rendering of the Cockpit pages. Connection, audio, backlight and
  * OTA values are modeled for layout and routing tests; they are never hardware
  * acceptance evidence. */
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 #include "../../ui/lvgl_launcher.c"
+#include "touch_panel_lubanlite.h"
+#if LV_USE_SDL
+#include <SDL2/SDL.h>
+#endif
 
-static uint8_t pixels[1024 * 600 * 4];
+static uint8_t *pixels;
+static int preview_width = 1024, preview_height = 600;
 static demo_status_t model;
 static unsigned preview_ms = 183000;
 
@@ -444,9 +449,12 @@ int carplay_connection_manager_start(void)
 {
     return ++manager_calls <= 2 ? RTCP_ENOMEM : RTCP_OK;
 }
+static carplay_touch_panel_cb_t preview_touch;
+
 int carplay_touch_panel_start(uint16_t w, uint16_t h, carplay_touch_panel_cb_t c, void *p)
 {
-    assert(w == 1024 && h == 600 && c);
+    assert(w == preview_width && h == preview_height && c);
+    preview_touch = c;
     (void)p;
     return RTCP_OK;
 }
@@ -551,8 +559,8 @@ static void screenshot(const char *directory, const char *name)
     lv_refr_now(NULL);
     FILE *f = fopen(path, "wb");
     assert(f);
-    fprintf(f, "P6\n1024 600\n255\n");
-    for (unsigned i = 0; i < 1024 * 600; ++i)
+    fprintf(f, "P6\n%d %d\n255\n", preview_width, preview_height);
+    for (int i = 0; i < preview_width * preview_height; ++i)
     {
         uint8_t rgb[] = { pixels[i * 4 + 2], pixels[i * 4 + 1], pixels[i * 4] };
         assert(fwrite(rgb, 1, sizeof(rgb), f) == sizeof(rgb));
@@ -591,9 +599,9 @@ static void tap(int32_t x, int32_t y)
 {
     lv_indev_t *pointer = lv_indev_get_next(NULL);
     assert(pointer);
-    launcher_panel_touch(RTCP_TOUCH_DOWN, 0, (uint16_t)x, (uint16_t)y, NULL);
+    preview_touch(RTCP_TOUCH_DOWN, 0, (uint16_t)x, (uint16_t)y, NULL);
     lv_indev_read(pointer);
-    launcher_panel_touch(RTCP_TOUCH_UP, 0, (uint16_t)x, (uint16_t)y, NULL);
+    preview_touch(RTCP_TOUCH_UP, 0, (uint16_t)x, (uint16_t)y, NULL);
     lv_indev_read(pointer);
 }
 
@@ -643,11 +651,29 @@ static void assert_settings_page(settings_page_t expected)
     }
 }
 
+static void open_setting(settings_page_t route)
+{
+    settings_page_t section = settings_section(route);
+    click_caption(lv_obj_get_parent(settings_tabs[section]), TR(settings_titles[section]));
+    if (route != section)
+        click_caption(settings_pages[section], TR(settings_titles[route]));
+    assert_settings_page(route);
+}
+
 static void assert_header_row(lv_obj_t *page, const char *caption)
 {
     lv_obj_t *heading = find_caption(page, caption);
-    lv_obj_t *back = lv_obj_get_child(page, 0);
-    assert(heading && lv_obj_has_flag(back, LV_OBJ_FLAG_CLICKABLE));
+    lv_obj_t *back = NULL;
+    for (uint32_t index = 0; index < lv_obj_get_child_count(page); ++index)
+    {
+        lv_obj_t *child = lv_obj_get_child(page, (int32_t)index);
+        if (lv_obj_has_flag(child, LV_OBJ_FLAG_CLICKABLE))
+        {
+            back = child;
+            break;
+        }
+    }
+    assert(heading && back);
     lv_obj_update_layout(page);
     lv_area_t heading_area, back_area;
     lv_obj_get_coords(heading, &heading_area);
@@ -677,21 +703,161 @@ LV_FONT_DECLARE(carplay_cjk_18);
 LV_FONT_DECLARE(carplay_cjk_24);
 LV_FONT_DECLARE(carplay_cjk_30);
 
-int main(int argc, char **argv)
+static void seed_models(void)
 {
-    assert(argc == 2);
-    lv_init();
-    lv_display_t *d = lv_display_create(1024, 600);
-    assert(d);
-    lv_display_set_color_format(d, LV_COLOR_FORMAT_XRGB8888);
-    lv_display_set_buffers(d, pixels, NULL, sizeof(pixels), LV_DISPLAY_RENDER_MODE_DIRECT);
-    lv_display_set_flush_cb(d, flush);
-
     model.stage = DEMO_WAIT;
     model.automatic = model.wireless = true;
     model.usb_ready = model.wireless_enabled = model.bt_ready = true;
     snprintf(model.pin, sizeof(model.pin), "3939");
+}
 
+static void tap_object(lv_obj_t *object)
+{
+    lv_obj_update_layout(object);
+    lv_area_t bounds;
+    lv_obj_get_coords(object, &bounds);
+    lv_point_t center = { (bounds.x1 + bounds.x2) / 2, (bounds.y1 + bounds.y2) / 2 };
+    lv_obj_transform_point(object, &center, LV_OBJ_POINT_TRANSFORM_FLAG_RECURSIVE);
+    assert(center.x >= 0 && center.x < preview_width &&
+           center.y >= 0 && center.y < preview_height);
+    tap(center.x, center.y);
+}
+
+static void render_layout(const char *directory)
+{
+    carplay_demo_launcher_init();
+    update_page(NULL);
+    screenshot(directory, "dashboard_dark_en");
+    tap_object(owning_card(find_caption(pages[PAGE_DASHBOARD], "Settings")));
+    assert(!lv_obj_has_flag(pages[PAGE_SETTINGS], LV_OBJ_FLAG_HIDDEN));
+    screenshot(directory, "settings_dark_en");
+    tap_object(theme_buttons[0]);
+    assert(!carplay_ui_dark());
+    carplay_ui_set_chinese(true);
+    screenshot(directory, "settings_light_zh");
+    tap_object(settings_tabs[SETTINGS_CONNECTIONS]);
+    assert_settings_page(SETTINGS_CONNECTIONS);
+    tap_object(owning_card(find_caption(settings_pages[SETTINGS_CONNECTIONS], "Apple CarPlay")));
+    assert(!lv_obj_has_flag(pages[PAGE_CONNECTIVITY], LV_OBJ_FLAG_HIDDEN));
+    model.stage = DEMO_LIVE;
+    update_page(NULL);
+    screenshot(directory, "connectivity_light_zh");
+}
+
+#if LV_USE_SDL
+static int interactive(void)
+{
+    if (!lv_sdl_window_create(preview_width, preview_height) || !lv_sdl_mouse_create())
+        return EXIT_FAILURE;
+    carplay_demo_launcher_init();
+    bool previous[5] = { false };
+    const SDL_Scancode keys[] = { SDL_SCANCODE_F1, SDL_SCANCODE_F2, SDL_SCANCODE_F3,
+                                  SDL_SCANCODE_F4, SDL_SCANCODE_F5 };
+    int speed = 26, charge = 78;
+    bool valid = true;
+    puts("F1 theme, F2 language, F3 connection, F4 vehicle, F5 update status, Esc exit");
+    for (;;)
+    {
+        preview_ms = SDL_GetTicks();
+        lv_timer_handler();
+        const uint8_t *down = SDL_GetKeyboardState(NULL);
+        if (down[SDL_SCANCODE_ESCAPE])
+            return EXIT_SUCCESS;
+        for (unsigned index = 0; index < sizeof(keys) / sizeof(keys[0]); ++index)
+        {
+            bool pressed = down[keys[index]] != 0;
+            if (pressed && !previous[index])
+            {
+                switch (keys[index])
+                {
+                case SDL_SCANCODE_F1:
+                    carplay_ui_set_dark(!carplay_ui_dark());
+                    break;
+                case SDL_SCANCODE_F2:
+                    carplay_ui_set_chinese(!carplay_ui_is_chinese());
+                    break;
+                case SDL_SCANCODE_F3:
+                    model.stage = model.stage == DEMO_WAIT      ? DEMO_CONNECT
+                                  : model.stage == DEMO_CONNECT ? DEMO_LIVE
+                                  : model.stage == DEMO_LIVE    ? DEMO_FAILED
+                                                                : DEMO_WAIT;
+                    break;
+                case SDL_SCANCODE_F4:
+                    valid = speed != 66;
+                    speed = speed == 66 ? 6 : speed + 20;
+                    charge = charge <= 18 ? 78 : charge - 20;
+                    break;
+                case SDL_SCANCODE_F5:
+                    ota_model.state = ota_model.state == CARPLAY_OTA_DOWNLOADING
+                                          ? CARPLAY_OTA_READY_TO_INSTALL
+                                          : CARPLAY_OTA_DOWNLOADING;
+                    ota_model.progress = ota_model.state == CARPLAY_OTA_DOWNLOADING ? 55 : 100;
+                    break;
+                default:
+                    break;
+                }
+            }
+            previous[index] = pressed;
+        }
+        if (!lv_obj_has_flag(pages[PAGE_DASHBOARD], LV_OBJ_FLAG_HIDDEN))
+            carplay_instruments_update(&dashboard_instruments, valid, (unsigned)speed, (unsigned)charge);
+        SDL_Delay(10);
+    }
+}
+#endif
+
+static bool set_resolution(const char *width, const char *height)
+{
+    preview_width = atoi(width);
+    preview_height = atoi(height);
+    return (preview_width == 800 && preview_height == 480) ||
+           (preview_width == 1024 && preview_height == 600) ||
+           (preview_width == 1280 && preview_height == 720) ||
+           (preview_width == 1920 && preview_height == 1080);
+}
+
+#include "benchmark.inc"
+
+int main(int argc, char **argv)
+{
+    bool layout = argc == 5 && !strcmp(argv[1], "--layout") &&
+                  set_resolution(argv[3], argv[4]);
+    bool benchmark = argc == 2 && !strcmp(argv[1], "--benchmark");
+    lv_init();
+    seed_models();
+#if LV_USE_SDL
+    if ((argc == 2 || (argc == 4 && set_resolution(argv[2], argv[3]))) &&
+        !strcmp(argv[1], "--interactive"))
+        return interactive();
+#endif
+    if (argc != 2 && !layout)
+    {
+        fputs("Usage: launcher_preview DIR | --layout DIR WIDTH HEIGHT | --benchmark | --interactive [WIDTH HEIGHT]\n",
+              stderr);
+        return EXIT_FAILURE;
+    }
+    lv_display_t *d = lv_display_create(preview_width, preview_height);
+    assert(d);
+    size_t framebuffer_size = (size_t)preview_width * (size_t)preview_height * 4;
+    pixels = malloc(framebuffer_size);
+    assert(pixels);
+    lv_display_set_color_format(d, LV_COLOR_FORMAT_XRGB8888);
+    lv_display_set_buffers(d, pixels, NULL, framebuffer_size, LV_DISPLAY_RENDER_MODE_DIRECT);
+    lv_display_set_flush_cb(d, flush);
+    if (benchmark)
+    {
+        run_benchmark();
+        lv_deinit();
+        free(pixels);
+        return 0;
+    }
+    if (layout)
+    {
+        render_layout(argv[2]);
+        lv_deinit();
+        free(pixels);
+        return 0;
+    }
     carplay_demo_launcher_init();
     assert(manager_calls == 1);
     update_page(NULL);
@@ -719,18 +885,18 @@ int main(int argc, char **argv)
     inside(dash_bar);
     assert(lv_bar_get_value(dash_bar) == 78);
 
-    /* Connectivity: idle -> action is enabled, Android Auto row is inert. */
+    /* Connectivity exposes the capabilities reported by the connection owner. */
     click_caption(pages[PAGE_DASHBOARD], "Connectivity");
     assert(!lv_obj_has_flag(pages[PAGE_CONNECTIVITY], LV_OBJ_FLAG_HIDDEN));
     assert(lv_obj_has_flag(pages[PAGE_DASHBOARD], LV_OBJ_FLAG_HIDDEN));
     screenshot(argv[1], "02-connectivity_dark_en");
-    assert(!strcmp(lv_label_get_text(conn_state), "Waiting for phone"));
+    assert(!strcmp(lv_label_get_text(connectivity_view.state), "Waiting for phone"));
     assert_header_row(pages[PAGE_CONNECTIVITY], "Connectivity");
-    assert(!lv_obj_has_state(conn_action, LV_STATE_DISABLED));
-    inside(conn_state);
-    inside(conn_action);
+    assert(!lv_obj_has_state(connectivity_view.action, LV_STATE_DISABLED));
+    inside(connectivity_view.state);
+    inside(connectivity_view.action);
     unsigned retries = model.reconnects;
-    lv_obj_send_event(conn_action, LV_EVENT_CLICKED, NULL);
+    lv_obj_send_event(connectivity_view.action, LV_EVENT_CLICKED, NULL);
     assert(model.reconnects == retries + 1);
 
     /* Settings: both sliders reach the real backends and persist on release. */
@@ -739,8 +905,7 @@ int main(int argc, char **argv)
     click_caption(pages[PAGE_DASHBOARD], "Settings");
     assert(!lv_obj_has_flag(pages[PAGE_SETTINGS], LV_OBJ_FLAG_HIDDEN));
     assert_settings_page(SETTINGS_DISPLAY);
-    click_caption(pages[PAGE_SETTINGS], "Ethernet");
-    assert_settings_page(SETTINGS_ETHERNET);
+    open_setting(SETTINGS_ETHERNET);
     assert(!strcmp(lv_label_get_text(ethernet_values[0]), "Waiting for IPv4"));
     assert(!strcmp(lv_label_get_text(ethernet_values[1]), "--"));
     network_model.addressed = true;
@@ -769,8 +934,7 @@ int main(int argc, char **argv)
         assert(!strcmp(lv_label_get_text(ethernet_values[index]), "--"));
     assert(lv_color_eq(disconnected_color, lv_obj_get_style_image_recolor(dash_ethernet, 0)));
 
-    click_caption(pages[PAGE_SETTINGS], "Wi-Fi");
-    assert_settings_page(SETTINGS_WIFI);
+    open_setting(SETTINGS_WIFI);
     assert(lv_obj_has_state(wifi_scan_button, LV_STATE_DISABLED));
     lv_obj_send_event(wifi_mode_button, LV_EVENT_CLICKED, NULL);
     update_page(NULL);
@@ -818,11 +982,12 @@ int main(int argc, char **argv)
     screenshot(argv[1], "03-settings-wifi_dark_en");
     assert(lv_color_eq(addressed_color, lv_obj_get_style_image_recolor(dash_wifi, 0)));
     click_back(pages[PAGE_SETTINGS]);
+    assert_settings_page(SETTINGS_CONNECTIONS);
+    click_back(pages[PAGE_SETTINGS]);
     assert_dashboard_header();
     screenshot(argv[1], "01-dashboard-wifi_dark_en");
     click_caption(pages[PAGE_DASHBOARD], "Settings");
-    click_caption(pages[PAGE_SETTINGS], "Date & time");
-    assert_settings_page(SETTINGS_CLOCK);
+    open_setting(SETTINGS_CLOCK);
     click_caption(settings_pages[SETTINGS_CLOCK], "Time server");
     assert(!lv_obj_has_flag(clock_server_panel, LV_OBJ_FLAG_HIDDEN));
     lv_textarea_set_text(clock_server_entry, "https://bad.test");
@@ -849,13 +1014,12 @@ int main(int argc, char **argv)
     click_caption(settings_pages[SETTINGS_CLOCK], "Time server");
     click_caption(clock_server_panel, "Restore default");
     assert(!strcmp(time_server_model, "time.cloudflare.com"));
-    click_caption(pages[PAGE_SETTINGS], "Display");
+    open_setting(SETTINGS_DISPLAY);
     update_page(NULL);
     screenshot(argv[1], "03-settings_dark_en");
     lv_obj_t *display_cards[] = {
         lv_obj_get_parent(theme_buttons[0]),
         lv_obj_get_parent(display_buttons[0]),
-        lv_obj_get_parent(fps_buttons[0]),
     };
     lv_area_t display_page_area;
     lv_obj_get_coords(settings_pages[SETTINGS_DISPLAY], &display_page_area);
@@ -866,6 +1030,7 @@ int main(int argc, char **argv)
         assert(lv_area_get_height(&card_area) == lv_obj_get_height(display_cards[0]));
         assert(card_area.y1 >= display_page_area.y1 && card_area.y2 <= display_page_area.y2);
     }
+    open_setting(SETTINGS_DEVELOPER);
     lv_obj_send_event(fps_buttons[1], LV_EVENT_CLICKED, NULL);
     assert(stored_preferences[CARPLAY_PREF_HIGH_FPS] == 1);
     assert(!strcmp(lv_label_get_text(settings_hint), "Saved. Restart the receiver to apply."));
@@ -873,9 +1038,7 @@ int main(int argc, char **argv)
     assert(!strcmp(lv_label_get_text(volume_value), "60%"));
     assert(!strcmp(lv_label_get_text(brightness_value), "72%"));
 
-    lv_obj_scroll_to_view(settings_tabs[SETTINGS_BLUETOOTH], LV_ANIM_OFF);
-    click_caption(pages[PAGE_SETTINGS], "Bluetooth");
-    assert_settings_page(SETTINGS_BLUETOOTH);
+    open_setting(SETTINGS_BLUETOOTH);
     assert(!strcmp(lv_textarea_get_text(bluetooth_name), CARPLAY_BT_NAME_DEFAULT));
     lv_obj_send_event(bluetooth_name, LV_EVENT_CLICKED, NULL);
     assert(!lv_obj_has_flag(bluetooth_keyboard, LV_OBJ_FLAG_HIDDEN));
@@ -895,8 +1058,11 @@ int main(int argc, char **argv)
     assert(lv_obj_has_flag(bluetooth_keyboard, LV_OBJ_FLAG_HIDDEN));
     screenshot(argv[1], "03-settings-bluetooth_dark_en");
 
-    click_caption(pages[PAGE_SETTINGS], "Sound");
-    assert_settings_page(SETTINGS_SOUND);
+    open_setting(SETTINGS_SOUND);
+    click_caption(settings_pages[SETTINGS_SOUND], "Mute microphone");
+    assert(microphone_muted && stored_preferences[CARPLAY_PREF_MIC_MUTED] == 1);
+    click_caption(settings_pages[SETTINGS_SOUND], "Unmute microphone");
+    assert(!microphone_muted && stored_preferences[CARPLAY_PREF_MIC_MUTED] == 0);
     screenshot(argv[1], "03-settings-sound_dark_en");
     lv_slider_set_value(volume_slider, 25, LV_ANIM_OFF);
     lv_obj_send_event(volume_slider, LV_EVENT_VALUE_CHANGED, NULL);
@@ -912,8 +1078,7 @@ int main(int argc, char **argv)
     lv_obj_send_event(volume_slider, LV_EVENT_RELEASED, NULL);
     assert(model_volume == 100 && stored_preferences[CARPLAY_PREF_VOLUME] == 100);
 
-    click_caption(pages[PAGE_SETTINGS], "Display");
-    assert_settings_page(SETTINGS_DISPLAY);
+    open_setting(SETTINGS_DISPLAY);
     assert(!strcmp(lv_label_get_text(volume_value), "100%"));
     lv_slider_set_value(brightness_slider, CARPLAY_BRIGHTNESS_MIN, LV_ANIM_OFF);
     lv_obj_send_event(brightness_slider, LV_EVENT_VALUE_CHANGED, NULL);
@@ -933,8 +1098,7 @@ int main(int argc, char **argv)
     assert_header_row(pages[PAGE_SETTINGS], "Settings");
     lv_obj_send_event(theme_buttons[1], LV_EVENT_CLICKED, NULL);
     assert(carplay_ui_dark());
-    click_caption(pages[PAGE_SETTINGS], "Language");
-    assert_settings_page(SETTINGS_LANGUAGE);
+    open_setting(SETTINGS_LANGUAGE);
     lv_obj_send_event(language_buttons[0], LV_EVENT_CLICKED, NULL);
     assert(carplay_ui_is_chinese() && stored_preferences[CARPLAY_PREF_LANGUAGE] == 1);
     screenshot(argv[1], "03-settings_dark_zh");
@@ -946,15 +1110,14 @@ int main(int argc, char **argv)
     assert(find_caption(pages[PAGE_SETTINGS], "语言"));
     assert(find_caption(pages[PAGE_SETTINGS], "CarPlay 显示"));
     assert(find_caption(pages[PAGE_SETTINGS], "系统更新"));
-    click_caption(pages[PAGE_SETTINGS], "关于");
-    assert_settings_page(SETTINGS_ABOUT);
+    open_setting(SETTINGS_ABOUT);
     assert(find_caption(settings_pages[SETTINGS_ABOUT], "构建哈希"));
     assert(find_caption(settings_pages[SETTINGS_ABOUT], "构建时间 (UTC)"));
     screenshot(argv[1], "03-settings-about_dark_zh");
-    click_caption(pages[PAGE_SETTINGS], "手机控制");
-    assert_settings_page(SETTINGS_PHONE);
+    open_setting(SETTINGS_DISPLAY);
     lv_obj_send_event(phone_appearance_buttons[RTCP_APPEARANCE_LIGHT], LV_EVENT_CLICKED, NULL);
     assert(model_phone_appearance == RTCP_APPEARANCE_LIGHT && carplay_ui_dark());
+    open_setting(SETTINGS_PHONE);
     model_phone_media = (carplay_phone_media_t){
         .track = { .title = "Test Track", .artist = "Test Artist", .has_playing = true, .playing = true, .has_duration = true, .has_elapsed = true, .duration_ms = 180000, .elapsed_ms = 90000, .artwork_revision = 1 },
         .route_destination = "Central Station",
@@ -1068,9 +1231,7 @@ int main(int argc, char **argv)
     assert(lv_obj_has_flag(phone_lane_strip, LV_OBJ_FLAG_HIDDEN));
     assert(!strcmp(lv_label_get_text(phone_power), TR("Battery unavailable")));
     assert(!strcmp(lv_label_get_text(phone_clock_mode), TR("Waiting for iPhone time")));
-    lv_obj_scroll_to_view(settings_tabs[SETTINGS_GNSS], LV_ANIM_OFF);
-    click_caption(pages[PAGE_SETTINGS], "模拟定位");
-    assert_settings_page(SETTINGS_GNSS);
+    open_setting(SETTINGS_GNSS);
     update_page(NULL);
     assert(!strcmp(lv_label_get_text(gnss_state), "模拟定位已关闭"));
     lv_obj_send_event(gnss_latitude, LV_EVENT_CLICKED, NULL);
@@ -1118,18 +1279,17 @@ int main(int argc, char **argv)
            gnss.end_latitude == -33450000 && gnss.end_longitude == -70674000 && gnss.speed_kmh == 36);
     lv_obj_send_event(gnss_apply_button, LV_EVENT_CLICKED, NULL);
     lv_obj_send_event(gnss_buttons[0], LV_EVENT_CLICKED, NULL);
-    click_caption(pages[PAGE_SETTINGS], "语言");
+    open_setting(SETTINGS_LANGUAGE);
     lv_obj_send_event(language_buttons[1], LV_EVENT_CLICKED, NULL);
     assert(!carplay_ui_is_chinese());
 
     /* Display mode without the compositor is refused, not faked. */
-    click_caption(pages[PAGE_SETTINGS], "Display");
+    open_setting(SETTINGS_DISPLAY);
     lv_obj_send_event(display_buttons[0], LV_EVENT_CLICKED, NULL);
     assert(strstr(lv_label_get_text(settings_hint), "Not supported"));
     screenshot(argv[1], "03-settings_dark_en");
 
-    click_caption(pages[PAGE_SETTINGS], "About");
-    assert_settings_page(SETTINGS_ABOUT);
+    open_setting(SETTINGS_ABOUT);
     const char *about_values[] = {
         carplay_build_info.sdk_version,
         carplay_build_info.rtcarplay_version,
@@ -1145,10 +1305,10 @@ int main(int argc, char **argv)
     screenshot(argv[1], "03-settings-about_dark_en");
     carplay_launcher_open_display_settings();
     assert_settings_page(SETTINGS_DISPLAY);
-    click_caption(pages[PAGE_SETTINGS], "About");
+    open_setting(SETTINGS_SYSTEM);
 
     /* OTA page: real state strings, no progress without a real percentage. */
-    click_caption(pages[PAGE_SETTINGS], "System update");
+    click_caption(settings_pages[SETTINGS_SYSTEM], "System update");
     assert(!lv_obj_has_flag(pages[PAGE_OTA], LV_OBJ_FLAG_HIDDEN));
     screenshot(argv[1], "04-ota_dark_en");
     assert(!strcmp(lv_label_get_text(ota_state), "Ready to download"));
@@ -1213,7 +1373,7 @@ int main(int argc, char **argv)
     assert_header_row(pages[PAGE_OTA], "系统更新");
     click_back(pages[PAGE_OTA]);
     assert(!lv_obj_has_flag(pages[PAGE_SETTINGS], LV_OBJ_FLAG_HIDDEN));
-    assert_settings_page(SETTINGS_ABOUT);
+    assert_settings_page(SETTINGS_SYSTEM);
     click_back(pages[PAGE_SETTINGS]);
     update_page(NULL);
     screenshot(argv[1], "01-dashboard_dark_zh");
@@ -1234,7 +1394,7 @@ int main(int argc, char **argv)
     model.stage = DEMO_LIVE;
     update_page(NULL);
     assert(!strcmp(lv_label_get_text(dash_status), "Connected"));
-    assert(!strcmp(lv_label_get_text(conn_state), "Connected"));
+    assert(!strcmp(lv_label_get_text(connectivity_view.state), "Connected"));
     model.stage = DEMO_WAIT;
     update_page(NULL);
 
@@ -1261,7 +1421,9 @@ int main(int argc, char **argv)
     assert(!strcmp(lv_label_get_text(volume_value), "Not supported"));
     screenshot(argv[1], "03-settings-no-audio_dark_en");
 
-    puts("V4 LVGL pages: dashboard, connectivity, settings, OTA, pairing and "
+    puts("Cockpit LVGL pages: dashboard, connectivity, settings, OTA, pairing and "
          "unsupported-backend states rendered at 1024x600; modeled values only");
+    lv_deinit();
+    free(pixels);
     return 0;
 }

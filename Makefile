@@ -199,8 +199,7 @@ check-lubanlite-demo:
 	  -Itests/support/lubanlite_demo -Iplatform \
 	  -I$(LVGL_ROOT) \
 	  -DRTCP_CONNECTION_SOURCE='"$(abspath app/connection_manager.c)"' \
-	  -DRTCP_LAUNCHER_SOURCE='"$(abspath ui/lvgl_launcher.c)"' \
-	  -ffunction-sections -fdata-sections tests/unit/test_lubanlite_demo.c app/pairing_manager.c ui/icons/carplay_icons.c \
+	  -ffunction-sections -fdata-sections tests/unit/test_lubanlite_demo.c app/pairing_manager.c platform/launcher_touch_lubanlite.c \
 	  -Wl,--gc-sections -o $(BUILD)/test_lubanlite_demo
 	$(BUILD)/test_lubanlite_demo
 

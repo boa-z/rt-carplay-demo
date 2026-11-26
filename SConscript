@@ -29,6 +29,7 @@ if GetDepend('RTCARPLAY_DEMO_LAUNCHER'):
     # disabled stub when the image has no audio/PWM driver.
     src += Glob('platform/audio_volume_lubanlite.c')
     src += Glob('platform/backlight_lubanlite.c')
+    src += Glob('platform/launcher_touch_lubanlite.c')
 if GetDepend('RTCARPLAY_D213_BOARD_KEYS'):
     src += Glob('platform/board_keys_lubanlite.c')
 if GetDepend('RTCARPLAY_SINGLE_SCREEN_FUSION'):
@@ -239,6 +240,9 @@ if GetDepend('RTCARPLAY_DEMO_LAUNCHER'):
     build_info_group = DefineGroup('CarPlay build info', Glob('platform/carplay_build_info.c'),
                                    depend=[''], LOCAL_CPPPATH=[os.path.join(repo, 'include')],
                                    LOCAL_CPPDEFINES=['RTCARPLAY_BUILD_TIME_UTC=%s' % timestamp])
+    import building
+    build_info_object = File('platform/carplay_build_info' + building.Env.subst('$OBJSUFFIX'))
+    Depends(build_info_object, Value(timestamp))
     group = group + build_info_group
 
 app_sconscript = os.path.join(repo, 'SConscript')

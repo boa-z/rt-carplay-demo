@@ -1,16 +1,15 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-/* Drive the actual application connection manager. UI compiles against SDK LVGL headers;
- * unused UI sections are removed, so this does not test framebuffer rendering. */
+/* Drive the actual application connection manager and touch adapter. */
 #include <assert.h>
 #include <setjmp.h>
-#ifndef RTCP_LAUNCHER_SOURCE
-#error "Define RTCP_LAUNCHER_SOURCE to the host application LVGL launcher"
-#endif
 #ifndef RTCP_CONNECTION_SOURCE
 #error "Define RTCP_CONNECTION_SOURCE to the host application connection manager"
 #endif
 #include RTCP_CONNECTION_SOURCE
-#include RTCP_LAUNCHER_SOURCE
+#include "launcher_touch_lubanlite.h"
+#include "touch_panel_lubanlite.h"
+#include "lvgl.h"
+#include "rtcp/input.h"
 
 static jmp_buf finished;
 static unsigned mode, starts, pairs, closes, stops, net_checks, pictures, failed_waits;
@@ -20,6 +19,25 @@ static unsigned reports;
 static unsigned now_ms, radio_mode, radio_starts;
 static bool fail_mutex, fail_worker, fail_schedule;
 static unsigned scheduled, deleted;
+static carplay_touch_panel_cb_t panel_input;
+static lv_indev_read_cb_t read_pointer;
+
+lv_indev_t *lv_indev_create(void)
+{
+    return (lv_indev_t *)1;
+}
+
+void lv_indev_set_type(lv_indev_t *device, lv_indev_type_t type)
+{
+    assert(device && type == LV_INDEV_TYPE_POINTER);
+}
+
+void lv_indev_set_read_cb(lv_indev_t *device, lv_indev_read_cb_t callback)
+{
+    assert(device && callback);
+    read_pointer = callback;
+}
+
 rt_mutex_t rt_mutex_create(const char *name, int flags)
 {
     (void)name;
@@ -290,7 +308,7 @@ int carplay_video_sink_set_display_observer(carplay_video_display_cb_t callback,
 int carplay_touch_panel_start(uint16_t width, uint16_t height,
                               carplay_touch_panel_cb_t callback, void *context)
 {
-    (void)callback;
+    panel_input = callback;
     (void)context;
     assert(width == 1024 && height == 600);
     return RTCP_OK;
@@ -341,23 +359,26 @@ int main(void)
             assert(net_checks >= 2 && pictures >= 2);
     }
     /* Touch is delivered to LVGL before picture, and to CarPlay after picture. */
-    status_lock = pointer_lock = (void *)1;
+    status_lock = (void *)1;
+    assert(carplay_launcher_touch_init());
+    assert(carplay_launcher_touch_bind());
+    assert(carplay_launcher_touch_start(1024, 600) == RTCP_OK);
     status.stage = DEMO_WAIT;
     pictures = 0;
     receiver_running = true;
     lv_indev_data_t point = { 0 };
     assert(carplay_demo_touch(RTCP_TOUCH_DOWN, 7, 100, 200));
     assert(carplay_demo_touch(RTCP_TOUCH_DOWN, 9, 800, 500)); /* second finger ignored */
-    pointer_read(NULL, &point);
+    read_pointer(NULL, &point);
     assert(point.state == LV_INDEV_STATE_PRESSED && point.point.x == 100 && point.point.y == 200);
     assert(carplay_demo_touch(RTCP_TOUCH_UP, 7, 120, 220));
-    pointer_read(NULL, &point);
+    read_pointer(NULL, &point);
     assert(point.state == LV_INDEV_STATE_RELEASED && point.point.x == 120);
     for (unsigned i = 0; i < 80; ++i) assert(carplay_demo_touch(i ? RTCP_TOUCH_MOVE : RTCP_TOUCH_DOWN, 7, i, i));
     assert(carplay_demo_touch(RTCP_TOUCH_UP, 7, 99, 99));
     do
     {
-        pointer_read(NULL, &point);
+        read_pointer(NULL, &point);
     } while (point.continue_reading);
     assert(point.state == LV_INDEV_STATE_RELEASED && point.point.x == 99);
     manager_open = true;
@@ -370,13 +391,13 @@ int main(void)
     pictures = 2;
     status.stage = DEMO_LIVE;
     failed_handoff = true;
-    launcher_panel_touch(RTCP_TOUCH_DOWN, 7, 10, 10, NULL);
+    panel_input(RTCP_TOUCH_DOWN, 7, 10, 10, NULL);
     assert(reports == 0); /* a visible launcher retains touch on failed handoff */
     failed_handoff = false;
-    launcher_panel_touch(RTCP_TOUCH_DOWN, 7, 10, 10, NULL);
+    panel_input(RTCP_TOUCH_DOWN, 7, 10, 10, NULL);
     assert(reports == 1);
     status.stage = DEMO_CLOSING;
-    launcher_panel_touch(RTCP_TOUCH_MOVE, 7, 20, 20, NULL);
+    panel_input(RTCP_TOUCH_MOVE, 7, 20, 20, NULL);
     assert(reports == 1); /* closing gates reports before queue teardown */
     assert(!carplay_demo_touch(RTCP_TOUCH_DOWN, 7, 10, 10));
     receiver_running = false;

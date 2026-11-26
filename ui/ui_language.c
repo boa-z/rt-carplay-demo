@@ -10,16 +10,22 @@ LV_FONT_DECLARE(carplay_cjk_24);
 LV_FONT_DECLARE(carplay_cjk_30);
 
 static bool chinese;
-static const struct
+typedef struct
 {
     const char *en, *zh;
-} words[] = {
+} translation_t;
+
+static const translation_t words[] = {
     { "Dashboard", "仪表" },
     { "Connectivity", "车机互联" },
     { "Settings", "系统设置" },
     { "System update", "系统更新" },
     { "Display", "显示" },
     { "Sound", "声音" },
+    { "Connections", "连接" },
+    { "General", "通用" },
+    { "System", "系统" },
+    { "Developer options", "开发者选项" },
     { "About", "关于" },
     { "Build hash", "构建哈希" },
     { "Build time (UTC)", "构建时间 (UTC)" },
@@ -44,12 +50,22 @@ static const struct
     { "Connect phone", "连接手机" },
     { "Resume CarPlay", "重新显示 CarPlay" },
     { "Connecting", "正在连接" },
+    { "Connection failed", "连接失败" },
+    { "Disconnecting", "正在断开" },
+    { "iPhone · Wireless", "iPhone · 无线" },
+    { "iPhone · USB", "iPhone · USB" },
+    { "Available over USB and Wi-Fi", "支持 USB 和 Wi-Fi 连接" },
+    { "Available over USB", "支持 USB 连接" },
     { "Other protocols", "其他协议" },
     { "Android Auto  /  CarLife+", "Android Auto  /  CarLife+" },
     { "Planned", "后续支持" },
     { "Media volume", "媒体音量" },
+    { "Mute microphone", "静音麦克风" },
+    { "Unmute microphone", "开启麦克风" },
     { "Display brightness", "屏幕亮度" },
+    { "Screen", "屏幕" },
     { "Appearance", "外观" },
+    { "Phone projection", "手机投屏" },
     { "Phone appearance", "手机界面外观" },
     { "Phone appearance requested", "已请求更改手机外观" },
     { "Auto uses daylight on this board", "本机自动模式使用日间外观" },
@@ -193,19 +209,22 @@ static const struct
 
 /* Labels, rather than buttons, own translation bindings. Delete events retire
  * bindings, so rebuilding a page cannot leak a stale pointer. */
-static struct binding
+typedef struct binding
 {
     lv_obj_t *label;
-    const char *key;
+    const translation_t *word;
     const lv_font_t *font; /* Latin font chosen by the page owner */
-} labels[384];
+    struct binding *prev, *next;
+} binding_t;
 
-static const char *lookup(const char *english)
+static binding_t *labels;
+
+static const translation_t *lookup(const char *english)
 {
     for (unsigned i = 0; i < sizeof(words) / sizeof(words[0]); ++i)
         if (!strcmp(english, words[i].en))
-            return chinese ? words[i].zh : words[i].en;
-    return english;
+            return &words[i];
+    return NULL;
 }
 
 bool carplay_ui_is_chinese(void)
@@ -215,7 +234,8 @@ bool carplay_ui_is_chinese(void)
 
 const char *carplay_ui_translate(const char *english)
 {
-    return lookup(english);
+    const translation_t *word = lookup(english);
+    return word && chinese ? word->zh : english;
 }
 
 /* Only labels whose rendered text actually contains non-ASCII characters get
@@ -241,64 +261,78 @@ static const lv_font_t *cjk_for(const lv_font_t *latin)
     return &carplay_cjk_16;
 }
 
-static void apply_font(struct binding *b)
+static void apply_font(binding_t *binding)
 {
-    if (!b || !b->label)
+    if (!binding)
         return;
-    const char *text = lv_label_get_text(b->label);
-    lv_obj_set_style_text_font(b->label, needs_cjk(text) ? cjk_for(b->font) : b->font, 0);
+    const char *text = lv_label_get_text(binding->label);
+    const lv_font_t *font = needs_cjk(text) ? cjk_for(binding->font) : binding->font;
+    if (lv_obj_get_style_text_font(binding->label, 0) != font)
+        lv_obj_set_style_text_font(binding->label, font, 0);
 }
 
 static void deleted(lv_event_t *event)
 {
-    memset(lv_event_get_user_data(event), 0, sizeof(struct binding));
+    binding_t *binding = lv_event_get_user_data(event);
+    if (binding->prev)
+        binding->prev->next = binding->next;
+    else
+        labels = binding->next;
+    if (binding->next)
+        binding->next->prev = binding->prev;
+    lv_free(binding);
 }
 
-static struct binding *bind_label(lv_obj_t *label)
+static binding_t *bind_label(lv_obj_t *label, bool needed)
 {
-    struct binding *free_slot = NULL;
-    for (unsigned i = 0; i < sizeof(labels) / sizeof(labels[0]); ++i)
+    uint32_t count = lv_obj_get_event_count(label);
+    for (uint32_t index = 0; index < count; ++index)
     {
-        if (labels[i].label == label)
-            return &labels[i];
-        if (!labels[i].label && !free_slot)
-            free_slot = &labels[i];
+        lv_event_dsc_t *event = lv_obj_get_event_dsc(label, index);
+        if (lv_event_dsc_get_cb(event) == deleted)
+            return lv_event_dsc_get_user_data(event);
     }
-    if (free_slot)
+    if (!needed)
+        return NULL;
+    binding_t *binding = lv_malloc(sizeof(*binding));
+    if (!binding)
+        return NULL;
+    *binding = (binding_t){ .label = label,
+                            .font = lv_obj_get_style_text_font(label, 0),
+                            .next = labels };
+    if (!lv_obj_add_event_cb(label, deleted, LV_EVENT_DELETE, binding))
     {
-        free_slot->label = label;
-        free_slot->font = lv_obj_get_style_text_font(label, 0);
-        lv_obj_add_event_cb(label, deleted, LV_EVENT_DELETE, free_slot);
+        lv_free(binding);
+        return NULL;
     }
-    return free_slot;
+    if (labels)
+        labels->prev = binding;
+    labels = binding;
+    return binding;
+}
+
+static void set_text(lv_obj_t *label, const char *text, const translation_t *word)
+{
+    binding_t *binding = bind_label(label, word || needs_cjk(text));
+    if (binding)
+        binding->word = word;
+    if (strcmp(lv_label_get_text(label), text) != 0)
+        lv_label_set_text(label, text);
+    apply_font(binding);
 }
 
 void carplay_ui_set_text(lv_obj_t *label, const char *english)
 {
-    struct binding *b = bind_label(label);
-    if (b)
-    {
-        b->key = NULL;
-        for (unsigned i = 0; i < sizeof(words) / sizeof(words[0]); ++i)
-            if (!strcmp(english, words[i].en))
-            {
-                b->key = words[i].en;
-                break;
-            }
-    }
-    lv_label_set_text(label, lookup(english));
-    apply_font(b);
+    const translation_t *word = lookup(english);
+    set_text(label, word && chinese ? word->zh : english, word);
 }
 
 void carplay_ui_set_text_fmt(lv_obj_t *label, const char *format, ...)
 {
-    struct binding *b = bind_label(label);
-    if (b)
-        b->key = NULL;
     va_list args, copy;
     va_start(args, format);
     va_copy(copy, args);
-    const char *translated = lookup(format);
+    const char *translated = carplay_ui_translate(format);
     int length = vsnprintf(NULL, 0, translated, copy);
     va_end(copy);
     if (length >= 0)
@@ -307,23 +341,26 @@ void carplay_ui_set_text_fmt(lv_obj_t *label, const char *format, ...)
         if (buffer)
         {
             vsnprintf(buffer, (size_t)length + 1U, translated, args);
-            lv_label_set_text(label, buffer);
+            set_text(label, buffer, NULL);
             lv_free(buffer);
         }
     }
     va_end(args);
-    apply_font(b);
 }
 
 void carplay_ui_set_chinese(bool value)
 {
+    if (value == chinese)
+        return;
     chinese = value;
-    for (unsigned i = 0; i < sizeof(labels) / sizeof(labels[0]); ++i)
+    for (binding_t *binding = labels; binding; binding = binding->next)
     {
-        if (!labels[i].label)
-            continue;
-        if (labels[i].key)
-            lv_label_set_text(labels[i].label, lookup(labels[i].key));
-        apply_font(&labels[i]);
+        if (binding->word)
+        {
+            const char *text = chinese ? binding->word->zh : binding->word->en;
+            if (strcmp(lv_label_get_text(binding->label), text) != 0)
+                lv_label_set_text(binding->label, text);
+            apply_font(binding);
+        }
     }
 }

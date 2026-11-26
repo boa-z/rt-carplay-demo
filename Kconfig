@@ -53,7 +53,7 @@ config CONFIG_LV_USE_FONT_COMPRESSED
     default 1
 
 config RTCARPLAY_DEMO_LAUNCHER
-    bool "LVGL 9 Launcher V2"
+    bool "Cockpit LVGL 9 launcher"
     select RTCARPLAY_AUTO_CONNECT
     select LV_FONT_MONTSERRAT_14
     select LV_FONT_MONTSERRAT_16
@@ -67,6 +67,11 @@ config RTCARPLAY_DEMO_LAUNCHER
       devices, settings, audio tests and diagnostics. Application connection
       ownership is independent of the GUI. Phone consent remains required.
       Requires the SDK lv_user_gui_init hook. CarPlay owns panel input.
+
+config RTCARPLAY_DEMO_DEVELOPER_OPTIONS
+    bool "Show Cockpit developer options"
+    default y
+    depends on RTCARPLAY_DEMO_LAUNCHER
 
 config RTCARPLAY_D213_BOARD_KEYS
     bool "D213ECV-DEMO V4.0 PA.6 function keys"

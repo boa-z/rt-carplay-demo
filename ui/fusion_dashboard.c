@@ -16,8 +16,7 @@
 #include "ui_language.h"
 #include "carplay_ui_theme.h"
 #include "icons/carplay_icons.h"
-#define lv_label_set_text carplay_ui_set_text
-#define TR                carplay_ui_translate
+#include "vehicle_instruments.h"
 
 LV_FONT_DECLARE(carplay_display_115);
 LV_FONT_DECLARE(carplay_display_58);
@@ -37,8 +36,7 @@ static lv_obj_t *speed_caption, *speed_label, *unit_label;
 static lv_obj_t *soc_caption, *soc_label, *soc_bar;
 static lv_obj_t *home_button;
 static bool showing_launcher;
-static unsigned shown_speed;
-static unsigned shown_soc;
+static carplay_instruments_t instruments;
 
 typedef enum
 {
@@ -125,19 +123,19 @@ static void build_strip(lv_obj_t *parent)
     line(strip, 0, 0, 1, STRIP_H, CARPLAY_STYLE_LINE_BORDER);
 
     speed_caption = label(strip, PAD, 72, 200, &carplay_ui_17, CARPLAY_STYLE_MUTED);
-    lv_label_set_text(speed_caption, "Speed");
+    carplay_ui_set_text(speed_caption, "Speed");
 
     speed_label = label(strip, 0, 150, STRIP_W, &carplay_display_115, CARPLAY_STYLE_TEXT);
     lv_obj_set_style_text_align(speed_label, LV_TEXT_ALIGN_CENTER, 0);
 
     unit_label = label(strip, 0, 268, STRIP_W, &carplay_ui_18, CARPLAY_STYLE_MUTED);
-    lv_label_set_text(unit_label, "km/h");
+    lv_label_set_text_static(unit_label, "km/h");
     lv_obj_set_style_text_align(unit_label, LV_TEXT_ALIGN_CENTER, 0);
 
     line(strip, PAD - 1, 322, 202, 1, CARPLAY_STYLE_LINE_BORDER);
 
     soc_caption = label(strip, PAD, 346, 200, &carplay_ui_17, CARPLAY_STYLE_MUTED);
-    lv_label_set_text(soc_caption, "Battery");
+    carplay_ui_set_text(soc_caption, "Battery");
 
     soc_label = label(strip, PAD, 378, 202, &carplay_display_58, CARPLAY_STYLE_TEXT);
 
@@ -150,6 +148,7 @@ static void build_strip(lv_obj_t *parent)
     lv_obj_set_style_radius(soc_bar, 4, LV_PART_INDICATOR);
     carplay_ui_style_part(soc_bar, CARPLAY_STYLE_BAR_BG, LV_PART_MAIN);
     carplay_ui_style_part(soc_bar, CARPLAY_STYLE_BAR_FILL, LV_PART_INDICATOR);
+    carplay_instruments_bind(&instruments, speed_label, soc_label, soc_bar, true);
 
     home_button = lv_obj_create(strip);
     lv_obj_remove_flag(home_button, LV_OBJ_FLAG_SCROLLABLE);
@@ -171,7 +170,7 @@ static void build_strip(lv_obj_t *parent)
     carplay_ui_style(arrow, CARPLAY_STYLE_ICON_ACCENT);
 
     lv_obj_t *caption = label(home_button, 44, 16, 170, &carplay_ui_15, CARPLAY_STYLE_TEXT);
-    lv_label_set_text(caption, "Dashboard");
+    carplay_ui_set_text(caption, "Dashboard");
 }
 
 void carplay_fusion_ui_init(lv_obj_t *launcher, uint16_t width, uint16_t height)
@@ -249,29 +248,8 @@ bool carplay_fusion_ui_update(const demo_status_t *status)
 
     /* Only speed and SOC; no gear, RPM, range or diagnostic text. */
     const carplay_vehicle_sample_t *v = &s.vehicle;
-    unsigned speed = v->available ? v->speed_kph : 0;
-    unsigned soc = v->available ? v->battery_percent : 0;
-    if (!v->available)
-    {
-        if (shown_speed != UINT16_MAX)
-        {
-            lv_label_set_text(speed_label, "--");
-            lv_label_set_text(soc_label, "--%");
-            lv_bar_set_value(soc_bar, 0, LV_ANIM_OFF);
-            shown_speed = UINT16_MAX;
-        }
-    }
-    else if (speed != shown_speed || soc != shown_soc)
-    {
-        char buffer[16];
-        snprintf(buffer, sizeof(buffer), "%u", speed);
-        lv_label_set_text(speed_label, buffer);
-        snprintf(buffer, sizeof(buffer), "%u%%", soc);
-        lv_label_set_text(soc_label, buffer);
-        lv_bar_set_value(soc_bar, (int32_t)soc, LV_ANIM_OFF);
-        shown_speed = speed;
-        shown_soc = soc;
-    }
+    carplay_instruments_update(&instruments, v->available, v->speed_kph,
+                               v->battery_percent);
     return true;
 }
 #endif

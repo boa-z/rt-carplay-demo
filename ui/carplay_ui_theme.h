@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-/* V4 palette tokens and live light/dark switching for the native LVGL UI.
+/* Palette tokens and live light/dark switching for the native LVGL UI.
  * Only presentation lives here; persistence is owned by launcher_preferences. */
 #ifndef CARPLAY_UI_THEME_H
 #define CARPLAY_UI_THEME_H
@@ -56,12 +56,13 @@ typedef enum
     CARPLAY_STYLE_LINE_BORDER, /* 1 px divider fill */
     CARPLAY_STYLE_DOT_OFF,
     CARPLAY_STYLE_DOT_ON,
-    CARPLAY_STYLE_ICON_ACCENT, /* A8 icon mask recoloured to the accent colour */
-    CARPLAY_STYLE_ICON_TEXT,   /* A8 icon mask recoloured to the primary text colour */
-    CARPLAY_STYLE_ICON_MUTED,  /* A8 icon mask recoloured to the muted colour */
-    CARPLAY_STYLE_ICON_FAINT,  /* A8 icon mask recoloured to the faint colour */
-    CARPLAY_STYLE_STRIP,       /* fusion instrument panel background */
-    CARPLAY_STYLE_STRIP_BUTTON /* fusion back button surface */
+    CARPLAY_STYLE_ICON_ACCENT,  /* A8 icon mask recoloured to the accent colour */
+    CARPLAY_STYLE_ICON_TEXT,    /* A8 icon mask recoloured to the primary text colour */
+    CARPLAY_STYLE_ICON_MUTED,   /* A8 icon mask recoloured to the muted colour */
+    CARPLAY_STYLE_ICON_FAINT,   /* A8 icon mask recoloured to the faint colour */
+    CARPLAY_STYLE_STRIP,        /* fusion instrument panel background */
+    CARPLAY_STYLE_STRIP_BUTTON, /* fusion back button surface */
+    CARPLAY_STYLE_COUNT
 } carplay_style_role_t;
 
 bool carplay_ui_dark(void);
@@ -71,7 +72,7 @@ uint32_t carplay_ui_color(carplay_ui_role_t role);
 void carplay_ui_style(lv_obj_t *obj, carplay_style_role_t role);
 void carplay_ui_style_part(lv_obj_t *obj, carplay_style_role_t role,
                            lv_style_selector_t selector);
-/* Theme changes repaint registered objects and call the optional hook. */
+/* Theme changes refresh shared styles and call the optional hook. */
 void carplay_ui_on_theme_change(void (*hook)(void));
 
 #endif
