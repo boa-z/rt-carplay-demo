@@ -19,20 +19,20 @@ NUMERALS = "0123456789.%:-/"
 TEXT = ("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
         "0123456789 .,:;!?()[]/+-%'\"")
 
-# (output name, pixel size, weight, numerals only). The four large numeral
+# (output name, pixel size, weight, CJK fallback size or zero). The large numeral
 # subsets use 2 bpp: at 58 px and above the quantization is not visible, while
 # 4 bpp would cost about a megabyte of flash for the two dashboard faces.
 FONTS = (
-    ("carplay_display_220", 220, 600, True),   # dashboard speed
-    ("carplay_display_110", 110, 600, True),   # dashboard battery
-    ("carplay_display_115", 115, 600, True),   # fusion speed
-    ("carplay_display_58", 58, 600, True),     # fusion battery
-    ("carplay_ui_34", 34, 600, False),         # page titles
-    ("carplay_ui_21", 21, 600, False),         # card labels
-    ("carplay_ui_18", 18, 600, False),         # actions and options
-    ("carplay_ui_17", 17, 500, False),         # clock and secondary
-    ("carplay_ui_15", 15, 500, False),         # segmented options
-    ("carplay_ui_14", 14, 400, False),         # hints
+    ("carplay_display_220", 220, 600, 0),
+    ("carplay_display_110", 110, 600, 0),
+    ("carplay_display_115", 115, 600, 0),
+    ("carplay_display_58", 58, 600, 0),
+    ("carplay_ui_34", 34, 600, 30),
+    ("carplay_ui_21", 21, 600, 24),
+    ("carplay_ui_18", 18, 600, 18),
+    ("carplay_ui_17", 17, 500, 18),
+    ("carplay_ui_15", 15, 500, 16),
+    ("carplay_ui_14", 14, 400, 16),
 )
 
 parser = argparse.ArgumentParser()
@@ -45,7 +45,9 @@ destination.mkdir(exist_ok=True)
 
 with tempfile.TemporaryDirectory() as temp:
     instances = {}
-    for name, size, weight, digits in FONTS:
+    for name, size, weight, fallback_size in FONTS:
+        digits = not fallback_size
+        fallback = "lv_font_montserrat_16" if digits else "carplay_cjk_{}".format(fallback_size)
         if weight not in instances:
             font = TTFont(args.font)
             axes = {"wght": weight}
@@ -60,7 +62,7 @@ with tempfile.TemporaryDirectory() as temp:
             "node", str(args.converter), "--font", str(instances[weight]),
             "--size", str(size), "--bpp", "2" if digits else "4", *glyphs,
             "--no-compress", "--no-kerning", "--format", "lvgl",
-            "--lv-fallback", "lv_font_montserrat_16", "--lv-font-name", name,
+            "--lv-fallback", fallback, "--lv-font-name", name,
             "-o", str(output),
         ], check=True)
         text = output.read_text(encoding="utf-8")

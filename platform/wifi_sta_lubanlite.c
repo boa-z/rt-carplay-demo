@@ -90,22 +90,27 @@ static int enter_sta(void)
     if (!carplay_connection_maintenance_acquire())
         return -RT_EBUSY;
     rt_wlan_config_autoreconnect(RT_FALSE);
-    int result = rt_wlan_set_mode(RT_WLAN_DEVICE_AP_NAME, RT_WLAN_NONE);
+    int result = rt_wlan_ap_is_active() ? rt_wlan_ap_stop() : RT_EOK;
+    if (result == RT_EOK && rt_wlan_ap_is_active())
+        result = -RT_EBUSY;
+    if (result == RT_EOK && rt_wlan_get_mode(RT_WLAN_DEVICE_AP_NAME) != RT_WLAN_NONE)
+        result = rt_wlan_set_mode(RT_WLAN_DEVICE_AP_NAME, RT_WLAN_NONE);
     if (result == RT_EOK)
-        result = rt_wlan_set_mode(RT_WLAN_DEVICE_STA_NAME, RT_WLAN_STATION);
-    if (result != RT_EOK)
     {
-        (void)rt_wlan_set_mode(RT_WLAN_DEVICE_STA_NAME, RT_WLAN_NONE);
-        carplay_connection_maintenance_release();
+        result = rt_wlan_set_mode(RT_WLAN_DEVICE_STA_NAME, RT_WLAN_STATION);
+        if (result != RT_EOK)
+            (void)rt_wlan_set_mode(RT_WLAN_DEVICE_STA_NAME, RT_WLAN_NONE);
     }
+    if (result != RT_EOK)
+        carplay_connection_maintenance_release();
     return result;
 }
 
 static int leave_sta(void)
 {
-    if (rt_wlan_is_connected())
-        (void)rt_wlan_disconnect();
-    int result = rt_wlan_set_mode(RT_WLAN_DEVICE_STA_NAME, RT_WLAN_NONE);
+    int result = rt_wlan_is_connected() ? rt_wlan_disconnect() : RT_EOK;
+    if (result == RT_EOK)
+        result = rt_wlan_set_mode(RT_WLAN_DEVICE_STA_NAME, RT_WLAN_NONE);
     if (result == RT_EOK)
         carplay_connection_maintenance_release();
     return result;
@@ -115,9 +120,11 @@ static void poll_state(void)
 {
     bool connected = status.enabled && rt_wlan_is_connected();
     bool addressed = connected && rt_wlan_is_ready();
+    bool ap_active = rt_wlan_ap_is_active();
     rt_mutex_take(&wifi_lock, RT_WAITING_FOREVER);
     status.connected = connected;
     status.addressed = addressed;
+    status.ap_active = ap_active;
     snprintf(status.connected_ssid, sizeof(status.connected_ssid), "%.*s",
              connected ? reconnect.ssid.len : 0, reconnect.ssid.val);
     rt_mutex_release(&wifi_lock);

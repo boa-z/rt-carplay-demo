@@ -58,7 +58,7 @@ Demo 在有线和无线连接中都会提供 **rt-carplay** OEM 图标。固件�
 
 点击 CarPlay 内置的 OEM 返回入口后，Demo 立即切到本地启动台，现有会话可用于恢复投屏。在仪表条点击 **仪表** 或执行 `carplay_projection pause` 可显式请求将 MainScreen 交给宿主。
 
-在启动台打开 **车机互联 → 重新显示 CarPlay**，或执行 `carplay_projection resume`，通过现有会话发送 `requestUI`。从 OEM 图标返回后，如果手机通过新的 `modesChanged` 确认取得 MainScreen，且 Type 110 流和显示布局仍有效，Demo 会直接显示保留帧。视频流已经更换或保留帧失效时，Demo 会等待新解码帧。即使手机暂时关闭屏幕流，只要会话仍在，恢复入口依然可用。使用 `carplay_status` 查看 MainScreen 所有权，使用 `carplay_connection status` 查看会话和视频状态。如果整个会话结束，由连接管理器重新建立连接。有线测试时保持音乐播放，点击 OEM 返回入口再恢复，检查 RTSP 会话和 iAP2 链路是否持续连接。
+在启动台打开**手机互联 → 重新显示 CarPlay**，或执行 `carplay_projection resume`，通过现有会话发送 `requestUI`。从 OEM 图标返回后，如果手机通过新的 `modesChanged` 确认取得 MainScreen，且 Type 110 流和显示布局仍有效，Demo 会直接显示保留帧。视频流已经更换或保留帧失效时，Demo 会等待新解码帧。即使手机暂时关闭屏幕流，只要会话仍在，恢复入口依然可用。使用 `carplay_status` 查看 MainScreen 所有权，使用 `carplay_connection status` 查看会话和视频状态。如果整个会话结束，由连接管理器重新建立连接。有线测试时保持音乐播放，点击 OEM 返回入口再恢复，检查 RTSP 会话和 iAP2 链路是否持续连接。
 
 ## 硬件合成与资源归属
 

@@ -19,7 +19,9 @@ The platform sinks retain buffer ownership through asynchronous decode, presenta
 
 ## Wireless variants
 
-The Realtek baseline uses `wifi_conf.h` and `wifi_util.h` in `platform/rtcp_wifi_lubanlite.c`, concurrent AP/STA in `platform/wifi_sta_lubanlite.c`, and Zephyr H:5 with Classic BR/EDR, SDP, RFCOMM and persistent bonds. AIC8800D40 uses the SDK SDIO WLAN and Bluetooth firmware initialization with Zephyr H:4. The RT-Thread SoftAP path programs the Apple Vendor IE through the SDK before enabling the AP. On the board, verify startup order, the IE in Beacon and Probe Response frames, BR/EDR pairing and bond restoration, and wireless CarPlay reconnect.
+Realtek uses `wifi_conf.h` and `wifi_util.h` in `platform/rtcp_wifi_lubanlite.c` and Zephyr H:5 with Classic BR/EDR, SDP, RFCOMM and persistent bonds. AIC8800D40 uses the SDK SDIO WLAN and Bluetooth firmware initialization with Zephyr H:4. The RT-Thread SoftAP path programs the Apple Vendor IE through the SDK before enabling the AP.
+
+Both targets expose STA maintenance under **Settings → Connections → Wi-Fi** on OTA builds. The page shows whether the CarPlay SoftAP is active. Entering maintenance pauses the CarPlay connection manager and stops SoftAP before enabling STA scan and association. Leaving maintenance disconnects STA and restores the selected CarPlay connection policy. The application uses AP and STA in separate modes. On AIC8800D40, verify the Vendor IE in Beacon and Probe Response frames, pairing and bond restoration, STA scan and WPA2 association, DHCP and OTA reachability, and wireless CarPlay recovery after leaving maintenance.
 
 AIC8800D40 has a separate hardware target with A/B OTA. Its CPIO carries a specific compatibility ID. RTL8733BS retains its legacy ID, so each target rejects the other's CPIO before NAND writes.
 

@@ -4,11 +4,6 @@
 #include <stdio.h>
 #include <string.h>
 
-LV_FONT_DECLARE(carplay_cjk_16);
-LV_FONT_DECLARE(carplay_cjk_18);
-LV_FONT_DECLARE(carplay_cjk_24);
-LV_FONT_DECLARE(carplay_cjk_30);
-
 static bool chinese;
 typedef struct
 {
@@ -16,6 +11,19 @@ typedef struct
 } translation_t;
 
 static const translation_t words[] = {
+    { "Home", "首页" },
+    { "Phone Hub", "手机互联" },
+    { "Phone details", "手机详情" },
+    { "Phone battery", "手机电量" },
+    { "No media", "暂无媒体" },
+    { "No active route", "暂无导航" },
+    { "Bluetooth connected", "蓝牙已连接" },
+    { "Bluetooth ready", "蓝牙就绪" },
+    { "Confirm pairing on iPhone", "请在 iPhone 上确认配对" },
+    { "Connecting to wireless network", "正在建立无线连接" },
+    { "Starting CarPlay", "正在启动 CarPlay" },
+    { "Wireless", "无线" },
+    { "Retry", "重试" },
     { "Dashboard", "仪表" },
     { "Connectivity", "车机互联" },
     { "Settings", "系统设置" },
@@ -34,6 +42,34 @@ static const translation_t words[] = {
     { "Connected", "已连接" },
     { "Not connected", "未连接" },
     { "Wi-Fi", "Wi-Fi" },
+    { "CarPlay access point active", "CarPlay 热点已开启" },
+    { "CarPlay access point inactive", "CarPlay 热点未开启" },
+    { "Pause CarPlay and enable Wi-Fi", "暂停 CarPlay 并连接 Wi-Fi" },
+    { "Leave STA maintenance", "退出 Wi-Fi 维护模式" },
+    { "Scan", "扫描网络" },
+    { "Connect", "连接" },
+    { "No scan results", "暂无扫描结果" },
+    { "Wi-Fi password", "Wi-Fi 密码" },
+    { "Forget network", "忘记网络" },
+    { "Wi-Fi operation in progress.", "正在处理 Wi-Fi 操作。" },
+    { "Wi-Fi operation in progress...", "正在处理 Wi-Fi 操作…" },
+    { "Check Wi-Fi mode, network and password.", "请检查 Wi-Fi 模式、网络和密码。" },
+    { "Network is in use by the update worker.", "系统更新正在使用网络。" },
+    { "STA maintenance pauses CarPlay until you leave it.", "退出 Wi-Fi 维护模式后，CarPlay 恢复连接。" },
+    { "Could not enter STA maintenance.", "无法进入 Wi-Fi 维护模式。" },
+    { "STA maintenance active. Scan for networks.", "Wi-Fi 维护模式已开启，请扫描网络。" },
+    { "Could not stop STA. Retry before starting CarPlay.", "无法断开 Wi-Fi，请重试后再启动 CarPlay。" },
+    { "CarPlay connection policy restored.", "已恢复 CarPlay 连接设置。" },
+    { "Scan failed or timed out.", "扫描失败或超时。" },
+    { "Select a Wi-Fi network.", "请选择 Wi-Fi 网络。" },
+    { "Wi-Fi association failed.", "Wi-Fi 连接失败。" },
+    { "Associated. Waiting for DHCP.", "已连接，正在等待 DHCP。" },
+    { "Disconnect failed.", "断开连接失败。" },
+    { "Wi-Fi network forgotten.", "已忘记 Wi-Fi 网络。" },
+    { "Wi-Fi reconnect failed.", "Wi-Fi 重连失败。" },
+    { "Reconnected. Waiting for DHCP.", "已重新连接，正在等待 DHCP。" },
+    { "IPv4 ready", "已获取 IPv4 地址" },
+    { "Waiting for DHCP", "正在等待 DHCP" },
     { "Ethernet", "有线网络" },
     { "Connection status", "连接状态" },
     { "Network unavailable", "网络不可用" },
@@ -213,7 +249,6 @@ typedef struct binding
 {
     lv_obj_t *label;
     const translation_t *word;
-    const lv_font_t *font; /* Latin font chosen by the page owner */
     struct binding *prev, *next;
 } binding_t;
 
@@ -236,39 +271,6 @@ const char *carplay_ui_translate(const char *english)
 {
     const translation_t *word = lookup(english);
     return word && chinese ? word->zh : english;
-}
-
-/* Only labels whose rendered text actually contains non-ASCII characters get
- * a CJK face. Numerals, units and version strings keep their Latin design
- * font, so a 220 px speed reading is never replaced by a 30 px CJK face. */
-static bool needs_cjk(const char *text)
-{
-    for (const unsigned char *p = (const unsigned char *)text; *p; ++p)
-        if (*p > 0x7f)
-            return true;
-    return false;
-}
-
-static const lv_font_t *cjk_for(const lv_font_t *latin)
-{
-    int height = latin ? latin->line_height : 0;
-    if (height >= 30)
-        return &carplay_cjk_30;
-    if (height >= 22)
-        return &carplay_cjk_24;
-    if (height >= 18)
-        return &carplay_cjk_18;
-    return &carplay_cjk_16;
-}
-
-static void apply_font(binding_t *binding)
-{
-    if (!binding)
-        return;
-    const char *text = lv_label_get_text(binding->label);
-    const lv_font_t *font = needs_cjk(text) ? cjk_for(binding->font) : binding->font;
-    if (lv_obj_get_style_text_font(binding->label, 0) != font)
-        lv_obj_set_style_text_font(binding->label, font, 0);
 }
 
 static void deleted(lv_event_t *event)
@@ -298,7 +300,6 @@ static binding_t *bind_label(lv_obj_t *label, bool needed)
     if (!binding)
         return NULL;
     *binding = (binding_t){ .label = label,
-                            .font = lv_obj_get_style_text_font(label, 0),
                             .next = labels };
     if (!lv_obj_add_event_cb(label, deleted, LV_EVENT_DELETE, binding))
     {
@@ -313,12 +314,11 @@ static binding_t *bind_label(lv_obj_t *label, bool needed)
 
 static void set_text(lv_obj_t *label, const char *text, const translation_t *word)
 {
-    binding_t *binding = bind_label(label, word || needs_cjk(text));
+    binding_t *binding = bind_label(label, word != NULL);
     if (binding)
         binding->word = word;
     if (strcmp(lv_label_get_text(label), text) != 0)
         lv_label_set_text(label, text);
-    apply_font(binding);
 }
 
 void carplay_ui_set_text(lv_obj_t *label, const char *english)
@@ -360,7 +360,6 @@ void carplay_ui_set_chinese(bool value)
             const char *text = chinese ? binding->word->zh : binding->word->en;
             if (strcmp(lv_label_get_text(binding->label), text) != 0)
                 lv_label_set_text(binding->label, text);
-            apply_font(binding);
         }
     }
 }

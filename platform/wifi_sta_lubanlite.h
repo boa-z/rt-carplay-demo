@@ -15,7 +15,7 @@ typedef struct
 
 typedef struct
 {
-    bool enabled, busy, connected, addressed;
+    bool enabled, busy, connected, addressed, ap_active;
     unsigned scan_revision, count;
     char connected_ssid[33];
     char message[96];

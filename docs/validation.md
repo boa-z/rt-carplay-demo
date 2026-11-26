@@ -5,7 +5,7 @@
 | Target | Implemented scope | Host | Cross-build | Physical |
 | --- | --- | --- | --- | --- |
 | D213, RTL8733BS, 128 MiB NAND | RT-Thread CarPlay, Launcher, Fusion and BSP services | Demo Actions suite | D213 firmware Actions | `NOT_RUN` for this migration |
-| D213, AIC8800 | Planned. SKU and module integration pending. | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
+| D213, AIC8800D40, 128 MiB NAND | CarPlay SoftAP and Wi-Fi STA maintenance | Launcher Preview with modeled Wi-Fi states | Dedicated AIC8800D40 defconfig | `NOT_RUN` |
 | Embedded Linux | LVGL Preview and modeled adapters. Production Receiver planned. | Launcher and Fusion renders | `NOT_RUN` | `NOT_RUN` |
 
 See the [CI guide](ci.md) for runnable checks. A green Host or cross-build result records software validation for that commit. Record board results with the source manifest, board revision, WLAN module, iPhone and iOS versions, and serial logs with identifiers removed.

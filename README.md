@@ -40,11 +40,13 @@ The local `Kconfig` and `SConscript` select board features. SDK protocol switche
 
 | Task | Guide |
 | --- | --- |
-| Now Playing, artwork, navigation, iPhone status, and RTC | [Phone Controls](docs/mobility-cockpit-v4.md#phone-controls) |
+| Now Playing, artwork, navigation, iPhone status, and RTC | [Phone Hub](docs/mobility-cockpit-v4.md#phone-hub) |
+| System Shell, layouts, themes and fonts | [Cockpit design system](docs/design-system.md) |
 | Fullscreen, Fusion, touch mapping and 30/60 FPS | [Display guide](docs/single-screen-fusion.md) |
 | USB enumeration, trust or network bring-up | [Wired startup](docs/wired-startup.md) and [native NCM](docs/wired-native-ncm.md) |
 | Wireless pairing, reconnect and wired/wireless handoff | [Connection manager](docs/connection-manager.md) and [Bluetooth checks](docs/mobility-cockpit-v4.md#bluetooth-name) |
 | Audio routing, Siri, and microphone recovery | [Audio recovery](docs/audio-recovery.md) |
+| AIC8800D40 and RTL8733BS SoftAP and Wi-Fi maintenance | [Platform guide](docs/platform.md) |
 | Network, USB files and firmware | [Network manager](docs/network-manager.md), [Internet sharing](docs/internet-sharing.md), [USB files](docs/usb-files.md), [A/B OTA](docs/ota.md) and [update mirrors](docs/ota-mirror.md) |
 
 ## Verify changes

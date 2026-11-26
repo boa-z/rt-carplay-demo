@@ -57,45 +57,52 @@ void carplay_connectivity_build(carplay_connectivity_view_t *view, lv_obj_t *pag
     lv_obj_t *card = lv_obj_create(page);
     lv_obj_remove_style_all(card);
     lv_obj_remove_flag(card, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_pos(card, 32, 108);
-    lv_obj_set_size(card, 576, 246);
+    lv_obj_set_pos(card, 24, 63);
+    lv_obj_set_size(card, 976, 99);
     lv_obj_set_style_radius(card, 12, LV_PART_MAIN);
     carplay_ui_style(card, CARPLAY_STYLE_CARD);
 
     lv_obj_t *phone = lv_image_create(card);
     lv_image_set_src(phone, &carplay_icon_smartphone_42);
-    lv_obj_set_pos(phone, 24, 23);
+    lv_obj_set_pos(phone, 18, 16);
     carplay_ui_style(phone, CARPLAY_STYLE_ICON_ACCENT);
 
-    lv_obj_t *title = connection_label(card, "Apple CarPlay", &carplay_ui_34, CARPLAY_STYLE_TEXT);
-    lv_obj_set_pos(title, 88, 26);
-    view->state = connection_label(card, "Waiting for phone", &carplay_ui_21,
-                                   CARPLAY_STYLE_TEXT);
-    lv_obj_set_pos(view->state, 25, 112);
+    lv_obj_t *title = connection_label(card, "Apple CarPlay", &carplay_ui_21, CARPLAY_STYLE_TEXT);
+    lv_obj_set_pos(title, 76, 12);
+    view->state = connection_label(card, "Waiting for phone", &carplay_ui_18, CARPLAY_STYLE_TEXT);
+    lv_obj_set_pos(view->state, 76, 40);
     view->transport = connection_label(card, "", &carplay_ui_18, CARPLAY_STYLE_MUTED);
-    lv_obj_set_pos(view->transport, 25, 152);
-    lv_obj_t *separator = lv_obj_create(card);
-    lv_obj_remove_style_all(separator);
-    lv_obj_remove_flag(separator, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_pos(separator, 24, 87);
-    lv_obj_set_size(separator, 526, 1);
-    carplay_ui_style(separator, CARPLAY_STYLE_LINE_BORDER);
-
-    lv_obj_t *actions = carplay_settings_list(page, 368, 246);
-    lv_obj_set_pos(actions, 624, 108);
-    lv_obj_remove_flag(actions, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_pad_all(actions, 24, LV_PART_MAIN);
-    lv_obj_set_style_pad_row(actions, 20, LV_PART_MAIN);
-    lv_obj_set_flex_align(actions, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    view->capabilities = connection_label(actions, "", &carplay_ui_18, CARPLAY_STYLE_MUTED);
-    lv_obj_set_width(view->capabilities, lv_pct(100));
-    view->action = carplay_settings_row(actions, "Connect phone", &carplay_icon_link_24,
+    lv_obj_set_pos(view->transport, 76, 66);
+    view->capabilities = connection_label(card, "", &carplay_ui_18, CARPLAY_STYLE_MUTED);
+    lv_obj_set_pos(view->capabilities, 76, 66);
+    view->action = carplay_settings_row(card, "Connect phone", &carplay_icon_link_24,
                                         false, connect_phone, NULL);
-    lv_obj_set_height(view->action, 76);
+    lv_obj_set_size(view->action, 254, 64);
+    lv_obj_align(view->action, LV_ALIGN_RIGHT_MID, -16, 0);
     view->action_label = lv_obj_get_child(view->action, 1);
     carplay_ui_style(view->action, CARPLAY_STYLE_ACCENT_CARD);
     carplay_ui_style_part(view->action, CARPLAY_STYLE_CARD_ALT, LV_STATE_DISABLED);
+}
+
+const char *carplay_connectivity_state(const demo_status_t *status)
+{
+    switch (status ? status->stage : DEMO_BOOT)
+    {
+    case DEMO_PAIR:
+        return "Confirm pairing on iPhone";
+    case DEMO_NETWORK:
+        return "Connecting to wireless network";
+    case DEMO_CONNECT:
+        return "Starting CarPlay";
+    case DEMO_LIVE:
+        return "Connected";
+    case DEMO_CLOSING:
+        return "Disconnecting";
+    case DEMO_FAILED:
+        return "Connection failed";
+    default:
+        return "Waiting for phone";
+    }
 }
 
 void carplay_connectivity_update(carplay_connectivity_view_t *view,
@@ -110,20 +117,15 @@ void carplay_connectivity_update(carplay_connectivity_view_t *view,
     connected |= resume;
     busy &= !resume;
 #endif
-    const char *message = connected               ? "Connected"
-                          : busy                  ? "Connecting"
-                          : stage == DEMO_FAILED  ? "Connection failed"
-                          : stage == DEMO_CLOSING ? "Disconnecting"
-                                                  : "Waiting for phone";
-    carplay_ui_set_text(view->state, message);
+    carplay_ui_set_text(view->state, resume ? "Connected" : carplay_connectivity_state(status));
     carplay_ui_set_text(view->transport, (connected || busy) && status
                                              ? (status->wireless ? "iPhone · Wireless" : "iPhone · USB")
                                              : "");
-    carplay_ui_set_text(view->capabilities, status && status->wireless_enabled
-                                                ? "Available over USB and Wi-Fi"
-                                                : "Available over USB");
-    carplay_ui_set_text(view->action_label, resume ? "Resume CarPlay" : "Connect phone");
-    if (busy || (connected && !resume))
+    carplay_ui_set_text(view->capabilities, connected || busy ? "" : status && status->wireless_enabled ? "Available over USB and Wi-Fi"
+                                                                                                        : "Available over USB");
+    carplay_ui_set_text(view->action_label, resume ? "Resume CarPlay" : stage == DEMO_FAILED ? "Retry"
+                                                                                             : "Connect phone");
+    if (busy || stage == DEMO_BOOT || stage == DEMO_CLOSING || (connected && !resume))
         lv_obj_add_state(view->action, LV_STATE_DISABLED);
     else
         lv_obj_remove_state(view->action, LV_STATE_DISABLED);

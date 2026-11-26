@@ -14,6 +14,8 @@
 
 #if CARPLAY_UI_17
 
+LV_FONT_DECLARE(carplay_cjk_18);
+
 /*-----------------
  *    BITMAPS
  *----------------*/
@@ -867,7 +869,7 @@ lv_font_t carplay_ui_17 = {
 #endif
     .dsc = &font_dsc,          /*The custom font data. Will be accessed by `get_glyph_bitmap/dsc` */
 #if LV_VERSION_CHECK(8, 2, 0) || LVGL_VERSION_MAJOR >= 9
-    .fallback = &lv_font_montserrat_16,
+    .fallback = &carplay_cjk_18,
 #endif
     .user_data = NULL,
 };

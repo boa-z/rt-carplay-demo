@@ -16,3 +16,4 @@ typedef struct
 void carplay_connectivity_build(carplay_connectivity_view_t *view, lv_obj_t *page);
 void carplay_connectivity_update(carplay_connectivity_view_t *view,
                                  const demo_status_t *status);
+const char *carplay_connectivity_state(const demo_status_t *status);

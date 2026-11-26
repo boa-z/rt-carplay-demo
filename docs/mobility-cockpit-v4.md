@@ -8,8 +8,8 @@ The V4 design package (`Mobility_Cockpit_UI/mobility_cockpit_v4`) replaces the L
 
 | Screen | Content |
 | --- | --- |
-| Dashboard | Speed as the primary readout, state of charge with a percentage bar, connection stage and clock, Connectivity and Settings entries |
-| Connectivity | CarPlay status, failure text, Connect/Retry/Resume action, pairing state; Android Auto and CarLife+ are labelled Planned and never simulate a backend |
+| Home | Vehicle speed and state of charge, plus connection, media and route summaries |
+| Phone Hub | CarPlay status and connection actions, Now Playing, route guidance and Phone details |
 | Settings | Media volume, display brightness, Appearance (light/dark; Auto disabled), Language, CarPlay display (Fullscreen/Fusion) and the System update entry |
 | System update | Installed version and slot, real check/download/apply/reboot/failed states with progress when known, install confirmation, backend availability |
 
@@ -29,7 +29,7 @@ The generated file is excluded from clang-format (`.clang-format-ignore`), like 
 
 `ui/carplay_ui_theme.c` holds the V4 palette as role tokens and applies a whole role to an object (background, border, text colour, radius-independent fill opacity) so a theme change restyles the widget tree without re-running layout. `carplay_ui_set_dark()` switches immediately; every page, the modals and the fusion strip are registered, and the choice is written to the settings record. Auto is present but disabled: the board has no ambient-light sensor, and the page states that rather than faking a schedule.
 
-`ui/ui_language.c` maps each English label to its simplified-Chinese counterpart and switches live with `carplay_ui_set_chinese()`. CJK text is drawn with a Noto Sans SC subset at the matching size (16/18/24/30). All four CJK font files are generated from one union symbol set by `tools/generate_ui_fonts.py`, so a label can never render as missing-glyph boxes at one size only. English uses the Inter subsets produced by `tools/generate_display_fonts.py`.
+`ui/ui_language.c` maps English labels to simplified Chinese and switches the text live with `carplay_ui_set_chinese()`. Inter text styles use LVGL's Noto Sans SC fallbacks, so translated labels and mixed-script strings can share a stable layout. The [font guide](../ui/fonts/README.md) covers generation and the static glyph check.
 
 Preferences persist through `app/launcher_preferences.c` in `/data/carplay-ui.bin`. The record stores numerical settings and the Bluetooth name with a checksum. A temporary file and backup protect replacement. Settings reports a failed save.
 
@@ -63,11 +63,11 @@ The Settings page writes the display mode through `carplay_connection_set_displa
 
 The page controls `carplay_ota_*` in `platform/ota_lubanlite.c`. It shows the installed version, slot, saved `.cpio` URL, and download and installation progress when available. Download, package verification and installation run in a worker. The page asks for confirmation with the verified target version before installation. See [Firmware updates](ota.md).
 
-## Phone Controls
+## Phone Hub
 
 Wired USB iAP2 and wireless AirPlay iAP2 use the same subscriptions for Now Playing, route guidance and iPhone status. `carplay_classic_diag on` enables serial diagnostics for either transport.
 
-Open **Settings → Phone Controls** to see Now Playing, route guidance and phone status. Now Playing displays the received track, artist, album, playback state, elapsed time and duration. The D213 Demo accepts artwork up to 192 KiB from wired iAP2, the wireless iAP2 tunnel or an inline AirPlay update. It decodes baseline JPEG up to 2048×2048 directly into a thumbnail of at most 96×96 pixels and accepts PNG up to 512×512. When a cover is unavailable it displays a music icon. The navigation card shows the reported destination, current road, remaining distance, next-turn distance, up to three announced maneuvers in order and up to eight lane indicators. The status card displays the reported battery, charging, cellular and call information when present. It shows local board RTC time and distinguishes manual mode, waiting for iPhone time and receipt of a phone time sample. **Settings → Date & time** controls how the board clock is set.
+Open **Phone Hub** from the bottom navigation bar to see Now Playing and route guidance. Now Playing displays the received track, artist, album, playback state, elapsed time and duration. The D213 Demo accepts artwork up to 192 KiB from wired iAP2, the wireless iAP2 tunnel or an inline AirPlay update. It decodes baseline JPEG up to 2048×2048 directly into a thumbnail of at most 96×96 pixels and accepts PNG up to 512×512. When a cover is unavailable it displays a music icon. The navigation card shows the reported destination, current road, remaining distance, next-turn distance, up to three announced maneuvers in order and up to eight lane indicators. **Phone details** displays the reported battery, charging, cellular and call information when present. It shows local board RTC time and distinguishes manual mode, waiting for iPhone time and receipt of a phone time sample. **Settings → General → Date & time** controls how the board clock is set.
 
 **Implemented / Host Tested.** The integration and LVGL preview exercise field clearing and artwork fallback. iAP2 title and playback updates preserve the current cover when they omit artwork. A new transfer can clear the previous cover until its replacement arrives. **Hardware Pending.** On D213, connect an iPhone over USB and then wirelessly. Verify that the cover stays visible through title and playback updates and changes when the phone sends a replacement. Start and cancel a route with upcoming turns and lane guidance. Check phone status during charging and a call, verify local time and the selected clock mode, then disconnect and reconnect. Session data should clear on disconnect and return as updates arrive. The board RTC should keep running.
 

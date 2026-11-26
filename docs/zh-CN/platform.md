@@ -19,7 +19,9 @@
 
 ## 无线硬件变体
 
-Realtek 基线在 `platform/rtcp_wifi_lubanlite.c` 使用 `wifi_conf.h` 和 `wifi_util.h`，在 `platform/wifi_sta_lubanlite.c` 使用 AP/STA 并发，蓝牙使用 Zephyr H:5、Classic BR/EDR、SDP、RFCOMM 和配对持久化。AIC8800D40 使用 SDK 的 SDIO WLAN 和蓝牙固件初始化，蓝牙传输采用 Zephyr H:4。RT-Thread SoftAP 启用前通过 SDK 设置 Apple Vendor IE。上板需验证启动顺序、Beacon 和 Probe Response 中的 Vendor IE、BR/EDR 配对及配对恢复，以及无线 CarPlay 重连。
+Realtek 在 `platform/rtcp_wifi_lubanlite.c` 使用 `wifi_conf.h` 和 `wifi_util.h`，蓝牙使用 Zephyr H:5、Classic BR/EDR、SDP、RFCOMM 和配对持久化。AIC8800D40 使用 SDK 的 SDIO WLAN 和蓝牙固件初始化，蓝牙传输采用 Zephyr H:4。RT-Thread SoftAP 启用前通过 SDK 设置 Apple Vendor IE。
+
+两个目标的 OTA 固件都在**设置 → 连接 → Wi-Fi**提供 STA 维护模式，并显示 CarPlay 热点的实际状态。进入维护模式时暂停 CarPlay 连接管理，停止热点后启用 STA 扫描和连接。退出维护模式时断开 STA 并恢复原 CarPlay 连接策略。应用以互斥方式使用 AP 和 STA。AIC8800D40 上板需验证 Beacon 和 Probe Response 的 Vendor IE、蓝牙配对及配对恢复、STA 扫描及 WPA2 关联、DHCP 和 OTA 可达性，以及退出维护后无线 CarPlay 恢复。
 
 AIC8800D40 是支持 A/B OTA 的独立硬件目标。其 CPIO 使用专用兼容 ID，RTL8733BS 保留旧 ID，两种目标均会在写 NAND 前拒绝另一目标的 CPIO。
 

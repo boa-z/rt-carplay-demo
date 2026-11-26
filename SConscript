@@ -43,8 +43,8 @@ if GetDepend('RTCARPLAY_INTERNET_SHARE'):
     src += Glob('platform/internet_share_lubanlite.c')
 if GetDepend('RTCARPLAY_OTA'):
     src += Glob('platform/ota_lubanlite.c')
-    if GetDepend('AIC_WLAN_REALTEK'):
-        src += Glob('platform/wifi_sta_lubanlite.c')
+if GetDepend('RTCARPLAY_WIFI_STA_MAINTENANCE'):
+    src += Glob('platform/wifi_sta_lubanlite.c')
 if GetDepend('RTCARPLAY_OTA') or GetDepend('RTCARPLAY_INTERNET_SHARE'):
     src += Glob('app/network_manager.c')
 if GetDepend('RTCARPLAY_NETWORK_TIME'):

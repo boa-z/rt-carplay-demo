@@ -40,7 +40,8 @@ set(UI_SOURCES
 
 # Actual V4 pages with modeled connection, audio, backlight and OTA owners.
 add_executable(launcher_preview main.c ../../platform/launcher_touch_lubanlite.c
-    ../../ui/settings_navigation.c ../../ui/connectivity_page.c ../../ui/launcher_layout.c)
+    ../../ui/settings_navigation.c ../../ui/connectivity_page.c ../../ui/launcher_layout.c
+    ../../ui/system_shell.c)
 target_sources(launcher_preview PRIVATE ${UI_SOURCES})
 target_include_directories(launcher_preview PRIVATE
     ../../ui ../support/lubanlite_demo ../../app ../../platform
@@ -48,7 +49,7 @@ target_include_directories(launcher_preview PRIVATE
     "${RTCP_ROOT}/core/airplay/include")
 target_compile_definitions(launcher_preview PRIVATE
     RTCARPLAY_INTERNET_SHARE RTCARPLAY_MICROPHONE RTCARPLAY_IAP2 RT_USING_RTC
-    LPKG_RT_CARPLAY_LUBANLITE_WIFI RTCARPLAY_OTA AIC_WLAN_REALTEK RTCARPLAY_NETWORK_TIME
+    LPKG_RT_CARPLAY_LUBANLITE_WIFI RTCARPLAY_OTA RTCARPLAY_WIFI_STA_MAINTENANCE RTCARPLAY_NETWORK_TIME
     LPKG_BT_DEVICE_NAME_DYNAMIC CARPLAY_PREFERENCES_EXTERNAL_PROVIDER
     RTCARPLAY_DEMO_DEVELOPER_OPTIONS
     CARPLAY_PREVIEW_JPEG="${CMAKE_CURRENT_SOURCE_DIR}/cover-fixture.jpg")

@@ -73,7 +73,7 @@ static void run_benchmark(void)
     print_samples("page_switch", page);
     print_samples("theme_switch", theme);
 #if LV_USE_TJPGD
-    show_settings_page(SETTINGS_PHONE);
+    show_page(PAGE_CONNECTIVITY);
     start = timestamp_ms();
     update_phone_cover(3);
     printf("jpeg_read_decode_ms=%.3f\n", timestamp_ms() - start);

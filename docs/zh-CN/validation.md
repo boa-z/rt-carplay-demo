@@ -5,7 +5,7 @@
 | 目标 | 已实现范围 | Host | 交叉构建 | 实机 |
 | --- | --- | --- | --- | --- |
 | D213、RTL8733BS、128 MiB NAND | RT-Thread CarPlay、Launcher、Fusion 与 BSP 服务 | Demo Actions 回归 | D213 固件 Actions | 本次迁移 `NOT_RUN` |
-| D213、AIC8800 | 计划支持，型号和模组适配待确认。 | `NOT_RUN` | `NOT_RUN` | `NOT_RUN` |
+| D213、AIC8800D40、128 MiB NAND | CarPlay SoftAP 与 Wi-Fi STA 维护模式 | Launcher Preview 模拟 Wi-Fi 状态 | 独立 AIC8800D40 defconfig | `NOT_RUN` |
 | 嵌入式 Linux | LVGL Preview 与适配层模型，生产 Receiver 为计划。 | Launcher 和 Fusion 渲染 | `NOT_RUN` | `NOT_RUN` |
 
 [CI 指南](ci.md)列出可运行的检查。Host 或交叉构建通过时，按提交记录软件验证结果。上板测试记录源版本清单、板卡版本、无线模组、iPhone 和 iOS 版本，以及去除设备标识后的串口日志。

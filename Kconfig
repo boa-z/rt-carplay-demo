@@ -147,6 +147,16 @@ config RTCARPLAY_OTA_COMPAT
       Must match the board field in the generated CPIO metadata. Use a distinct
       identifier for targets which must never install each other's updates.
 
+config RTCARPLAY_WIFI_STA_MAINTENANCE
+    bool "Wi-Fi station maintenance for system updates"
+    default y
+    depends on RTCARPLAY_OTA
+    depends on AIC_WLAN_REALTEK || AIC_WLAN_AIC8800D40
+    help
+      Pause the CarPlay connection manager and use the WLAN station
+      interface for maintenance. Restore the selected CarPlay connection
+      policy when leaving station mode.
+
 config RTCARPLAY_INTERNET_PROBE_PATH
     string "HTTP 204 connectivity probe path"
     default "/generate_204"

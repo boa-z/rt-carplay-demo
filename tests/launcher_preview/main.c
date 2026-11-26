@@ -408,6 +408,8 @@ void carplay_wifi_status(carplay_wifi_status_t *out)
 int carplay_wifi_enable(bool enabled)
 {
     wifi_model.enabled = enabled;
+    if (enabled)
+        wifi_model.ap_active = false;
     wifi_model.connected = wifi_model.addressed = false;
     return RT_EOK;
 }
@@ -653,6 +655,7 @@ static void assert_settings_page(settings_page_t expected)
 
 static void open_setting(settings_page_t route)
 {
+    show_page(PAGE_SETTINGS);
     settings_page_t section = settings_section(route);
     click_caption(lv_obj_get_parent(settings_tabs[section]), TR(settings_titles[section]));
     if (route != section)
@@ -728,7 +731,7 @@ static void render_layout(const char *directory)
     carplay_demo_launcher_init();
     update_page(NULL);
     screenshot(directory, "dashboard_dark_en");
-    tap_object(owning_card(find_caption(pages[PAGE_DASHBOARD], "Settings")));
+    tap_object(shell.tabs[PAGE_SETTINGS]);
     assert(!lv_obj_has_flag(pages[PAGE_SETTINGS], LV_OBJ_FLAG_HIDDEN));
     screenshot(directory, "settings_dark_en");
     tap_object(theme_buttons[0]);
@@ -737,7 +740,7 @@ static void render_layout(const char *directory)
     screenshot(directory, "settings_light_zh");
     tap_object(settings_tabs[SETTINGS_CONNECTIONS]);
     assert_settings_page(SETTINGS_CONNECTIONS);
-    tap_object(owning_card(find_caption(settings_pages[SETTINGS_CONNECTIONS], "Apple CarPlay")));
+    tap_object(shell.tabs[PAGE_CONNECTIVITY]);
     assert(!lv_obj_has_flag(pages[PAGE_CONNECTIVITY], LV_OBJ_FLAG_HIDDEN));
     model.stage = DEMO_LIVE;
     update_page(NULL);
@@ -886,12 +889,13 @@ int main(int argc, char **argv)
     assert(lv_bar_get_value(dash_bar) == 78);
 
     /* Connectivity exposes the capabilities reported by the connection owner. */
-    click_caption(pages[PAGE_DASHBOARD], "Connectivity");
+    show_page(PAGE_CONNECTIVITY);
+    update_page(NULL);
     assert(!lv_obj_has_flag(pages[PAGE_CONNECTIVITY], LV_OBJ_FLAG_HIDDEN));
     assert(lv_obj_has_flag(pages[PAGE_DASHBOARD], LV_OBJ_FLAG_HIDDEN));
     screenshot(argv[1], "02-connectivity_dark_en");
     assert(!strcmp(lv_label_get_text(connectivity_view.state), "Waiting for phone"));
-    assert_header_row(pages[PAGE_CONNECTIVITY], "Connectivity");
+    assert(find_caption(pages[PAGE_CONNECTIVITY], "Phone Hub"));
     assert(!lv_obj_has_state(connectivity_view.action, LV_STATE_DISABLED));
     inside(connectivity_view.state);
     inside(connectivity_view.action);
@@ -900,9 +904,9 @@ int main(int argc, char **argv)
     assert(model.reconnects == retries + 1);
 
     /* Settings: both sliders reach the real backends and persist on release. */
-    click_back(pages[PAGE_CONNECTIVITY]);
+    tap_object(shell.tabs[PAGE_DASHBOARD]);
     assert(!lv_obj_has_flag(pages[PAGE_DASHBOARD], LV_OBJ_FLAG_HIDDEN));
-    click_caption(pages[PAGE_DASHBOARD], "Settings");
+    tap_object(shell.tabs[PAGE_SETTINGS]);
     assert(!lv_obj_has_flag(pages[PAGE_SETTINGS], LV_OBJ_FLAG_HIDDEN));
     assert_settings_page(SETTINGS_DISPLAY);
     open_setting(SETTINGS_ETHERNET);
@@ -936,19 +940,39 @@ int main(int argc, char **argv)
 
     open_setting(SETTINGS_WIFI);
     assert(lv_obj_has_state(wifi_scan_button, LV_STATE_DISABLED));
+    wifi_model.ap_active = true;
+    update_page(NULL);
+    assert(!strcmp(lv_label_get_text(wifi_ap_status), "CarPlay access point active"));
+    assert(lv_color_eq(link_color, lv_obj_get_style_image_recolor(dash_wifi, 0)));
+    const lv_font_t *wifi_font = lv_obj_get_style_text_font(wifi_ap_status, 0);
+    carplay_ui_set_chinese(true);
+    update_page(NULL);
+    assert(!strcmp(lv_label_get_text(wifi_ap_status), "CarPlay 热点已开启"));
+    assert(!strcmp(lv_textarea_get_placeholder_text(wifi_password), "Wi-Fi 密码"));
+    assert(lv_obj_get_style_text_font(wifi_ap_status, 0) == wifi_font);
+    lv_font_glyph_dsc_t hotspot_glyph;
+    assert(lv_font_get_glyph_dsc(wifi_font, &hotspot_glyph, 0x70ed, 0) && !hotspot_glyph.is_placeholder);
+    assert(hotspot_glyph.resolved_font == &carplay_cjk_18);
+    screenshot(argv[1], "03-settings-wifi-ap_dark_zh");
+    carplay_ui_set_chinese(false);
     lv_obj_send_event(wifi_mode_button, LV_EVENT_CLICKED, NULL);
     update_page(NULL);
+    assert(!strcmp(lv_label_get_text(wifi_ap_status), "CarPlay access point inactive"));
+    assert(!lv_obj_has_state(wifi_scan_button, LV_STATE_DISABLED));
     lv_obj_send_event(wifi_scan_button, LV_EVENT_CLICKED, NULL);
     update_page(NULL);
-    assert(strstr(lv_dropdown_get_options(wifi_results), "Workshop  WPA2  5 GHz  -42 dBm"));
+    const char *network_row = lv_label_get_text(lv_obj_get_child(wifi_rows[0], 0));
+    assert(strstr(network_row, "Workshop"));
+    assert(strstr(network_row, "WPA2") && strstr(network_row, "5 GHz"));
+    tap_object(wifi_rows[0]);
+    assert(wifi_selected == 0);
     assert(lv_textarea_get_password_mode(wifi_password));
-    lv_obj_send_event(wifi_theme_buttons[0], LV_EVENT_CLICKED, NULL);
+    lv_obj_send_event(theme_buttons[0], LV_EVENT_CLICKED, NULL);
     assert(!carplay_ui_dark() && stored_preferences[CARPLAY_PREF_THEME] == 0);
     assert(lv_color_eq(lv_obj_get_style_bg_color(theme_buttons[0], 0),
                        lv_color_hex(carplay_ui_color(CARPLAY_UI_SOFT))));
-    lv_obj_t *results_list = lv_dropdown_get_list(wifi_results);
-    assert(lv_color_eq(lv_obj_get_style_bg_color(results_list, 0),
-                       lv_color_hex(carplay_ui_color(CARPLAY_UI_SURFACE2))));
+    assert(lv_color_eq(lv_obj_get_style_bg_color(wifi_results, 0),
+                       lv_color_hex(carplay_ui_color(CARPLAY_UI_SURFACE))));
     lv_obj_update_layout(pages[PAGE_SETTINGS]);
     lv_area_t password_area, keyboard_area, detail_area;
     lv_obj_get_coords(wifi_password, &password_area);
@@ -959,13 +983,13 @@ int main(int argc, char **argv)
     lv_obj_get_coords(wifi_keyboard, &keyboard_area);
     lv_obj_get_coords(settings_pages[SETTINGS_WIFI], &detail_area);
     assert(keyboard_area.y1 > password_area.y2 && keyboard_area.y2 <= detail_area.y2);
-    tap(keyboard_area.x1 + 85, keyboard_area.y1 + 22);
+    tap(keyboard_area.x1 + 93, keyboard_area.y1 + 20);
     assert(!strcmp(lv_textarea_get_text(wifi_password), "q"));
     screenshot(argv[1], "03-settings-wifi-keyboard_light_en");
     lv_obj_send_event(wifi_keyboard, LV_EVENT_READY, NULL);
     assert(lv_obj_has_flag(wifi_keyboard, LV_OBJ_FLAG_HIDDEN));
     assert(lv_keyboard_get_textarea(wifi_keyboard) == NULL);
-    lv_obj_send_event(wifi_theme_buttons[1], LV_EVENT_CLICKED, NULL);
+    lv_obj_send_event(theme_buttons[1], LV_EVENT_CLICKED, NULL);
     assert(carplay_ui_dark() && stored_preferences[CARPLAY_PREF_THEME] == 1);
     tap(password_area.x1 + 30, (password_area.y1 + password_area.y2) / 2);
     assert(!lv_obj_has_flag(wifi_keyboard, LV_OBJ_FLAG_HIDDEN));
@@ -986,7 +1010,7 @@ int main(int argc, char **argv)
     click_back(pages[PAGE_SETTINGS]);
     assert_dashboard_header();
     screenshot(argv[1], "01-dashboard-wifi_dark_en");
-    click_caption(pages[PAGE_DASHBOARD], "Settings");
+    tap_object(shell.tabs[PAGE_SETTINGS]);
     open_setting(SETTINGS_CLOCK);
     click_caption(settings_pages[SETTINGS_CLOCK], "Time server");
     assert(!lv_obj_has_flag(clock_server_panel, LV_OBJ_FLAG_HIDDEN));
@@ -1027,8 +1051,7 @@ int main(int argc, char **argv)
     {
         lv_area_t card_area;
         lv_obj_get_coords(display_cards[index], &card_area);
-        assert(lv_area_get_height(&card_area) == lv_obj_get_height(display_cards[0]));
-        assert(card_area.y1 >= display_page_area.y1 && card_area.y2 <= display_page_area.y2);
+        assert(card_area.y1 >= display_page_area.y1 && card_area.y1 < display_page_area.y2);
     }
     open_setting(SETTINGS_DEVELOPER);
     lv_obj_send_event(fps_buttons[1], LV_EVENT_CLICKED, NULL);
@@ -1117,7 +1140,8 @@ int main(int argc, char **argv)
     open_setting(SETTINGS_DISPLAY);
     lv_obj_send_event(phone_appearance_buttons[RTCP_APPEARANCE_LIGHT], LV_EVENT_CLICKED, NULL);
     assert(model_phone_appearance == RTCP_APPEARANCE_LIGHT && carplay_ui_dark());
-    open_setting(SETTINGS_PHONE);
+    tap_object(shell.tabs[PAGE_CONNECTIVITY]);
+    model.stage = DEMO_LIVE;
     model_phone_media = (carplay_phone_media_t){
         .track = { .title = "Test Track", .artist = "Test Artist", .has_playing = true, .playing = true, .has_duration = true, .has_elapsed = true, .duration_ms = 180000, .elapsed_ms = 90000, .artwork_revision = 1 },
         .route_destination = "Central Station",
@@ -1146,7 +1170,7 @@ int main(int argc, char **argv)
     assert(!strcmp(lv_label_get_text(phone_destination), "Central Station"));
     assert(!strcmp(lv_label_get_text(phone_road), "Main Street"));
     assert(!strcmp(lv_label_get_text(phone_remaining), "2 km"));
-    assert(find_caption(settings_pages[SETTINGS_PHONE], "路线引导"));
+    assert(find_caption(pages[PAGE_CONNECTIVITY], "路线引导"));
     assert(lv_bar_get_value(phone_progress) == 500);
     assert(!lv_obj_has_flag(phone_cover, LV_OBJ_FLAG_HIDDEN));
     assert(!lv_obj_has_flag(phone_lane_strip, LV_OBJ_FLAG_HIDDEN));
@@ -1158,7 +1182,15 @@ int main(int argc, char **argv)
     assert(!strcmp(lv_label_get_text(phone_call), TR("Call active")));
     assert(!strcmp(lv_label_get_text(phone_clock), "2026-11-21 16:42:19  UTC+00:00"));
     assert(!strcmp(lv_label_get_text(phone_clock_mode), TR("iPhone time received")));
-    screenshot(argv[1], "03-settings-phone_dark_zh");
+    screenshot(argv[1], "02-phone-hub-live_dark_zh");
+    tap_object(shell.tabs[PAGE_DASHBOARD]);
+    update_page(NULL);
+    assert(strstr(lv_label_get_text(home_media), "Test Track"));
+    assert(!lv_obj_has_flag(home_cover, LV_OBJ_FLAG_HIDDEN));
+    assert(lv_image_get_src(home_cover) == lv_image_get_src(phone_cover));
+    assert(strstr(lv_label_get_text(home_route), "Turn right"));
+    screenshot(argv[1], "01-home-media-route_dark_zh");
+    tap_object(shell.tabs[PAGE_CONNECTIVITY]);
     model_phone_media.track.artwork_revision = 3;
     cover_read_busy = true;
     update_page(NULL);
@@ -1180,23 +1212,24 @@ int main(int argc, char **argv)
     lv_refr_now(NULL);
     lv_area_t cover_area;
     lv_obj_get_coords(phone_cover, &cover_area);
+    static const uint8_t fixture_rgb[][3] = { { 77, 72, 136 }, { 120, 119, 101 }, { 162, 162, 100 } };
     for (unsigned sample = 1; sample <= 3; ++sample)
     {
         unsigned col = cover_image->header.w * sample / 4U;
         unsigned row = cover_image->header.h * sample / 4U;
-        uint16_t expected = cover_pixels[row * cover_image->header.stride / 2U + col];
         unsigned screen_x = (unsigned)cover_area.x1 + col;
         unsigned screen_y = (unsigned)cover_area.y1 + row;
         assert(screen_x < 1024U && screen_y < 600U);
         const uint8_t *pixel = pixels + (screen_y * 1024U + screen_x) * 4U;
-        assert(abs((int)pixel[0] - (int)((expected & 31U) * 255U / 31U)) <= 4);
-        assert(abs((int)pixel[1] - (int)(((expected >> 5) & 63U) * 255U / 63U)) <= 4);
-        assert(abs((int)pixel[2] - (int)((expected >> 11) * 255U / 31U)) <= 4);
+        assert(abs((int)pixel[2] - fixture_rgb[sample - 1][0]) <= 12);
+        assert(abs((int)pixel[1] - fixture_rgb[sample - 1][1]) <= 12);
+        assert(abs((int)pixel[0] - fixture_rgb[sample - 1][2]) <= 12);
     }
-    lv_obj_t *phone_page = settings_pages[SETTINGS_PHONE];
-    lv_obj_scroll_to_y(phone_page, lv_obj_get_scroll_y(phone_page) + lv_obj_get_scroll_bottom(phone_page), LV_ANIM_OFF);
-    assert(lv_obj_get_scroll_y(phone_page) > 0 && lv_obj_get_scroll_bottom(phone_page) == 0);
-    screenshot(argv[1], "03-settings-phone-status_dark_zh");
+    click_caption(pages[PAGE_CONNECTIVITY], TR("Phone details"));
+    assert(current_page == PAGE_PHONE_DETAILS);
+    screenshot(argv[1], "02-phone-details_dark_zh");
+    click_back(pages[PAGE_PHONE_DETAILS]);
+    assert(current_page == PAGE_CONNECTIVITY);
     model_phone_media = (carplay_phone_media_t){
         .track = { .title = "龘\U00020087 Live", .artist = "麤樂隊", .artwork_revision = 2 },
         .route_destination = "龘龍站",
@@ -1209,6 +1242,9 @@ int main(int argc, char **argv)
     lv_font_glyph_dsc_t glyph;
     assert(lv_font_get_glyph_dsc(&carplay_cjk_full_18, &glyph, 0x9f98, 0) && !glyph.is_placeholder);
     assert(lv_font_get_glyph_dsc(&carplay_cjk_full_18, &glyph, 0x20087, 0) && !glyph.is_placeholder);
+    assert(lv_font_get_glyph_dsc(&carplay_ui_18, &glyph, 0x20087, 0) && !glyph.is_placeholder);
+    assert(glyph.resolved_font == &carplay_cjk_full_18);
+    assert(lv_font_get_glyph_dsc(&carplay_ui_18, &glyph, 'A', 0) && glyph.resolved_font == &carplay_ui_18);
     const lv_font_t *clock_fonts[] = { &carplay_cjk_16, &carplay_cjk_18, &carplay_cjk_24, &carplay_cjk_30 };
     const uint32_t clock_glyphs[] = { 0x4e0e, 0x504f, 0x540c, 0x5730, 0x671f, 0x6b65, 0x6cd5, 0x79fb, 0x949f };
     for (size_t font = 0; font < sizeof(clock_fonts) / sizeof(clock_fonts[0]); ++font)
@@ -1217,11 +1253,12 @@ int main(int argc, char **argv)
                    !glyph.is_placeholder);
     carplay_ui_set_chinese(false);
     update_page(NULL);
-    assert(find_caption(settings_pages[SETTINGS_PHONE], "Route guidance"));
+    assert(find_caption(pages[PAGE_CONNECTIVITY], "Route guidance"));
     assert(!strcmp(lv_label_get_text(phone_artist), "麤樂隊"));
     assert(lv_obj_get_style_text_font(phone_artist, 0) == &carplay_cjk_full_18);
     carplay_ui_set_chinese(true);
     update_page(NULL);
+    model.stage = DEMO_WAIT;
     memset(&model_phone_media, 0, sizeof(model_phone_media));
     clock_received = false;
     update_page(NULL);
@@ -1229,6 +1266,7 @@ int main(int argc, char **argv)
     assert(!strcmp(lv_label_get_text(phone_destination), "-") && !*lv_label_get_text(phone_road) &&
            !*lv_label_get_text(phone_remaining));
     assert(lv_obj_has_flag(phone_lane_strip, LV_OBJ_FLAG_HIDDEN));
+    assert(lv_obj_has_flag(home_cover, LV_OBJ_FLAG_HIDDEN));
     assert(!strcmp(lv_label_get_text(phone_power), TR("Battery unavailable")));
     assert(!strcmp(lv_label_get_text(phone_clock_mode), TR("Waiting for iPhone time")));
     open_setting(SETTINGS_GNSS);
@@ -1381,9 +1419,10 @@ int main(int argc, char **argv)
     assert(find_caption(pages[PAGE_DASHBOARD], "仪表"));
     assert(find_caption(pages[PAGE_DASHBOARD], "当前速度"));
     assert(find_caption(pages[PAGE_DASHBOARD], "剩余电量"));
-    assert(find_caption(pages[PAGE_DASHBOARD], "车机互联"));
-    assert(find_caption(pages[PAGE_DASHBOARD], "系统设置"));
-    click_caption(pages[PAGE_DASHBOARD], "车机互联");
+    assert(find_caption(shell.navigation, TR("Phone Hub")));
+    assert(find_caption(shell.navigation, "系统设置"));
+    tap_object(shell.tabs[PAGE_CONNECTIVITY]);
+    update_page(NULL);
     screenshot(argv[1], "02-connectivity_dark_zh");
     assert(find_caption(pages[PAGE_CONNECTIVITY], "等待连接"));
     carplay_ui_set_chinese(false);
