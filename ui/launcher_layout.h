@@ -48,6 +48,14 @@ void carplay_phone_hub_track(carplay_phone_hub_t *hub, const carplay_phone_track
 
 void carplay_phone_hub_build(carplay_phone_hub_t *hub, lv_obj_t *parent, lv_event_cb_t open_details);
 
+typedef struct
+{
+    lv_obj_t *caption, *power, *cellular, *call, *clock, *clock_mode, *transport;
+} carplay_phone_details_t;
+
+void carplay_launcher_header(lv_obj_t *parent, const char *title, lv_event_cb_t go_back);
+void carplay_phone_details_build(carplay_phone_details_t *view, lv_obj_t *parent, lv_event_cb_t go_back);
+
 lv_obj_t *carplay_connection_card_build(lv_obj_t *parent, lv_obj_t **state, lv_obj_t **transport);
 lv_obj_t *carplay_connection_action(lv_obj_t *card, lv_event_cb_t activate, lv_obj_t **label);
 

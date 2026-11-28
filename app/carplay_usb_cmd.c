@@ -302,6 +302,14 @@ static uint32_t lockdown_now_ms(void)
     return (uint32_t)rt_tick_get_millisecond();
 }
 
+#if defined(RTCP_LOCKDOWN_TIMING)
+static void lockdown_report_timing(void *context, const char *stage, uint32_t elapsed_ms, int result)
+{
+    (void)context;
+    rt_kprintf("carplay-pair: usb %s elapsed_ms=%u result=%d\n", stage, (unsigned)elapsed_ms, result);
+}
+#endif
+
 static uint32_t lockdown_clock_ms(void *user)
 {
     (void)user;
@@ -584,6 +592,9 @@ static int cmd_pair(void)
     config.close_connection = lockdown_close_connection;
     config.sleep_ms = lockdown_sleep;
     config.now_ms = lockdown_now_ms;
+#if defined(RTCP_LOCKDOWN_TIMING)
+    config.report_timing = lockdown_report_timing;
+#endif
     config.rng = lockdown_rng;
     config.label = "rt-carplay";
     config.record = &s_pair_record;
@@ -598,7 +609,10 @@ static int cmd_pair(void)
 
     char cache_path[128] = { 0 };
     bool cacheable = pair_cache_path(cache_path, sizeof(cache_path));
+    uint32_t cache_started = lockdown_now_ms();
     int cached = cacheable ? carplay_usb_pair_cache_load(cache_path, &s_pair_record) : RTCP_ENOENT;
+    rt_kprintf("carplay-pair: usb cache-load elapsed_ms=%u result=%d\n",
+               (unsigned)(lockdown_now_ms() - cache_started), cached);
     config.resume_pairing = cached == RTCP_OK;
     s_trust_cache = config.resume_pairing ? 2 : (cached == RTCP_ENOENT ? 1 : cached);
     rt_kprintf("[carplay_usb] trust cache=%s load=%d\n", config.resume_pairing ? "reuse" : "new", cached);
@@ -647,14 +661,12 @@ static int cmd_pair(void)
         cacheable = pair_cache_path(cache_path, sizeof(cache_path));
     if (cacheable && !config.resume_pairing)
     {
+        cache_started = lockdown_now_ms();
         int saved = carplay_usb_pair_cache_save(cache_path, &s_pair_record);
         s_trust_cache = saved == RTCP_OK ? 3 : saved;
-        rt_kprintf("[carplay_usb] trust cache save=%d\n", saved);
+        rt_kprintf("carplay-pair: usb cache-save elapsed_ms=%u result=%d\n",
+                   (unsigned)(lockdown_now_ms() - cache_started), saved);
     }
-    rt_kprintf("[carplay_usb] pair: host=%s system=%s wifi=%s\n",
-               s_lockdown_session.config.host_id,
-               s_lockdown_session.config.system_buid,
-               s_pair_record.wifi_address);
     rt_kprintf("[carplay_usb] pair: carkit port=%u service_tls=%u "
                "session_tls=%u\n",
                s_lockdown_session.service_port,

@@ -16,7 +16,7 @@ option(CARPLAY_BLUEZ "Build the Classic Bluetooth iAP2 transport" OFF)
 find_package(Threads REQUIRED)
 add_subdirectory("${RTCP_ROOT}" rt-carplay)
 add_executable(rt-carplay-demo platform/linux/main.c platform/linux/persistence.c
-    platform/linux/mfi.c platform/linux/gnss.c app/receiver_session.c app/connection_retry.c
+    platform/linux/mfi.c platform/linux/gnss.c platform/linux/boot_trace.c app/receiver_session.c app/connection_retry.c
     app/phone_track.c)
 target_include_directories(rt-carplay-demo PRIVATE app platform/linux)
 target_compile_options(rt-carplay-demo PRIVATE -Wall -Wextra -Werror)
@@ -63,11 +63,11 @@ if(CARPLAY_LVGL)
     add_subdirectory("${LVGL_ROOT}" lvgl EXCLUDE_FROM_ALL)
     target_include_directories(lvgl PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/platform/linux")
     target_sources(rt-carplay-demo PRIVATE platform/linux/launcher.c
-        ui/carplay_ui_theme.c ui/launcher_layout.c ui/settings_navigation.c
+        ui/carplay_ui_theme.c ui/launcher_layout.c ui/settings_navigation.c ui/connectivity_page.c
         ui/system_shell.c ui/ui_language.c ui/icons/carplay_icons.c ui/fonts/carplay_ui_17.c
         ui/vehicle_instruments.c ui/fonts/carplay_ui_21.c
         ui/fonts/carplay_display_58.c ui/fonts/carplay_display_220.c
-        ui/fonts/carplay_ui_15.c ui/fonts/carplay_ui_18.c ui/fonts/carplay_ui_34.c
+        ui/fonts/carplay_ui_14.c ui/fonts/carplay_ui_15.c ui/fonts/carplay_ui_18.c ui/fonts/carplay_ui_34.c
         ui/fonts/carplay_cjk_16.c ui/fonts/carplay_cjk_18.c
         ui/fonts/carplay_cjk_24.c ui/fonts/carplay_cjk_30.c ui/fonts/carplay_cjk_full_18.c)
     target_compile_definitions(rt-carplay-demo PRIVATE CARPLAY_LVGL)

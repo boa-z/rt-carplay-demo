@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #pragma once
 
-#include "connection_manager.h"
 #include "lvgl.h"
 
 typedef struct
@@ -13,7 +12,15 @@ typedef struct
     lv_obj_t *capabilities;
 } carplay_connectivity_view_t;
 
-void carplay_connectivity_build(carplay_connectivity_view_t *view, lv_obj_t *page);
-void carplay_connectivity_update(carplay_connectivity_view_t *view,
-                                 const demo_status_t *status);
-const char *carplay_connectivity_state(const demo_status_t *status);
+typedef struct
+{
+    const char *state;
+    const char *transport;
+    const char *availability;
+    bool resume, retry, actionable;
+} carplay_connectivity_snapshot_t;
+
+void carplay_connectivity_build(carplay_connectivity_view_t *view, lv_obj_t *page,
+                                lv_event_cb_t activate);
+void carplay_connectivity_update(const carplay_connectivity_view_t *view,
+                                 const carplay_connectivity_snapshot_t *snapshot);

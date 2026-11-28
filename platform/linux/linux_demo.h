@@ -26,6 +26,7 @@ typedef struct
     uint16_t width;
     uint16_t height;
     uint8_t fps;
+    bool fps_override;
     uint16_t port;
     bool wired;
     bool wireless;
@@ -71,6 +72,7 @@ typedef struct
 } demo_gnss_stream_t;
 
 extern volatile sig_atomic_t demo_stop;
+void demo_boot_mark(const char *stage);
 int demo_identity_open(demo_identity_t *identity, const char *directory,
                        rtcp_pairing_provider_t *pairing);
 int demo_mfi_open(const char *device);
@@ -104,6 +106,8 @@ void demo_wireless_discoverable(void);
 void demo_audio_open(const demo_options_t *options, rtcp_media_backend_t *media,
                      bool *playback, bool *capture);
 void demo_audio_close(void);
+void demo_audio_set_local_volume(unsigned percent);
+void demo_audio_set_mic_muted(bool muted);
 #endif
 #ifdef CARPLAY_AIC_MPP
 int demo_video_open(const demo_options_t *options, rtcp_media_backend_t *media);
@@ -118,6 +122,7 @@ typedef struct
     int (*set_projection)(bool enabled, void *context);
     void (*request_keyframe)(void *context);
     void (*send_touch)(const rtcp_touch_contact_t *contacts, void *context);
+    int (*set_appearance)(rtcp_appearance_setting_t appearance, void *context);
     void *context;
 } demo_launcher_commands_t;
 

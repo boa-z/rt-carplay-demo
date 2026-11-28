@@ -6,7 +6,9 @@
 #include <fcntl.h>
 #include <getopt.h>
 #include <ifaddrs.h>
+#include <linux/rtnetlink.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,6 +41,11 @@ static int launcher_set_projection(bool enabled, void *context)
 {
     rtcp_receiver_t *receiver = *(rtcp_receiver_t **)context;
     return rtcp_receiver_set_projection_enabled(receiver, enabled);
+}
+
+static int launcher_set_appearance(rtcp_appearance_setting_t appearance, void *context)
+{
+    return rtcp_receiver_set_appearance(*(rtcp_receiver_t **)context, appearance, false, false);
 }
 
 static void launcher_request_keyframe(void *context)
@@ -190,6 +197,35 @@ static bool lan_address(const char *interface, char address[64])
     return found;
 }
 
+static int watch_addresses(void)
+{
+    int fd = socket(AF_NETLINK, SOCK_RAW | SOCK_NONBLOCK | SOCK_CLOEXEC, NETLINK_ROUTE);
+    if (fd >= 0)
+    {
+        struct sockaddr_nl address = { .nl_family = AF_NETLINK, .nl_groups = RTMGRP_LINK | RTMGRP_IPV4_IFADDR };
+        if (bind(fd, (const struct sockaddr *)&address, sizeof(address)) != 0)
+        {
+            close(fd);
+            fd = -1;
+        }
+    }
+    return fd;
+}
+
+static bool addresses_changed(int fd)
+{
+    bool changed = false;
+    for (unsigned batch = 0; batch < 16; ++batch)
+    {
+        uint8_t buffer[4096];
+        ssize_t got = recv(fd, buffer, sizeof(buffer), 0);
+        if (got <= 0)
+            return changed || errno == ENOBUFS;
+        changed = true;
+    }
+    return changed;
+}
+
 static mdns_responder_t *advertise(const demo_endpoint_t *endpoint,
                                    const demo_identity_t *identity,
                                    const airplay_info_plist_config_t *info, uint16_t port)
@@ -284,40 +320,116 @@ static bool same_endpoint(const demo_endpoint_t *left, const demo_endpoint_t *ri
            !strcmp(left->address, right->address);
 }
 
-static int run(demo_options_t *options)
+typedef struct
+{
+    const demo_options_t *options;
+    demo_identity_t *identity;
+    rtcp_pairing_provider_t *pairing;
+    int *lock;
+    bool identity_ready;
+    int result;
+    atomic_bool finished;
+} demo_credentials_t;
+
+static void *prepare_credentials(void *data)
+{
+    demo_credentials_t *credentials = data;
+    const demo_options_t *options = credentials->options;
+    credentials->result = RTCP_EIO;
+    if (*credentials->lock < 0)
+        *credentials->lock = lock_directory(options->directory);
+    if (!credentials->identity_ready && *credentials->lock >= 0)
+    {
+        int status = demo_identity_open(credentials->identity, options->directory, credentials->pairing);
+        credentials->identity_ready = status == RTCP_OK;
+        if (status != RTCP_OK)
+            fprintf(stderr, "carplay: could not load identity and pair records (%d)\n", status);
+    }
+    if (credentials->identity_ready)
+    {
+        credentials->result = options->wired || options->wireless ? demo_mfi_open(options->i2c) : RTCP_OK;
+        if (credentials->result != RTCP_OK)
+            fprintf(stderr, "carplay: MFi coprocessor unavailable on %s\n", options->i2c);
+    }
+    atomic_store(&credentials->finished, true);
+    return NULL;
+}
+
+static int run(demo_options_t *options, int *state_lock)
 {
     rtcp_receiver_config_t config = { 0 };
     demo_identity_t identity = { 0 };
     rtcp_receiver_t *receiver = NULL;
     mdns_responder_t *mdns = NULL;
-    int result = demo_identity_open(&identity, options->directory, &config.platform.pairing);
-    if (result != RTCP_OK)
+    int route_watch = -1;
+    int result = RTCP_OK;
+#ifdef CARPLAY_LVGL
+    bool launcher_ready = !options->headless && demo_launcher_open(options) == RTCP_OK;
+    if (!options->headless && !launcher_ready)
+        fprintf(stderr, "carplay: local framebuffer unavailable\n");
+    const demo_launcher_commands_t launcher = {
+        .set_projection = launcher_set_projection,
+        .request_keyframe = launcher_request_keyframe,
+        .send_touch = launcher_send_touch,
+        .set_appearance = launcher_set_appearance,
+        .context = &receiver,
+    };
+    uint64_t receiver_generation = 0;
+#endif
+    demo_credentials_t credentials = {
+        .options = options,
+        .identity = &identity,
+        .pairing = &config.platform.pairing,
+        .lock = state_lock,
+    };
+    while (!demo_stop)
     {
-        fprintf(stderr, "carplay: could not load identity and pair records (%d)\n", result);
+#ifdef CARPLAY_LVGL
+        pthread_t startup;
+        atomic_store(&credentials.finished, false);
+        if (launcher_ready && pthread_create(&startup, NULL, prepare_credentials, &credentials) == 0)
+        {
+            while (!demo_stop && !atomic_load(&credentials.finished))
+            {
+                demo_launcher_step(&launcher, &(demo_launcher_snapshot_t){ 0 });
+                rtcp_os_linux.sleep_ms(10);
+            }
+            pthread_join(startup, NULL);
+        }
+        else
+#endif
+            prepare_credentials(&credentials);
+        if (credentials.result == RTCP_OK)
+            break;
+#ifdef CARPLAY_LVGL
+        if (launcher_ready)
+        {
+            uint64_t retry_at = rtcp_os_linux.now_ms() + 3000;
+            while (!demo_stop && rtcp_os_linux.now_ms() < retry_at)
+            {
+                demo_launcher_step(&launcher, &(demo_launcher_snapshot_t){ 0 });
+                rtcp_os_linux.sleep_ms(10);
+            }
+            continue;
+        }
+#endif
+        result = RTCP_EIO;
         goto done;
     }
-    if ((options->wired || options->wireless) && (result = demo_mfi_open(options->i2c)) != RTCP_OK)
+    if (demo_stop)
     {
-        fprintf(stderr, "carplay: MFi coprocessor unavailable on %s\n", options->i2c);
+        result = RTCP_OK;
         goto done;
     }
+    demo_boot_mark("receiver-identity");
     if (options->gnss && !demo_gnss_open(options->gnss))
         fprintf(stderr, "carplay: GNSS unavailable on %s\n", options->gnss);
-#ifdef CARPLAY_BLUEZ
-    if (options->wireless && (result = demo_wireless_configure(options, &identity)) != RTCP_OK)
-    {
-        fprintf(stderr, "carplay: invalid or unreadable AP configuration %s\n", options->ap_config);
-        goto done;
-    }
-#endif
-
-#ifdef CARPLAY_LVGL
-    if (!options->headless && (result = demo_launcher_open(options)) != RTCP_OK)
-        goto done;
-#endif
 #ifdef CARPLAY_AIC_MPP
-    if (!options->headless && (result = demo_video_open(options, &config.media)) != RTCP_OK)
-        goto done;
+    if (!options->headless && demo_video_open(options, &config.media) != RTCP_OK)
+    {
+        fprintf(stderr, "carplay: hardware video unavailable\n");
+        demo_video_close();
+    }
 #endif
     bool playback = false, capture = false;
 #ifdef CARPLAY_ALSA
@@ -325,7 +437,7 @@ static int run(demo_options_t *options)
         demo_audio_open(options, &config.media, &playback, &capture);
 #endif
 #ifdef CARPLAY_LVGL
-    if (!options->headless)
+    if (launcher_ready)
         demo_launcher_attach_media(&config.media);
 #endif
     airplay_info_plist_config_t info = {
@@ -361,42 +473,73 @@ static int run(demo_options_t *options)
     config.platform.os = &rtcp_os_linux;
     config.platform.info_plist = plist;
     config.port = options->port;
-#ifdef CARPLAY_USB
-    if (options->wired && (result = demo_wired_start(options, &identity)) != RTCP_OK)
-        goto done;
-#endif
     const carplay_session_callbacks_t callbacks = {
         .now_playing = demo_track_update,
 #ifdef CARPLAY_LVGL
-        .host_ui = options->headless ? NULL : demo_launcher_show_local,
+        .host_ui = launcher_ready ? demo_launcher_show_local : NULL,
 #endif
     };
-#ifdef CARPLAY_LVGL
-    const demo_launcher_commands_t launcher = {
-        .set_projection = launcher_set_projection,
-        .request_keyframe = launcher_request_keyframe,
-        .send_touch = launcher_send_touch,
-        .context = &receiver,
-    };
-    uint64_t receiver_generation = 0;
-#endif
     demo_endpoint_t active = { 0 }, candidate = { 0 };
     rtcp_receiver_state_t previous = { 0 };
+#ifdef CARPLAY_AIC_MPP
+    bool previous_projection = false;
+#endif
     carplay_connection_retry_t retry = { 0 };
     uint64_t advertise_after = 0;
+    uint64_t address_rescan = 0;
+    demo_endpoint_t lan = { 0 };
+    if (options->interface)
+    {
+        route_watch = watch_addresses();
+        snprintf(lan.interface, sizeof(lan.interface), "%s", options->interface);
+    }
+#ifdef CARPLAY_BLUEZ
+    bool wireless_ready = false;
+    uint64_t wireless_retry = 0;
+#endif
+#ifdef CARPLAY_USB
+    bool wired_ready = false;
+    uint64_t wired_retry = 0;
+#endif
     while (!demo_stop)
     {
+        uint64_t now = rtcp_os_linux.now_ms();
         demo_endpoint_t endpoint = { 0 };
 #ifdef CARPLAY_USB
-        if (options->wired)
+        if (options->wired && !wired_ready && now >= wired_retry)
+        {
+            wired_ready = demo_wired_start(options, &identity) == RTCP_OK;
+            if (!wired_ready)
+                fprintf(stderr, "carplay: cannot start USB host worker, retrying\n");
+            wired_retry = now + 3000;
+        }
+        if (wired_ready)
             demo_wired_snapshot(&endpoint);
 #endif
-        if (!endpoint.address[0] && (!options->wired || options->wireless) &&
-            lan_address(options->interface, endpoint.address))
+#ifdef CARPLAY_BLUEZ
+        if (options->wireless && !wireless_ready && now >= wireless_retry)
         {
-            endpoint.generation = 0;
-            snprintf(endpoint.interface, sizeof(endpoint.interface), "%s", options->interface);
+            wireless_ready = demo_wireless_configure(options, &identity) == RTCP_OK;
+            if (!wireless_ready)
+                fprintf(stderr, "carplay: waiting for valid AP configuration %s\n", options->ap_config);
+            else
+                address_rescan = 0;
+            wireless_retry = now + 1000;
         }
+#endif
+        if ((!options->wired
+#ifdef CARPLAY_BLUEZ
+             || wireless_ready
+#endif
+             ) &&
+            ((route_watch >= 0 && addresses_changed(route_watch)) || now >= address_rescan))
+        {
+            if (!lan_address(options->interface, lan.address))
+                lan.address[0] = '\0';
+            address_rescan = now + (route_watch >= 0 ? 5000 : 500);
+        }
+        if (!endpoint.address[0] && lan.address[0])
+            endpoint = lan;
 
         if (!same_endpoint(&candidate, &endpoint))
         {
@@ -423,8 +566,11 @@ static int run(demo_options_t *options)
             ++receiver_generation;
 #endif
             demo_track_update(&(rtcp_now_playing_details_t){ .invalidated = true }, NULL);
+            previous = (rtcp_receiver_state_t){ 0 };
+#ifdef CARPLAY_AIC_MPP
+            previous_projection = false;
+#endif
         }
-        uint64_t now = rtcp_os_linux.now_ms();
         if (!receiver && endpoint.address[0] && !carplay_retry_remaining(&retry, (uint32_t)now))
         {
             memcpy(active_interface, endpoint.interface, sizeof(active_interface));
@@ -451,6 +597,8 @@ static int run(demo_options_t *options)
 #endif
                 fprintf(stderr, "carplay: RTSP ready on %s [%s]:%u\n", active.interface,
                         active.address, rtcp_receiver_port(receiver));
+                demo_boot_mark(active.generation ? "wired-listener" : options->wireless ? "wireless-listener"
+                                                                                        : "lan-listener");
                 advertise_after = 0;
             }
         }
@@ -459,10 +607,12 @@ static int run(demo_options_t *options)
             mdns = advertise(&active, &identity, &info, rtcp_receiver_port(receiver));
             if (!mdns)
                 fprintf(stderr, "carplay: mDNS unavailable on %s\n", active.interface);
+            else
+                demo_boot_mark(options->wireless ? "wireless-mdns" : "lan-mdns");
             advertise_after = now + 2000;
         }
 #ifdef CARPLAY_BLUEZ
-        if (options->wireless)
+        if (wireless_ready)
             demo_wireless_step(receiver, active.address, mdns != NULL);
 #endif
         rtcp_receiver_state_t state = { 0 };
@@ -470,6 +620,9 @@ static int run(demo_options_t *options)
         {
             rtcp_receiver_poll(receiver, 5);
             rtcp_receiver_get_state(receiver, &state);
+            if (state.input_ready && !previous.input_ready)
+                demo_boot_mark(active.generation ? "wired-session" : options->wireless ? "wireless-session"
+                                                                                       : "lan-session");
         }
         else
             rtcp_os_linux.sleep_ms(10);
@@ -491,6 +644,10 @@ static int run(demo_options_t *options)
         if (receiver && demo_video_needs_keyframe())
             rtcp_receiver_request_screen_keyframe(receiver);
         projection = state.input_ready && demo_video_visible();
+        if (projection && !previous_projection)
+            demo_boot_mark(active.generation ? "wired-video" : options->wireless ? "wireless-video"
+                                                                                 : "lan-video");
+        previous_projection = projection;
 #endif
 #ifdef CARPLAY_LVGL
         const demo_launcher_snapshot_t snapshot = {
@@ -508,6 +665,8 @@ static int run(demo_options_t *options)
     }
     result = RTCP_OK;
 done:
+    if (route_watch >= 0)
+        close(route_watch);
 #ifdef CARPLAY_USB
     demo_wired_stop();
 #endif
@@ -643,6 +802,7 @@ int main(int argc, char **argv)
             if (!number(optarg, 60, &value) || (value != 30 && value != 60))
                 return 2;
             options.fps = (uint8_t)value;
+            options.fps_override = true;
             break;
         case 'h':
             usage(stdout);
@@ -675,14 +835,18 @@ int main(int argc, char **argv)
         int error = errno;
         fprintf(stderr, "carplay: cannot use state directory %s: %s\n", options.directory,
                 error == EWOULDBLOCK ? "state lock in use by another instance" : strerror(error));
-        return 1;
+#ifdef CARPLAY_LVGL
+        if (options.headless || (error != EROFS && error != EIO && error != ENOENT))
+#endif
+            return 1;
     }
     struct sigaction action = { .sa_handler = stop };
     sigemptyset(&action.sa_mask);
     sigaction(SIGINT, &action, NULL);
     sigaction(SIGTERM, &action, NULL);
     signal(SIGPIPE, SIG_IGN);
-    int result = run(&options);
-    close(lock);
+    int result = run(&options, &lock);
+    if (lock >= 0)
+        close(lock);
     return result == RTCP_OK ? 0 : 1;
 }

@@ -46,6 +46,20 @@ static const char introspection[] =
     "</interface>"
     "</node>";
 
+typedef enum
+{
+    RADIO_IDLE,
+    RADIO_POWER,
+    RADIO_AGENT,
+    RADIO_DEFAULT_AGENT,
+    RADIO_PROFILE,
+    RADIO_READY,
+    RADIO_PAIRABLE_TIMEOUT,
+    RADIO_DISCOVERABLE_TIMEOUT,
+    RADIO_PAIRABLE,
+    RADIO_DISCOVERABLE,
+} radio_step_t;
+
 static struct
 {
     GDBusConnection *bus;
@@ -53,7 +67,9 @@ static struct
     GDBusMethodInvocation *confirmation;
     guint profile, agent, owner_watch;
     bool profile_registered, agent_registered;
-    bool owner_changed, startup_discovery_opened;
+    bool owner_changed, profile_released, startup_discovery_opened, call_pending;
+    unsigned bus_generation;
+    radio_step_t step;
     char *bluez_owner;
     int fd, passkey;
     uint64_t deadline, retry;
@@ -72,31 +88,7 @@ static struct
 } radio = { .fd = -1, .passkey = -1 };
 
 static void bluetooth_stop(void);
-
-static GVariant *call(const char *path, const char *interface, const char *method, GVariant *value)
-{
-    return g_dbus_connection_call_sync(radio.bus, "org.bluez", path, interface, method, value,
-                                       NULL, G_DBUS_CALL_FLAGS_NONE, 750, NULL, NULL);
-}
-
-static bool register_bluez(const char *interface, const char *method, GVariant *value)
-{
-    GVariant *reply = call("/org/bluez", interface, method, value);
-    if (!reply)
-        return false;
-    g_variant_unref(reply);
-    return true;
-}
-
-static bool adapter_property(const char *name, GVariant *value)
-{
-    GVariant *reply = call(radio.adapter_path, "org.freedesktop.DBus.Properties", "Set",
-                           g_variant_new("(ssv)", "org.bluez.Adapter1", name, value));
-    if (!reply)
-        return false;
-    g_variant_unref(reply);
-    return true;
-}
+static void bluetooth_advance(void);
 
 void demo_wireless_confirm(bool accept)
 {
@@ -152,7 +144,7 @@ static void method(GDBusConnection *connection, const gchar *sender, const gchar
             radio.fd = fd;
         }
         else if (!strcmp(operation, "Release"))
-            radio.owner_changed = true;
+            radio.profile_released = true;
         else
         {
             const char *device;
@@ -192,40 +184,31 @@ static void method(GDBusConnection *connection, const gchar *sender, const gchar
     g_dbus_method_invocation_return_value(invocation, NULL);
 }
 
-static void owner_changed(GDBusConnection *connection, const gchar *sender, const gchar *object,
-                          const gchar *interface, const gchar *signal, GVariant *arguments,
-                          gpointer context)
+static void bluez_appeared(GDBusConnection *connection, const gchar *name, const gchar *owner, gpointer context)
 {
-    (void)connection;
-    (void)sender;
-    (void)object;
-    (void)interface;
-    (void)signal;
-    (void)context;
-    const char *name, *old_owner, *new_owner;
-    g_variant_get(arguments, "(&s&s&s)", &name, &old_owner, &new_owner);
     (void)name;
-    (void)old_owner;
-    if (g_strcmp0(new_owner, radio.bluez_owner))
-        radio.owner_changed = true;
+    (void)context;
+    bluetooth_stop();
+    g_set_object(&radio.bus, connection);
+    g_free(radio.bluez_owner);
+    radio.bluez_owner = g_strdup(owner);
+    radio.retry = 0;
+}
+
+static void bluez_vanished(GDBusConnection *connection, const gchar *name, gpointer context)
+{
+    (void)name;
+    (void)context;
+    radio.owner_changed = true;
+    bluetooth_stop();
+    g_set_object(&radio.bus, connection);
+    g_clear_pointer(&radio.bluez_owner, g_free);
+    radio.startup_discovery_opened = false;
 }
 
 static bool bluetooth_start(void)
 {
     static const GDBusInterfaceVTable methods = { .method_call = method };
-    radio.bus = g_bus_get_sync(G_BUS_TYPE_SYSTEM, NULL, NULL);
-    if (!radio.bus)
-        return false;
-    radio.owner_watch = g_dbus_connection_signal_subscribe(radio.bus, "org.freedesktop.DBus",
-                                                           "org.freedesktop.DBus", "NameOwnerChanged", "/org/freedesktop/DBus", "org.bluez",
-                                                           G_DBUS_SIGNAL_FLAGS_NONE, owner_changed, NULL, NULL);
-    GVariant *owner = g_dbus_connection_call_sync(radio.bus, "org.freedesktop.DBus", "/org/freedesktop/DBus",
-                                                  "org.freedesktop.DBus", "GetNameOwner", g_variant_new("(s)", "org.bluez"),
-                                                  G_VARIANT_TYPE("(s)"), G_DBUS_CALL_FLAGS_NONE, 750, NULL, NULL);
-    if (!owner)
-        return false;
-    g_variant_get(owner, "(s)", &radio.bluez_owner);
-    g_variant_unref(owner);
     radio.node = g_dbus_node_info_new_for_xml(introspection, NULL);
     if (!radio.node)
         return false;
@@ -233,13 +216,15 @@ static bool bluetooth_start(void)
                                                       &methods, NULL, NULL, NULL);
     radio.agent = g_dbus_connection_register_object(radio.bus, agent_path, radio.node->interfaces[1],
                                                     &methods, NULL, NULL, NULL);
-    if (!radio.profile || !radio.agent || !adapter_property("Powered", g_variant_new_boolean(true)))
+    if (!radio.profile || !radio.agent)
         return false;
-    radio.agent_registered = register_bluez("org.bluez.AgentManager1", "RegisterAgent",
-                                            g_variant_new("(os)", agent_path, "DisplayYesNo"));
-    if (!radio.agent_registered || !register_bluez("org.bluez.AgentManager1", "RequestDefaultAgent",
-                                                   g_variant_new("(o)", agent_path)))
-        return false;
+    radio.step = RADIO_POWER;
+    bluetooth_advance();
+    return true;
+}
+
+static GVariant *profile_arguments(void)
+{
     GVariantBuilder properties;
     g_variant_builder_init(&properties, G_VARIANT_TYPE_VARDICT);
     g_variant_builder_add(&properties, "{sv}", "Name", g_variant_new_string("Luban CarPlay"));
@@ -248,25 +233,114 @@ static bool bluetooth_start(void)
     g_variant_builder_add(&properties, "{sv}", "RequireAuthentication", g_variant_new_boolean(true));
     char *record = g_strdup_printf(service_record, uuid, (unsigned)RFCOMM_CHANNEL);
     g_variant_builder_add(&properties, "{sv}", "ServiceRecord", g_variant_new_take_string(record));
-    radio.profile_registered = register_bluez("org.bluez.ProfileManager1", "RegisterProfile",
-                                              g_variant_new("(os@a{sv})", profile_path, uuid, g_variant_builder_end(&properties)));
-    return radio.profile_registered;
+    return g_variant_new("(os@a{sv})", profile_path, uuid, g_variant_builder_end(&properties));
 }
 
 void demo_wireless_discoverable(void)
 {
-    if (!radio.profile_registered)
+    if (!radio.receiver || radio.step != RADIO_READY)
         return;
-    if (adapter_property("PairableTimeout", g_variant_new_uint32(120)) &&
-        adapter_property("DiscoverableTimeout", g_variant_new_uint32(120)) &&
-        adapter_property("Pairable", g_variant_new_boolean(true)) &&
-        adapter_property("Discoverable", g_variant_new_boolean(true)))
+    radio.step = RADIO_PAIRABLE_TIMEOUT;
+    bluetooth_advance();
+}
+
+static void bluetooth_reply(GObject *object, GAsyncResult *result, gpointer context)
+{
+    GVariant *reply = g_dbus_connection_call_finish(G_DBUS_CONNECTION(object), result, NULL);
+    bool succeeded = reply != NULL;
+    g_clear_pointer(&reply, g_variant_unref);
+    if (GPOINTER_TO_UINT(context) != radio.bus_generation)
+        return;
+    radio.call_pending = false;
+    if (!succeeded)
+    {
+        if (radio.step >= RADIO_PAIRABLE_TIMEOUT)
+        {
+            radio.step = RADIO_READY;
+            fprintf(stderr, "carplay: could not open Bluetooth pairing window\n");
+        }
+        else
+            bluetooth_stop();
+        radio.retry = rtcp_os_linux.now_ms() + 2000;
+        return;
+    }
+    if (radio.step == RADIO_AGENT)
+        radio.agent_registered = true;
+    if (radio.step == RADIO_POWER)
+        demo_boot_mark("bluetooth-powered");
+    if (radio.step == RADIO_PROFILE)
+    {
+        radio.profile_registered = true;
+        demo_boot_mark("bluetooth-profile");
+        fprintf(stderr, "carplay: BlueZ RFCOMM adapter ready\n");
+    }
+    if (radio.step == RADIO_DISCOVERABLE)
     {
         radio.startup_discovery_opened = true;
+        radio.step = RADIO_READY;
+        demo_boot_mark("wireless-pairing");
         fprintf(stderr, "carplay: Bluetooth pairing available for 120 seconds\n");
     }
     else
-        fprintf(stderr, "carplay: could not open Bluetooth pairing window\n");
+        ++radio.step;
+    bluetooth_advance();
+}
+
+static void bluetooth_advance(void)
+{
+    const char *path = "/org/bluez";
+    const char *interface = "org.bluez.AgentManager1";
+    const char *method_name;
+    const char *property = NULL;
+    GVariant *value;
+    switch (radio.step)
+    {
+    case RADIO_POWER:
+        property = "Powered";
+        value = g_variant_new_boolean(true);
+        break;
+    case RADIO_PAIRABLE_TIMEOUT:
+        property = "PairableTimeout";
+        value = g_variant_new_uint32(120);
+        break;
+    case RADIO_DISCOVERABLE_TIMEOUT:
+        property = "DiscoverableTimeout";
+        value = g_variant_new_uint32(120);
+        break;
+    case RADIO_PAIRABLE:
+        property = "Pairable";
+        value = g_variant_new_boolean(true);
+        break;
+    case RADIO_DISCOVERABLE:
+        property = "Discoverable";
+        value = g_variant_new_boolean(true);
+        break;
+    case RADIO_AGENT:
+        method_name = "RegisterAgent";
+        value = g_variant_new("(os)", agent_path, "DisplayYesNo");
+        break;
+    case RADIO_DEFAULT_AGENT:
+        method_name = "RequestDefaultAgent";
+        value = g_variant_new("(o)", agent_path);
+        break;
+    case RADIO_PROFILE:
+        interface = "org.bluez.ProfileManager1";
+        method_name = "RegisterProfile";
+        value = profile_arguments();
+        break;
+    default:
+        return;
+    }
+    if (property)
+    {
+        path = radio.adapter_path;
+        interface = "org.freedesktop.DBus.Properties";
+        method_name = "Set";
+        value = g_variant_new("(ssv)", "org.bluez.Adapter1", property, value);
+    }
+    radio.call_pending = true;
+    g_dbus_connection_call(radio.bus, radio.bluez_owner, path, interface, method_name, value, NULL,
+                           G_DBUS_CALL_FLAGS_NONE, 750, NULL, bluetooth_reply, GUINT_TO_POINTER(radio.bus_generation));
 }
 
 int demo_wireless_passkey(void)
@@ -437,24 +511,31 @@ void demo_wireless_step(rtcp_receiver_t *receiver, const char *ip, bool active)
         snprintf(radio.address, sizeof(radio.address), "%s", ip);
     g_main_context_iteration(NULL, false);
     uint64_t now = rtcp_os_linux.now_ms();
-    if (radio.owner_changed || (radio.bus && g_dbus_connection_is_closed(radio.bus)))
+    if (radio.profile_released)
         bluetooth_stop();
+    if (now >= radio.retry && (!radio.owner_watch || !radio.bus || g_dbus_connection_is_closed(radio.bus)))
+    {
+        if (radio.owner_watch)
+        {
+            g_bus_unwatch_name(radio.owner_watch);
+            bluez_vanished(NULL, NULL, NULL);
+        }
+        radio.owner_watch = g_bus_watch_name(G_BUS_TYPE_SYSTEM, "org.bluez", G_BUS_NAME_WATCHER_FLAGS_NONE,
+                                             bluez_appeared, bluez_vanished, NULL, NULL);
+        radio.retry = now + 2000;
+    }
     if (radio.confirmation && (!radio.receiver || now >= radio.deadline))
         demo_wireless_confirm(false);
-    if (radio.receiver && !radio.profile_registered && now >= radio.retry)
+    if (radio.bluez_owner && radio.step == RADIO_IDLE && now >= radio.retry)
     {
         if (!bluetooth_start())
         {
             bluetooth_stop();
-            radio.retry = now + 5000;
-        }
-        else
-        {
-            fprintf(stderr, "carplay: BlueZ RFCOMM adapter ready\n");
-            if (!radio.startup_discovery_opened)
-                demo_wireless_discoverable();
+            radio.retry = now + 2000;
         }
     }
+    if (radio.receiver && radio.step == RADIO_READY && !radio.startup_discovery_opened && now >= radio.retry)
+        demo_wireless_discoverable();
     if (!radio.receiver || radio.link_failed || (radio.handoff && !radio.tunnel_failed && iap2_session_is_authenticated(radio.tunnel) && iap2_session_identification_accepted(radio.tunnel)))
         rfcomm_close();
     if (radio.fd < 0)
@@ -531,31 +612,43 @@ int demo_wireless_configure(const demo_options_t *options, const demo_identity_t
 
 static void bluetooth_stop(void)
 {
+    ++radio.bus_generation;
     demo_wireless_confirm(false);
     rfcomm_close();
-    if (radio.profile_registered && !radio.owner_changed)
-        register_bluez("org.bluez.ProfileManager1", "UnregisterProfile", g_variant_new("(o)", profile_path));
-    if (radio.agent_registered && !radio.owner_changed)
-        register_bluez("org.bluez.AgentManager1", "UnregisterAgent", g_variant_new("(o)", agent_path));
+    if (radio.bus && radio.bluez_owner && !radio.owner_changed)
+    {
+        if (radio.profile_registered || (radio.call_pending && radio.step == RADIO_PROFILE))
+            g_dbus_connection_call(radio.bus, radio.bluez_owner, "/org/bluez", "org.bluez.ProfileManager1",
+                                   "UnregisterProfile", g_variant_new("(o)", profile_path), NULL,
+                                   G_DBUS_CALL_FLAGS_NONE, 750, NULL, NULL, NULL);
+        if (radio.agent_registered || (radio.call_pending && radio.step == RADIO_AGENT))
+            g_dbus_connection_call(radio.bus, radio.bluez_owner, "/org/bluez", "org.bluez.AgentManager1",
+                                   "UnregisterAgent", g_variant_new("(o)", agent_path), NULL,
+                                   G_DBUS_CALL_FLAGS_NONE, 750, NULL, NULL, NULL);
+    }
     if (radio.profile)
         g_dbus_connection_unregister_object(radio.bus, radio.profile);
     if (radio.agent)
         g_dbus_connection_unregister_object(radio.bus, radio.agent);
-    if (radio.owner_watch)
-        g_dbus_connection_signal_unsubscribe(radio.bus, radio.owner_watch);
     if (radio.node)
         g_dbus_node_info_unref(radio.node);
-    g_clear_object(&radio.bus);
-    g_clear_pointer(&radio.bluez_owner, g_free);
-    radio.profile = radio.agent = radio.owner_watch = 0;
+    radio.profile = radio.agent = 0;
     radio.profile_registered = radio.agent_registered = false;
     radio.owner_changed = false;
+    radio.profile_released = false;
+    radio.call_pending = false;
+    radio.step = RADIO_IDLE;
     radio.node = NULL;
 }
 
 void demo_wireless_close(void)
 {
     radio.receiver = NULL;
+    if (radio.owner_watch)
+        g_bus_unwatch_name(radio.owner_watch);
+    radio.owner_watch = 0;
     bluetooth_stop();
+    g_clear_object(&radio.bus);
+    g_clear_pointer(&radio.bluez_owner, g_free);
     tunnel_stop(NULL);
 }

@@ -656,7 +656,7 @@ static void assert_settings_page(settings_page_t expected)
 static void open_setting(settings_page_t route)
 {
     show_page(PAGE_SETTINGS);
-    settings_page_t section = settings_section(route);
+    settings_page_t section = carplay_settings_section(route);
     click_caption(lv_obj_get_parent(settings_tabs[section]), TR(settings_titles[section]));
     if (route != section)
         click_caption(settings_pages[section], TR(settings_titles[route]));

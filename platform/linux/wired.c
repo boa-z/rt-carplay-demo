@@ -23,6 +23,12 @@
 
 typedef struct
 {
+    uint32_t elapsed_ms;
+    unsigned calls;
+} random_timing_t;
+
+typedef struct
+{
     libusb_device_handle *handle;
     rtcp_usbmux_host_t mux;
     rtcp_lockdown_session_t lockdown;
@@ -35,6 +41,7 @@ typedef struct
     bool link_failed;
     char path[64];
     char address[64];
+    random_timing_t random_timing;
 } wired_phone_t;
 
 static pthread_t worker;
@@ -45,6 +52,9 @@ static demo_endpoint_t endpoint;
 static uint64_t endpoint_generation;
 static const demo_options_t *options;
 static const demo_identity_t *identity;
+static pthread_t key_worker;
+static bool key_worker_started;
+static rtcp_pair_keys_t *prepared_keys;
 
 static uint32_t now_ms(void)
 {
@@ -133,8 +143,67 @@ static void stream_close(void *context, const rtcp_stream_t *stream)
 
 static int random_bytes(void *context, uint8_t *bytes, size_t length)
 {
+    random_timing_t *timing = context;
+    uint32_t start = now_ms();
+    bool ready = !atomic_load(&worker_stop) && rtcp_os_linux.random(bytes, length);
+    if (timing)
+    {
+        ++timing->calls;
+        timing->elapsed_ms += now_ms() - start;
+    }
+    return ready ? 0 : -1;
+}
+
+static void pair_timing(void *context, const char *stage, uint32_t elapsed_ms, int result)
+{
+    const char *origin = context ? "usb" : "background";
+    fprintf(stderr, "carplay-pair: %s %s elapsed_ms=%u result=%d\n", origin, stage, elapsed_ms, result);
+}
+
+static void *generate_keys(void *context)
+{
     (void)context;
-    return rtcp_os_linux.random(bytes, length) ? 0 : -1;
+    (void)nice(10);
+    const rtcp_pair_profile_t profile = { now_ms, pair_timing, NULL };
+    rtcp_pair_keys_generate(&prepared_keys, random_bytes, NULL, &profile);
+    return NULL;
+}
+
+static rtcp_pair_keys_t *take_keys(void *context)
+{
+    if (key_worker_started)
+    {
+        uint32_t start = now_ms();
+        pthread_join(key_worker, NULL);
+        key_worker_started = false;
+        pair_timing(context, "prepared-rsa-wait", now_ms() - start, prepared_keys ? RTCP_OK : RTCP_ENOENT);
+    }
+    rtcp_pair_keys_t *keys = prepared_keys;
+    prepared_keys = NULL;
+    return keys;
+}
+
+static bool first_pairing(void)
+{
+    if (getenv("CARPLAY_SYNC_PAIR_KEYS"))
+        return false;
+    DIR *directory = opendir(options->directory);
+    if (!directory)
+        return false;
+    bool found = false;
+    struct dirent *entry;
+    while ((entry = readdir(directory)))
+    {
+        const char *name = entry->d_name;
+        size_t length = strlen(name);
+        if (length > 9 && !strncmp(name, "usb-", 4) && !strcmp(name + length - 5, ".pair"))
+        {
+            found = true;
+            break;
+        }
+    }
+    closedir(directory);
+    return !found;
 }
 
 static void sleep_retry(void *context, uint32_t ms)
@@ -164,13 +233,21 @@ static int pair(wired_phone_t *phone, uint8_t serial_index)
 {
     rtcp_usbmux_transport_t transport = { bulk_send, bulk_receive, phone };
     rtcp_usbmux_init(&phone->mux, &transport);
-    int result = rtcp_usbmux_start(&phone->mux, now_ms());
+    uint32_t start = now_ms();
+    int result = rtcp_usbmux_start(&phone->mux, start);
+    pair_timing(phone, "usbmux-start", now_ms() - start, result);
     if (result != RTCP_OK)
         return result;
     char path[256];
+    start = now_ms();
     bool persist = pair_path(phone, serial_index, path);
+    pair_timing(phone, "serial", now_ms() - start, persist ? RTCP_OK : RTCP_ENOENT);
+    start = now_ms();
     int cached = persist ? carplay_usb_pair_cache_load(path, &phone->record) : RTCP_ENOENT;
-    if (cached != RTCP_OK && cached != RTCP_ENOENT)
+    pair_timing(phone, "cache-load", now_ms() - start, cached);
+    if (cached == RTCP_EINVAL)
+        fprintf(stderr, "carplay: invalid USB trust cache, requesting fresh trust\n");
+    else if (cached != RTCP_OK && cached != RTCP_ENOENT)
         return cached;
     rtcp_lockdown_session_config_t config = {
         .open_connection = stream_open,
@@ -178,6 +255,7 @@ static int pair(wired_phone_t *phone, uint8_t serial_index)
         .connection_user = phone,
         .sleep_ms = sleep_retry,
         .rng = random_bytes,
+        .rng_context = &phone->random_timing,
         .label = "rt-carplay",
         .record = &phone->record,
         .resume_pairing = cached == RTCP_OK,
@@ -185,7 +263,10 @@ static int pair(wired_phone_t *phone, uint8_t serial_index)
         .pair_retry_ms = 1000,
         .pair_attempts = 30,
         .now_ms = now_ms,
+        .report_timing = pair_timing,
+        .take_keys = take_keys,
     };
+    start = now_ms();
     result = rtcp_lockdown_session_open(&phone->lockdown, &config);
     const char *error = phone->lockdown.remote_error;
     if (result != RTCP_OK && config.resume_pairing &&
@@ -193,11 +274,21 @@ static int pair(wired_phone_t *phone, uint8_t serial_index)
         (!strcmp(error, "InvalidHostID") || !strcmp(error, "InvalidPairRecord") ||
          !strcmp(error, "MissingPairRecord")))
     {
+        mbedtls_platform_zeroize(&phone->record, sizeof(phone->record));
         config.resume_pairing = false;
         result = rtcp_lockdown_session_open(&phone->lockdown, &config);
     }
-    if (result == RTCP_OK && persist && !config.resume_pairing)
-        result = carplay_usb_pair_cache_save(path, &phone->record);
+    pair_timing(phone, config.resume_pairing ? "resume" : "first-pair", now_ms() - start, result);
+    fprintf(stderr, "carplay-pair: usb entropy elapsed_ms=%u calls=%u\n",
+            phone->random_timing.elapsed_ms, phone->random_timing.calls);
+    if (phone->lockdown.paired && persist && !config.resume_pairing)
+    {
+        start = now_ms();
+        int saved = carplay_usb_pair_cache_save(path, &phone->record);
+        pair_timing(phone, "cache-save", now_ms() - start, saved);
+        if (saved != RTCP_OK)
+            fprintf(stderr, "carplay: USB trust active but could not be persisted\n");
+    }
     if (result != RTCP_OK)
         fprintf(stderr, "carplay: Lockdown %s/%s failed (%d, %s)\n",
                 rtcp_lockdown_stage_name(phone->lockdown.stage), phone->lockdown.operation ? phone->lockdown.operation : "unknown", result, *error ? error : "no device error");
@@ -451,6 +542,15 @@ static void serve(wired_phone_t *phone, int network_interface)
     iap2_session_destroy(session);
 }
 
+static int usb_changed(libusb_context *usb, libusb_device *device, libusb_hotplug_event event, void *context)
+{
+    (void)usb;
+    (void)device;
+    (void)event;
+    *(int *)context = 1;
+    return 0;
+}
+
 static void *work(void *context)
 {
     libusb_context *usb = context;
@@ -460,8 +560,17 @@ static void *work(void *context)
         libusb_exit(usb);
         return NULL;
     }
+    int changed = 0;
+    libusb_hotplug_callback_handle callback;
+    bool watching = libusb_has_capability(LIBUSB_CAP_HAS_HOTPLUG) &&
+                    libusb_hotplug_register_callback(usb, LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED | LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT,
+                                                     0, 0x05ac, LIBUSB_HOTPLUG_MATCH_ANY, LIBUSB_HOTPLUG_MATCH_ANY,
+                                                     usb_changed, &changed, &callback) == LIBUSB_SUCCESS;
+    demo_boot_mark("usb-watch");
+    key_worker_started = first_pairing() && pthread_create(&key_worker, NULL, generate_keys, NULL) == 0;
     while (!atomic_load(&worker_stop))
     {
+        changed = 0;
         libusb_device **devices;
         ssize_t count = libusb_get_device_list(usb, &devices);
         if (count < 0)
@@ -469,6 +578,7 @@ static void *work(void *context)
             sleep_retry(NULL, 1000);
             continue;
         }
+        bool phone_found = false;
         for (ssize_t index = 0; index < count && !atomic_load(&worker_stop); ++index)
         {
             struct libusb_device_descriptor descriptor;
@@ -476,10 +586,12 @@ static void *work(void *context)
             if (libusb_get_device_descriptor(device, &descriptor) != 0 || descriptor.idVendor != 0x05ac ||
                 descriptor.idProduct < 0x1200 || descriptor.idProduct >= 0x1300)
                 continue;
+            phone_found = true;
             memset(phone, 0, sizeof(*phone));
             phone->mux_interface = -1;
             if (libusb_open(device, &phone->handle) != 0)
                 continue;
+            demo_boot_mark("usb-phone");
             int interface;
             if (configure(phone, device, &interface) && pair(phone, descriptor.iSerialNumber) == RTCP_OK)
                 serve(phone, interface);
@@ -493,8 +605,26 @@ static void *work(void *context)
             libusb_close(phone->handle);
         }
         libusb_free_device_list(devices, 1);
-        sleep_retry(NULL, 1000);
+        uint32_t retry_at = now_ms();
+        if (watching)
+        {
+            while (!changed && !atomic_load(&worker_stop) && (!phone_found || now_ms() - retry_at < 1000))
+            {
+                struct timeval timeout = { .tv_usec = 250000 };
+                if (libusb_handle_events_timeout_completed(usb, &timeout, &changed) < 0)
+                {
+                    libusb_hotplug_deregister_callback(usb, callback);
+                    watching = false;
+                    break;
+                }
+            }
+        }
+        if (!watching)
+            sleep_retry(NULL, 1000);
     }
+    if (watching)
+        libusb_hotplug_deregister_callback(usb, callback);
+    rtcp_pair_keys_free(take_keys(NULL));
     free(phone);
     libusb_exit(usb);
     return NULL;

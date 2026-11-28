@@ -36,12 +36,12 @@ int carplay_usb_pair_cache_load(const char *path, rtcp_pair_record_t *record)
             ret = RTCP_ENOENT;
         else if (n != SIZE || memcmp(blob, "RCPUSB01", 8) ||
                  read32(blob + 8) != sizeof(*record) || read32(blob + 12) != checksum(blob + HEADER, sizeof(*record)))
-            ret = RTCP_EIO;
+            ret = RTCP_EINVAL;
         else
         {
             memcpy(record, blob + HEADER, sizeof(*record));
             if (!rtcp_pair_record_valid(record))
-                ret = RTCP_EIO;
+                ret = RTCP_EINVAL;
         }
     }
     if (ret != RTCP_OK)

@@ -62,6 +62,19 @@ static struct
     bool running;
 } microphone = { .fd = -1 };
 
+static atomic_uint local_volume = 100;
+static atomic_bool mic_muted;
+
+void demo_audio_set_local_volume(unsigned percent)
+{
+    atomic_store(&local_volume, percent);
+}
+
+void demo_audio_set_mic_muted(bool muted)
+{
+    atomic_store(&mic_muted, muted);
+}
+
 static snd_pcm_t *open_pcm(const char *name, snd_pcm_stream_t direction, unsigned rate, unsigned channels)
 {
     snd_pcm_t *pcm;
@@ -192,7 +205,7 @@ static void *play(void *context)
         rtcp_audio_focus_t focus = player.focus;
         pthread_mutex_unlock(&player.mutex);
 
-        rtcp_audio_mixer_master(player.mixer, gain, muted);
+        rtcp_audio_mixer_master(player.mixer, gain * atomic_load(&local_volume) / 100, muted);
         rtcp_audio_mixer_duck(player.mixer, ducked);
         rtcp_audio_focus_policy_t policy;
         rtcp_audio_focus_policy(&focus, &policy);
@@ -259,6 +272,8 @@ static void *capture(void *context)
         offset += (size_t)got;
         if (offset == frames)
         {
+            if (atomic_load(&mic_muted))
+                memset(samples, 0, frames * channels * sizeof(*samples));
             int encoded = airplay_audio_sender_encode(microphone.sender, samples, frames, false,
                                                       datagram, sizeof(datagram));
             if (encoded > 0)

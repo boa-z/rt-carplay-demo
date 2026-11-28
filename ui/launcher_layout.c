@@ -17,6 +17,41 @@ LV_FONT_DECLARE(carplay_cjk_full_18);
 LV_FONT_DECLARE(carplay_display_58);
 LV_FONT_DECLARE(carplay_display_220);
 
+void carplay_launcher_header(lv_obj_t *parent, const char *title, lv_event_cb_t go_back)
+{
+    lv_obj_t *back = carplay_launcher_panel(parent, 20, 12, 64, 64, 8, CARPLAY_STYLE_CARD_ALT);
+    lv_obj_set_style_bg_opa(back, LV_OPA_TRANSP, LV_STATE_DEFAULT);
+    carplay_ui_style_part(back, CARPLAY_STYLE_CARD_ALT, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(back, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_add_flag(back, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(back, go_back, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *arrow = lv_image_create(back);
+    lv_image_set_src(arrow, &carplay_icon_arrow_left_22);
+    lv_obj_remove_flag(arrow, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    carplay_ui_style(arrow, CARPLAY_STYLE_ICON_TEXT);
+    lv_obj_center(arrow);
+    lv_obj_t *heading = carplay_launcher_label(parent, title, 0, 0, 700, &carplay_ui_34, CARPLAY_STYLE_TEXT);
+    lv_obj_align_to(heading, back, LV_ALIGN_OUT_RIGHT_MID, 12, 0);
+    carplay_launcher_panel(parent, 32, 83, 960, 1, 0, CARPLAY_STYLE_LINE_BORDER);
+}
+
+void carplay_phone_details_build(carplay_phone_details_t *view, lv_obj_t *parent, lv_event_cb_t go_back)
+{
+    carplay_launcher_header(parent, "Phone details", go_back);
+    lv_obj_t *card = carplay_launcher_panel(parent, 24, 112, 976, 222, 12, CARPLAY_STYLE_CARD);
+    view->caption = carplay_launcher_label(card, "", 24, 12, 579, &carplay_cjk_full_18, CARPLAY_STYLE_MUTED);
+    view->power = carplay_launcher_label(card, "", 24, 42, 265, &carplay_cjk_full_18, CARPLAY_STYLE_TEXT);
+    view->cellular = carplay_launcher_label(card, "", 302, 42, 301, &carplay_cjk_full_18, CARPLAY_STYLE_TEXT);
+    view->call = carplay_launcher_label(card, "", 24, 72, 579, &carplay_cjk_full_18, CARPLAY_STYLE_TEXT);
+    lv_label_set_long_mode(view->power, LV_LABEL_LONG_DOT);
+    lv_label_set_long_mode(view->cellular, LV_LABEL_LONG_DOT);
+    carplay_launcher_panel(card, 24, 102, 579, 1, 0, CARPLAY_STYLE_LINE_BORDER);
+    view->clock = carplay_launcher_label(card, "", 24, 115, 325, &carplay_ui_18, CARPLAY_STYLE_TEXT);
+    view->clock_mode = carplay_launcher_label(card, "", 349, 115, 254, &carplay_cjk_full_18, CARPLAY_STYLE_MUTED);
+    lv_obj_set_style_text_align(view->clock_mode, LV_TEXT_ALIGN_RIGHT, 0);
+    view->transport = carplay_launcher_label(card, "", 24, 155, 579, &carplay_ui_18, CARPLAY_STYLE_TEXT);
+}
+
 static void set_track_text(lv_obj_t *label, const char *value)
 {
     if (strcmp(lv_label_get_text(label), value) != 0)
