@@ -77,6 +77,6 @@ static void run_benchmark(void)
     start = timestamp_ms();
     update_phone_cover(3);
     printf("jpeg_read_decode_ms=%.3f\n", timestamp_ms() - start);
-    assert(!lv_obj_has_flag(phone_cover, LV_OBJ_FLAG_HIDDEN));
+    assert(!lv_obj_has_flag(phone_hub.cover, LV_OBJ_FLAG_HIDDEN));
 #endif
 }

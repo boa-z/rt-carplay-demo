@@ -880,13 +880,13 @@ int main(int argc, char **argv)
     update_page(NULL);
     lv_color_t link_color = lv_obj_get_style_image_recolor(dash_ethernet, 0);
     assert(!lv_color_eq(disconnected_color, link_color));
-    assert(!strcmp(lv_label_get_text(dash_speed), "26"));
-    assert(!strcmp(lv_label_get_text(dash_soc), "78"));
-    assert(!lv_obj_has_flag(dash_note, LV_OBJ_FLAG_HIDDEN));
-    inside(dash_speed);
-    inside(dash_soc);
-    inside(dash_bar);
-    assert(lv_bar_get_value(dash_bar) == 78);
+    assert(!strcmp(lv_label_get_text(dashboard.speed), "26"));
+    assert(!strcmp(lv_label_get_text(dashboard.charge), "78"));
+    assert(!lv_obj_has_flag(dashboard.note, LV_OBJ_FLAG_HIDDEN));
+    inside(dashboard.speed);
+    inside(dashboard.charge);
+    inside(dashboard.charge_bar);
+    assert(lv_bar_get_value(dashboard.charge_bar) == 78);
 
     /* Connectivity exposes the capabilities reported by the connection owner. */
     show_page(PAGE_CONNECTIVITY);
@@ -1164,19 +1164,19 @@ int main(int argc, char **argv)
     };
     clock_received = true;
     update_page(NULL);
-    assert(!strcmp(lv_label_get_text(phone_title), "Test Track"));
-    assert(!strcmp(lv_label_get_text(phone_artist), "Test Artist"));
-    assert(!strcmp(lv_label_get_text(phone_playback), "播放中"));
-    assert(!strcmp(lv_label_get_text(phone_destination), "Central Station"));
-    assert(!strcmp(lv_label_get_text(phone_road), "Main Street"));
-    assert(!strcmp(lv_label_get_text(phone_remaining), "2 km"));
+    assert(!strcmp(lv_label_get_text(phone_hub.title), "Test Track"));
+    assert(!strcmp(lv_label_get_text(phone_hub.artist), "Test Artist"));
+    assert(!strcmp(lv_label_get_text(phone_hub.playback), "播放中"));
+    assert(!strcmp(lv_label_get_text(phone_hub.destination), "Central Station"));
+    assert(!strcmp(lv_label_get_text(phone_hub.road), "Main Street"));
+    assert(!strcmp(lv_label_get_text(phone_hub.remaining), "2 km"));
     assert(find_caption(pages[PAGE_CONNECTIVITY], "路线引导"));
-    assert(lv_bar_get_value(phone_progress) == 500);
-    assert(!lv_obj_has_flag(phone_cover, LV_OBJ_FLAG_HIDDEN));
-    assert(!lv_obj_has_flag(phone_lane_strip, LV_OBJ_FLAG_HIDDEN));
-    assert(!strcmp(lv_label_get_text(phone_turn_distance), "400 m"));
-    assert(strstr(lv_label_get_text(phone_maneuvers[0]), "Turn right"));
-    assert(strstr(lv_label_get_text(phone_maneuvers[1]), "Keep left"));
+    assert(lv_bar_get_value(phone_hub.progress) == 500);
+    assert(!lv_obj_has_flag(phone_hub.cover, LV_OBJ_FLAG_HIDDEN));
+    assert(!lv_obj_has_flag(phone_hub.lane_strip, LV_OBJ_FLAG_HIDDEN));
+    assert(!strcmp(lv_label_get_text(phone_hub.turn_distance), "400 m"));
+    assert(strstr(lv_label_get_text(phone_hub.maneuvers[0]), "Turn right"));
+    assert(strstr(lv_label_get_text(phone_hub.maneuvers[1]), "Keep left"));
     assert(strstr(lv_label_get_text(phone_power), "75%"));
     assert(strstr(lv_label_get_text(phone_cellular), "Preview Wireless"));
     assert(!strcmp(lv_label_get_text(phone_call), TR("Call active")));
@@ -1185,24 +1185,24 @@ int main(int argc, char **argv)
     screenshot(argv[1], "02-phone-hub-live_dark_zh");
     tap_object(shell.tabs[PAGE_DASHBOARD]);
     update_page(NULL);
-    assert(strstr(lv_label_get_text(home_media), "Test Track"));
-    assert(!lv_obj_has_flag(home_cover, LV_OBJ_FLAG_HIDDEN));
-    assert(lv_image_get_src(home_cover) == lv_image_get_src(phone_cover));
-    assert(strstr(lv_label_get_text(home_route), "Turn right"));
+    assert(strstr(lv_label_get_text(dashboard.media), "Test Track"));
+    assert(!lv_obj_has_flag(dashboard.cover, LV_OBJ_FLAG_HIDDEN));
+    assert(lv_image_get_src(dashboard.cover) == lv_image_get_src(phone_hub.cover));
+    assert(strstr(lv_label_get_text(dashboard.route), "Turn right"));
     screenshot(argv[1], "01-home-media-route_dark_zh");
     tap_object(shell.tabs[PAGE_CONNECTIVITY]);
     model_phone_media.track.artwork_revision = 3;
     cover_read_busy = true;
     update_page(NULL);
-    assert(!lv_obj_has_flag(phone_cover, LV_OBJ_FLAG_HIDDEN));
+    assert(!lv_obj_has_flag(phone_hub.cover, LV_OBJ_FLAG_HIDDEN));
     cover_read_busy = false;
     update_page(NULL);
-    assert(!lv_obj_has_flag(phone_cover, LV_OBJ_FLAG_HIDDEN));
-    assert(lv_obj_has_flag(phone_cover_placeholder, LV_OBJ_FLAG_HIDDEN));
-    const lv_image_dsc_t *cover_image = lv_image_get_src(phone_cover);
+    assert(!lv_obj_has_flag(phone_hub.cover, LV_OBJ_FLAG_HIDDEN));
+    assert(lv_obj_has_flag(phone_hub.cover_placeholder, LV_OBJ_FLAG_HIDDEN));
+    const lv_image_dsc_t *cover_image = lv_image_get_src(phone_hub.cover);
     assert(cover_image->header.cf == LV_COLOR_FORMAT_RGB565);
     assert(cover_image->header.w == 96U && cover_image->header.h == 52U);
-    assert(lv_image_get_scale(phone_cover) == LV_SCALE_NONE);
+    assert(lv_image_get_scale(phone_hub.cover) == LV_SCALE_NONE);
     const uint16_t *cover_pixels = (const uint16_t *)cover_image->data;
     unsigned colors = 0;
     for (uint32_t row = 0; row < cover_image->header.h; ++row)
@@ -1211,7 +1211,7 @@ int main(int argc, char **argv)
     assert(colors > 100U);
     lv_refr_now(NULL);
     lv_area_t cover_area;
-    lv_obj_get_coords(phone_cover, &cover_area);
+    lv_obj_get_coords(phone_hub.cover, &cover_area);
     static const uint8_t fixture_rgb[][3] = { { 77, 72, 136 }, { 120, 119, 101 }, { 162, 162, 100 } };
     for (unsigned sample = 1; sample <= 3; ++sample)
     {
@@ -1235,10 +1235,10 @@ int main(int argc, char **argv)
         .route_destination = "龘龍站",
     };
     update_page(NULL);
-    assert(!strcmp(lv_label_get_text(phone_title), "龘\U00020087 Live"));
-    assert(lv_obj_get_style_text_font(phone_title, 0) == &carplay_cjk_full_18);
-    assert(lv_obj_get_style_text_font(phone_destination, 0) == &carplay_cjk_full_18);
-    assert(lv_obj_has_flag(phone_cover, LV_OBJ_FLAG_HIDDEN));
+    assert(!strcmp(lv_label_get_text(phone_hub.title), "龘\U00020087 Live"));
+    assert(lv_obj_get_style_text_font(phone_hub.title, 0) == &carplay_cjk_full_18);
+    assert(lv_obj_get_style_text_font(phone_hub.destination, 0) == &carplay_cjk_full_18);
+    assert(lv_obj_has_flag(phone_hub.cover, LV_OBJ_FLAG_HIDDEN));
     lv_font_glyph_dsc_t glyph;
     assert(lv_font_get_glyph_dsc(&carplay_cjk_full_18, &glyph, 0x9f98, 0) && !glyph.is_placeholder);
     assert(lv_font_get_glyph_dsc(&carplay_cjk_full_18, &glyph, 0x20087, 0) && !glyph.is_placeholder);
@@ -1254,19 +1254,19 @@ int main(int argc, char **argv)
     carplay_ui_set_chinese(false);
     update_page(NULL);
     assert(find_caption(pages[PAGE_CONNECTIVITY], "Route guidance"));
-    assert(!strcmp(lv_label_get_text(phone_artist), "麤樂隊"));
-    assert(lv_obj_get_style_text_font(phone_artist, 0) == &carplay_cjk_full_18);
+    assert(!strcmp(lv_label_get_text(phone_hub.artist), "麤樂隊"));
+    assert(lv_obj_get_style_text_font(phone_hub.artist, 0) == &carplay_cjk_full_18);
     carplay_ui_set_chinese(true);
     update_page(NULL);
     model.stage = DEMO_WAIT;
     memset(&model_phone_media, 0, sizeof(model_phone_media));
     clock_received = false;
     update_page(NULL);
-    assert(!strcmp(lv_label_get_text(phone_title), "-") && !*lv_label_get_text(phone_playback));
-    assert(!strcmp(lv_label_get_text(phone_destination), "-") && !*lv_label_get_text(phone_road) &&
-           !*lv_label_get_text(phone_remaining));
-    assert(lv_obj_has_flag(phone_lane_strip, LV_OBJ_FLAG_HIDDEN));
-    assert(lv_obj_has_flag(home_cover, LV_OBJ_FLAG_HIDDEN));
+    assert(!strcmp(lv_label_get_text(phone_hub.title), "-") && !*lv_label_get_text(phone_hub.playback));
+    assert(!strcmp(lv_label_get_text(phone_hub.destination), "-") && !*lv_label_get_text(phone_hub.road) &&
+           !*lv_label_get_text(phone_hub.remaining));
+    assert(lv_obj_has_flag(phone_hub.lane_strip, LV_OBJ_FLAG_HIDDEN));
+    assert(lv_obj_has_flag(dashboard.cover, LV_OBJ_FLAG_HIDDEN));
     assert(!strcmp(lv_label_get_text(phone_power), TR("Battery unavailable")));
     assert(!strcmp(lv_label_get_text(phone_clock_mode), TR("Waiting for iPhone time")));
     open_setting(SETTINGS_GNSS);

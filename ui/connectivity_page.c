@@ -4,6 +4,7 @@
 #include "carplay_ui_theme.h"
 #include "ui_language.h"
 #include "icons/carplay_icons.h"
+#include "launcher_layout.h"
 #include "settings_navigation.h"
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
 #include "carplay_app.h"
@@ -54,25 +55,7 @@ static lv_obj_t *connection_label(lv_obj_t *parent, const char *title, const lv_
 
 void carplay_connectivity_build(carplay_connectivity_view_t *view, lv_obj_t *page)
 {
-    lv_obj_t *card = lv_obj_create(page);
-    lv_obj_remove_style_all(card);
-    lv_obj_remove_flag(card, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_pos(card, 24, 63);
-    lv_obj_set_size(card, 976, 99);
-    lv_obj_set_style_radius(card, 12, LV_PART_MAIN);
-    carplay_ui_style(card, CARPLAY_STYLE_CARD);
-
-    lv_obj_t *phone = lv_image_create(card);
-    lv_image_set_src(phone, &carplay_icon_smartphone_42);
-    lv_obj_set_pos(phone, 18, 16);
-    carplay_ui_style(phone, CARPLAY_STYLE_ICON_ACCENT);
-
-    lv_obj_t *title = connection_label(card, "Apple CarPlay", &carplay_ui_21, CARPLAY_STYLE_TEXT);
-    lv_obj_set_pos(title, 76, 12);
-    view->state = connection_label(card, "Waiting for phone", &carplay_ui_18, CARPLAY_STYLE_TEXT);
-    lv_obj_set_pos(view->state, 76, 40);
-    view->transport = connection_label(card, "", &carplay_ui_18, CARPLAY_STYLE_MUTED);
-    lv_obj_set_pos(view->transport, 76, 66);
+    lv_obj_t *card = carplay_connection_card_build(page, &view->state, &view->transport);
     view->capabilities = connection_label(card, "", &carplay_ui_18, CARPLAY_STYLE_MUTED);
     lv_obj_set_pos(view->capabilities, 76, 66);
     view->action = carplay_settings_row(card, "Connect phone", &carplay_icon_link_24,

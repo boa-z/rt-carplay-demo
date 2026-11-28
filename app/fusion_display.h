@@ -42,8 +42,8 @@ typedef struct
     uint16_t id, x, y;
 } carplay_fusion_touch_t;
 
-/* Application-only, single-core D213 coordination. Each call copies bounded
- * state with interrupts masked; no LVGL, device ioctl or callback in that span.
+/* Application-only display coordination. Each call copies bounded state in
+ * the platform critical section; no LVGL, device ioctl or callback in that span.
  * Initialize once from the GUI before starting the connection owner. */
 int carplay_fusion_init(uint16_t width, uint16_t height);
 int carplay_fusion_set_mode(carplay_display_mode_t);

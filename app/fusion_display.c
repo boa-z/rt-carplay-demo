@@ -2,8 +2,37 @@
 #include "fusion_display.h"
 #include "rtcp/input.h"
 #include "rtcp/rtcp.h"
-#include <rtthread.h>
 #include <string.h>
+
+#ifdef RTCARPLAY_FUSION_POSIX
+#include <pthread.h>
+typedef int fusion_guard_t;
+static pthread_mutex_t fusion_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static fusion_guard_t fusion_lock(void)
+{
+    return pthread_mutex_lock(&fusion_mutex);
+}
+
+static void fusion_unlock(fusion_guard_t guard)
+{
+    if (guard == 0)
+        pthread_mutex_unlock(&fusion_mutex);
+}
+#else
+#include <rtthread.h>
+typedef rt_base_t fusion_guard_t;
+
+static fusion_guard_t fusion_lock(void)
+{
+    return rt_hw_interrupt_disable();
+}
+
+static void fusion_unlock(fusion_guard_t guard)
+{
+    rt_hw_interrupt_enable(guard);
+}
+#endif
 
 static carplay_fusion_snapshot_t state;
 static bool simulate = true;
@@ -31,26 +60,26 @@ static carplay_display_mode_t effective(void)
 
 void carplay_fusion_set_projection_hidden(bool hidden)
 {
-    rt_base_t irq = rt_hw_interrupt_disable();
+    fusion_guard_t guard = fusion_lock();
     resume_on_frame = false;
     if (projection_hidden != hidden)
     {
         projection_hidden = hidden;
         advance(&state.touch_epoch);
     }
-    rt_hw_interrupt_enable(irq);
+    fusion_unlock(guard);
 }
 
 void carplay_fusion_resume_projection_on_frame(void)
 {
-    rt_base_t irq = rt_hw_interrupt_disable();
+    fusion_guard_t guard = fusion_lock();
     resume_on_frame = projection_hidden;
-    rt_hw_interrupt_enable(irq);
+    fusion_unlock(guard);
 }
 
 bool carplay_fusion_resume_latched_projection(void)
 {
-    rt_base_t irq = rt_hw_interrupt_disable();
+    fusion_guard_t guard = fusion_lock();
     bool resumed = projection_hidden && resume_on_frame && state.video_active &&
                    state.video_generation == state.generation && state.requested != CARPLAY_LOCAL;
     if (resumed)
@@ -59,7 +88,7 @@ bool carplay_fusion_resume_latched_projection(void)
         resume_on_frame = false;
         advance(&state.touch_epoch);
     }
-    rt_hw_interrupt_enable(irq);
+    fusion_unlock(guard);
     return resumed;
 }
 
@@ -73,7 +102,7 @@ int carplay_fusion_init(uint16_t width, uint16_t height)
 {
     if (width < 512 || height < 320)
         return RTCP_EINVAL;
-    rt_base_t irq = rt_hw_interrupt_disable();
+    fusion_guard_t guard = fusion_lock();
     int result = RTCP_OK;
     if (state.initialized)
     {
@@ -84,7 +113,7 @@ int carplay_fusion_init(uint16_t width, uint16_t height)
     {
         state = (carplay_fusion_snapshot_t){ .initialized = true, .requested = CARPLAY_FUSION, .width = width, .height = height, .local_width = width / 4, .generation = 1, .touch_epoch = 1 };
     }
-    rt_hw_interrupt_enable(irq);
+    fusion_unlock(guard);
     return result;
 }
 
@@ -92,7 +121,7 @@ int carplay_fusion_set_mode(carplay_display_mode_t mode)
 {
     if ((unsigned)mode > CARPLAY_LOCAL)
         return RTCP_EINVAL;
-    rt_base_t irq = rt_hw_interrupt_disable();
+    fusion_guard_t guard = fusion_lock();
     int result = state.initialized ? RTCP_OK : RTCP_ESTATE;
     if (!result && state.requested != mode)
     {
@@ -100,7 +129,7 @@ int carplay_fusion_set_mode(carplay_display_mode_t mode)
         advance(&state.generation);
         advance(&state.touch_epoch);
     }
-    rt_hw_interrupt_enable(irq);
+    fusion_unlock(guard);
     return result;
 }
 
@@ -108,11 +137,11 @@ void carplay_fusion_snapshot(uint32_t now, carplay_fusion_snapshot_t *out)
 {
     if (!out)
         return;
-    rt_base_t irq = rt_hw_interrupt_disable();
+    fusion_guard_t guard = fusion_lock();
     *out = state;
     out->effective = effective();
     bool simulated = simulate;
-    rt_hw_interrupt_enable(irq);
+    fusion_unlock(guard);
     if (simulated)
     {
         unsigned t = (now / 1000U) % 80U;
@@ -131,22 +160,22 @@ int carplay_fusion_set_vehicle(const carplay_vehicle_sample_t *sample)
     for (unsigned i = 0; i < sizeof(sample->gear) && sample->gear[i]; ++i)
         if ((uint8_t)sample->gear[i] < 32 || (uint8_t)sample->gear[i] > 126)
             return RTCP_EINVAL;
-    rt_base_t irq = rt_hw_interrupt_disable();
+    fusion_guard_t guard = fusion_lock();
     int result = state.initialized ? RTCP_OK : RTCP_ESTATE;
     if (!result)
     {
         state.vehicle = *sample;
         simulate = false;
     }
-    rt_hw_interrupt_enable(irq);
+    fusion_unlock(guard);
     return result;
 }
 
 void carplay_fusion_use_simulated(void)
 {
-    rt_base_t irq = rt_hw_interrupt_disable();
+    fusion_guard_t guard = fusion_lock();
     simulate = true;
-    rt_hw_interrupt_enable(irq);
+    fusion_unlock(guard);
 }
 
 bool carplay_fusion_video_target(uint16_t width, uint16_t height,
@@ -154,7 +183,7 @@ bool carplay_fusion_video_target(uint16_t width, uint16_t height,
 {
     if (!rect || !generation || !width || !height)
         return false;
-    rt_base_t irq = rt_hw_interrupt_disable();
+    fusion_guard_t guard = fusion_lock();
     bool ready = state.initialized;
     if (ready)
     {
@@ -173,7 +202,7 @@ bool carplay_fusion_video_target(uint16_t width, uint16_t height,
             rect->width = (uint16_t)(width - state.local_width);
         *generation = state.generation;
     }
-    rt_hw_interrupt_enable(irq);
+    fusion_unlock(guard);
     return ready;
 }
 
@@ -183,7 +212,7 @@ void carplay_fusion_video_latched(const rtcp_display_rect_t *rect, uint16_t widt
 {
     if (!rect || !rect->width || !rect->height || !width || !height)
         return;
-    rt_base_t irq = rt_hw_interrupt_disable();
+    fusion_guard_t guard = fusion_lock();
     if (state.initialized)
     {
         bool resuming = resume_on_frame && new_frame;
@@ -202,24 +231,24 @@ void carplay_fusion_video_latched(const rtcp_display_rect_t *rect, uint16_t widt
         state.video_active = true;
         state.last_present_ms = now;
     }
-    rt_hw_interrupt_enable(irq);
+    fusion_unlock(guard);
 }
 
 void carplay_fusion_video_stopped(void)
 {
-    rt_base_t irq = rt_hw_interrupt_disable();
+    fusion_guard_t guard = fusion_lock();
     if (state.video_active)
         advance(&state.touch_epoch);
     state.video_active = false;
     state.video_generation = 0;
-    rt_hw_interrupt_enable(irq);
+    fusion_unlock(guard);
 }
 
 void carplay_fusion_display_error(int error)
 {
-    rt_base_t irq = rt_hw_interrupt_disable();
+    fusion_guard_t guard = fusion_lock();
     state.error = error;
-    rt_hw_interrupt_enable(irq);
+    fusion_unlock(guard);
 }
 
 static carplay_fusion_touch_t release_contact(fusion_contact_t *contact, bool wait_for_up)
@@ -236,7 +265,7 @@ static carplay_fusion_touch_t release_contact(fusion_contact_t *contact, bool wa
 carplay_fusion_touch_t carplay_fusion_cancel_touch(void)
 {
     carplay_fusion_touch_t action = { 0 };
-    rt_base_t irq = rt_hw_interrupt_disable();
+    fusion_guard_t guard = fusion_lock();
     for (unsigned index = 0; index < RTCP_TOUCH_CONTACTS; ++index)
     {
         fusion_contact_t *contact = &contacts[index];
@@ -247,7 +276,7 @@ carplay_fusion_touch_t carplay_fusion_cancel_touch(void)
             break;
         }
     }
-    rt_hw_interrupt_enable(irq);
+    fusion_unlock(guard);
     return action;
 }
 
@@ -256,7 +285,7 @@ carplay_fusion_touch_t carplay_fusion_touch(uint8_t phase, uint16_t id, uint16_t
     carplay_fusion_touch_t action = { 0 };
     if (phase != RTCP_TOUCH_DOWN && phase != RTCP_TOUCH_MOVE && phase != RTCP_TOUCH_UP)
         return action;
-    rt_base_t irq = rt_hw_interrupt_disable();
+    fusion_guard_t guard = fusion_lock();
     fusion_contact_t *contact = NULL;
     fusion_contact_t *free_slot = NULL;
     carplay_touch_owner_t active_owner = CARPLAY_TOUCH_NONE;
@@ -329,10 +358,11 @@ carplay_fusion_touch_t carplay_fusion_touch(uint8_t phase, uint16_t id, uint16_t
     if (phase == RTCP_TOUCH_UP)
         *contact = (fusion_contact_t){ 0 };
 done:
-    rt_hw_interrupt_enable(irq);
+    fusion_unlock(guard);
     return action;
 }
 
+#ifndef RTCARPLAY_FUSION_POSIX
 static int cmd_carplay_display(int argc, char **argv)
 {
     if (argc == 2 && !strcmp(argv[1], "simulate"))
@@ -371,3 +401,4 @@ static int cmd_carplay_display(int argc, char **argv)
     return RTCP_OK;
 }
 MSH_CMD_EXPORT_ALIAS(cmd_carplay_display, carplay_display, Single screen CarPlay display modes and vehicle data);
+#endif

@@ -1,0 +1,128 @@
+#ifndef CARPLAY_LINUX_DEMO_H
+#define CARPLAY_LINUX_DEMO_H
+
+#include <stdbool.h>
+#include <stdint.h>
+#include <signal.h>
+#include <net/if.h>
+
+#include "airplay_ed25519.h"
+#include "iap2_session.h"
+#include "rtcp/receiver.h"
+
+typedef struct
+{
+    const char *directory;
+    const char *interface;
+    const char *ap_config;
+    const char *adapter;
+    const char *framebuffer;
+    const char *touch;
+    const char *i2c;
+    const char *gnss;
+    const char *playback;
+    const char *capture;
+    uint16_t width;
+    uint16_t height;
+    uint8_t fps;
+    uint16_t port;
+    bool wired;
+    bool wireless;
+    bool headless;
+} demo_options_t;
+
+typedef struct
+{
+    airplay_ed25519_keypair_t keys;
+    char device_id[18];
+    char public_key[65];
+    char store[256];
+} demo_identity_t;
+
+typedef struct
+{
+    char title[129];
+    char artist[129];
+    char album[129];
+    bool playing;
+} demo_track_t;
+
+typedef struct
+{
+    char carrier[65];
+    uint16_t battery;
+    uint8_t signal, charging, call;
+    bool has_battery, has_signal, has_charging, has_call, airplane;
+} demo_phone_status_t;
+
+typedef struct
+{
+    char road[129], destination[129], distance[65];
+} demo_route_t;
+
+typedef struct
+{
+    char interface[IF_NAMESIZE];
+    char address[64];
+    uint64_t generation;
+    uint16_t port;
+    bool transport;
+    bool event;
+} demo_endpoint_t;
+
+typedef struct
+{
+    bool subscribed;
+    size_t length;
+    char sentence[RTCP_LOCATION_NMEA_MAX];
+} demo_gnss_stream_t;
+
+extern volatile sig_atomic_t demo_stop;
+int demo_identity_open(demo_identity_t *identity, const char *directory,
+                       rtcp_pairing_provider_t *pairing);
+int demo_mfi_open(const char *device);
+void demo_mfi_close(void);
+extern const struct rtcp_mfi demo_mfi;
+void demo_track_update(const rtcp_now_playing_details_t *update, void *context);
+void demo_phone_update(const rtcp_phone_status_t *update, void *context);
+void demo_route_update(const rtcp_route_details_t *update, void *context);
+void demo_phone_snapshot(demo_track_t *track, demo_phone_status_t *phone, demo_route_t *route);
+bool demo_gnss_open(const char *device);
+void demo_gnss_close(void);
+bool demo_gnss_available(void);
+void demo_gnss_tick(demo_gnss_stream_t *stream, iap2_session_t *session, uint64_t now);
+
+#ifdef CARPLAY_USB
+int demo_wired_start(const demo_options_t *options, const demo_identity_t *identity);
+void demo_wired_stop(void);
+void demo_wired_snapshot(demo_endpoint_t *endpoint);
+void demo_wired_publish(uint64_t generation, uint16_t port, const rtcp_receiver_state_t *state);
+#endif
+#ifdef CARPLAY_BLUEZ
+int demo_wireless_configure(const demo_options_t *options, const demo_identity_t *identity);
+void demo_wireless_step(rtcp_receiver_t *receiver, const char *ip, bool active);
+void demo_wireless_backend(rtcp_iap2_backend_t *backend);
+void demo_wireless_close(void);
+int demo_wireless_passkey(void);
+void demo_wireless_confirm(bool accept);
+void demo_wireless_discoverable(void);
+#endif
+#ifdef CARPLAY_ALSA
+void demo_audio_open(const demo_options_t *options, rtcp_media_backend_t *media,
+                     bool *playback, bool *capture);
+void demo_audio_close(void);
+#endif
+#ifdef CARPLAY_AIC_MPP
+int demo_video_open(const demo_options_t *options, rtcp_media_backend_t *media);
+void demo_video_close(void);
+bool demo_video_needs_keyframe(void);
+bool demo_video_visible(void);
+void demo_video_session(bool live);
+#endif
+#ifdef CARPLAY_LVGL
+int demo_launcher_open(demo_options_t *options);
+void demo_launcher_step(rtcp_receiver_t *receiver, bool projection);
+void demo_launcher_close(void);
+#endif
+
+#endif
