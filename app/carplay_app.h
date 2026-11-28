@@ -14,6 +14,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "phone_track.h"
 #include "rtcp/device_time.h"
 #include "rtcp/events.h"
 #include "rtcp/display.h"
@@ -214,15 +215,6 @@ typedef enum
     CARPLAY_PHONE_PLAY_PAUSE,
     CARPLAY_PHONE_NEXT,
 } carplay_phone_action_t;
-
-typedef struct
-{
-    char title[129], artist[129], album[129];
-    bool has_playing, playing;
-    bool has_duration, has_elapsed;
-    uint32_t duration_ms, elapsed_ms;
-    uint32_t artwork_revision;
-} carplay_phone_track_t;
 
 #define CARPLAY_PHONE_MANEUVER_ROWS 3U
 #define CARPLAY_PHONE_ARTWORK_MAX   (192U * 1024U)

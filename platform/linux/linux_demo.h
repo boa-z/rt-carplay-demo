@@ -8,6 +8,7 @@
 
 #include "airplay_ed25519.h"
 #include "iap2_session.h"
+#include "phone_track.h"
 #include "rtcp/receiver.h"
 
 typedef struct
@@ -38,14 +39,6 @@ typedef struct
     char public_key[65];
     char store[256];
 } demo_identity_t;
-
-typedef struct
-{
-    char title[129];
-    char artist[129];
-    char album[129];
-    bool playing;
-} demo_track_t;
 
 typedef struct
 {
@@ -86,7 +79,7 @@ extern const struct rtcp_mfi demo_mfi;
 void demo_track_update(const rtcp_now_playing_details_t *update, void *context);
 void demo_phone_update(const rtcp_phone_status_t *update, void *context);
 void demo_route_update(const rtcp_route_details_t *update, void *context);
-void demo_phone_snapshot(demo_track_t *track, demo_phone_status_t *phone, demo_route_t *route);
+void demo_phone_snapshot(carplay_phone_track_t *track, demo_phone_status_t *phone, demo_route_t *route);
 bool demo_gnss_open(const char *device);
 void demo_gnss_close(void);
 bool demo_gnss_available(void);
@@ -120,11 +113,28 @@ bool demo_video_visible(void);
 void demo_video_session(bool live);
 #endif
 #ifdef CARPLAY_LVGL
+typedef struct
+{
+    int (*set_projection)(bool enabled, void *context);
+    void (*send_touch)(const rtcp_touch_contact_t *contacts, void *context);
+    void *context;
+} demo_launcher_commands_t;
+
+typedef struct
+{
+    rtcp_receiver_state_t receiver;
+    rtcp_projection_owner_t projection_owner;
+    uint32_t stream_generation;
+    uint64_t receiver_generation;
+    bool wired;
+    bool projection_visible;
+} demo_launcher_snapshot_t;
+
 int demo_launcher_open(demo_options_t *options);
-void demo_launcher_bind(rtcp_receiver_t *receiver);
+bool demo_launcher_show_local(void *context);
 void demo_launcher_attach_media(rtcp_media_backend_t *media);
-void demo_launcher_step(rtcp_receiver_t *receiver, const rtcp_receiver_state_t *state,
-                        bool wired, bool projection);
+void demo_launcher_step(const demo_launcher_commands_t *commands,
+                        const demo_launcher_snapshot_t *snapshot);
 void demo_launcher_close(void);
 #endif
 

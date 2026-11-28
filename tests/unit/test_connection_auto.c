@@ -415,8 +415,7 @@ int main(void)
             network_samples = 0;
             receiver = radio = usb_session = seen_live = false;
             memset(&status, 0, sizeof(status));
-            memset(failures, 0, sizeof(failures));
-            memset(retry_waiting, 0, sizeof(retry_waiting));
+            memset(retries, 0, sizeof(retries));
             automatic = true;
             wireless_enabled = scenario != USB_RETRY && scenario != NO_PICTURE &&
                                scenario != USB_START_FAILURE;
@@ -435,12 +434,12 @@ int main(void)
             if (scenario == ENUM_RETRY)
                 assert(opens == 3 && elapsed() >= 10000);
             if (scenario == RADIO_FAILURE)
-                assert(status.wireless_error == RTCP_EIO && retry_waiting[1] && failures[1] == 1U);
+                assert(status.wireless_error == RTCP_EIO && retries[1].waiting && retries[1].failures == 1U);
             if (scenario == USB_RETRY)
                 assert(pairs == 2);
         }
     }
-    memset(failures, 0, sizeof(failures));
+    memset(retries, 0, sizeof(retries));
     const unsigned delays[] = { 5000, 10000, 20000, 40000, 60000, 60000 };
     now = UINT32_MAX - 1000U;
     for (unsigned i = 0; i < sizeof(delays) / sizeof(delays[0]); ++i)

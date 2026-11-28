@@ -2431,36 +2431,11 @@ static void update_phone_model(const demo_status_t *status)
 #endif
 }
 
-static void format_elapsed(char *text, size_t size, bool valid, uint32_t milliseconds)
-{
-    unsigned seconds = milliseconds / 1000U;
-    if (!valid)
-        snprintf(text, size, "--:--");
-    else if (seconds >= 3600)
-        snprintf(text, size, "%u:%02u:%02u", seconds / 3600U, seconds / 60U % 60U, seconds % 60U);
-    else
-        snprintf(text, size, "%u:%02u", seconds / 60U, seconds % 60U);
-}
-
 static void update_phone_hub(const demo_status_t *status)
 {
     const carplay_phone_media_t *media = &phone_model;
-    const carplay_phone_track_t *track = &media->track;
     char detail[300];
-    set_phone_text(phone_hub.title, track->title[0] ? track->title : "-");
-    snprintf(detail, sizeof(detail), "%s%s%s", track->artist,
-             track->artist[0] && track->album[0] ? " / " : "", track->album);
-    set_phone_text(phone_hub.artist, detail);
-    set_phone_text(phone_hub.playback, track->has_playing ? TR(track->playing ? "Playing" : "Not playing") : "");
-    uint32_t duration = track->duration_ms;
-    uint32_t elapsed = track->has_duration && track->elapsed_ms > duration ? duration : track->elapsed_ms;
-    lv_bar_set_value(phone_hub.progress, track->has_duration && track->has_elapsed && duration ? (int32_t)((uint64_t)elapsed * 1000U / duration) : 0, LV_ANIM_OFF);
-    char position[16], length[16];
-    format_elapsed(position, sizeof(position), track->has_elapsed, elapsed);
-    format_elapsed(length, sizeof(length), track->has_duration, duration);
-    snprintf(detail, sizeof(detail), "%s / %s", position, length);
-    set_phone_text(phone_hub.position, track->has_elapsed || track->has_duration ? detail : "");
-    set_phone_text(phone_hub.media_caption, TR("Now Playing"));
+    carplay_phone_hub_track(&phone_hub, &media->track);
     set_phone_text(phone_hub.route_caption, TR("Route guidance"));
     set_phone_text(phone_status_caption, TR("Phone status"));
     set_phone_text(phone_hub.destination, media->route_destination[0] ? media->route_destination : "-");

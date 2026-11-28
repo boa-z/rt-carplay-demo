@@ -5,6 +5,7 @@
 #include <stdatomic.h>
 #include <string.h>
 #include "connection_manager.h"
+#include "connection_retry.h"
 #include "carplay_app.h"
 #include "carplay_usb.h"
 #include "video_sink_lubanlite.h"
@@ -31,33 +32,16 @@ static carplay_display_mode_t requested_display = CARPLAY_FUSION;
 static bool display_pending;
 #endif
 /* Worker-owned backoff; only copied summaries cross the UI boundary. */
-static uint32_t retry_at[2];
-static bool retry_waiting[2];
-static unsigned failures[2];
+static carplay_connection_retry_t retries[2];
 
 static bool retry_due(bool wireless)
 {
-    unsigned i = wireless ? 1U : 0U;
-    return !retry_waiting[i] ||
-           (int32_t)(rt_tick_get_millisecond() - retry_at[i]) >= 0;
+    return carplay_retry_remaining(&retries[wireless], rt_tick_get_millisecond()) == 0;
 }
 
 static void connection_finished(bool wireless, int error)
 {
-    unsigned i = wireless ? 1U : 0U;
-    unsigned delay = 1000U;
-    if (error)
-    {
-        if (failures[i] < 5U)
-            ++failures[i];
-        delay = 5000U << (failures[i] - 1U);
-        if (delay > 60000U)
-            delay = 60000U;
-    }
-    else
-        failures[i] = 0;
-    retry_at[i] = rt_tick_get_millisecond() + delay;
-    retry_waiting[i] = true;
+    carplay_retry_schedule(&retries[wireless], rt_tick_get_millisecond(), error);
     (void)rt_mutex_take(status_lock, RT_WAITING_FOREVER);
     if (wireless)
         status.wireless_error = error;
@@ -222,14 +206,11 @@ static void sample_debug(void)
 #endif
     (void)carplay_app_session_state(&sample.receiver);
     if (!sample.usb)
-    {
-        failures[0] = 0;
-        retry_waiting[0] = false;
-    }
-    unsigned remaining = 0;
-    unsigned i = status.wireless ? 1U : 0U;
-    if (!retry_due(status.wireless))
-        remaining = (retry_at[i] - rt_tick_get_millisecond() + 999U) / 1000U;
+        retries[0] = (carplay_connection_retry_t){ 0 };
+    unsigned remaining = (carplay_retry_remaining(&retries[status.wireless],
+                                                  rt_tick_get_millisecond()) +
+                          999U) /
+                         1000U;
     carplay_app_debug_counters(&sample.received, &sample.hid_sent, &sample.hid_failed);
     carplay_app_performance_report();
     sample.trust = carplay_usb_trust_cache_status();
@@ -278,9 +259,7 @@ static void publish(demo_stage_t stage, int error)
         status.last_error = error;
     if (stage == DEMO_LIVE)
     {
-        unsigned i = status.wireless ? 1U : 0U;
-        failures[i] = 0;
-        retry_waiting[i] = false;
+        retries[status.wireless] = (carplay_connection_retry_t){ 0 };
         if (status.wireless)
             status.wireless_error = 0;
         else
@@ -350,8 +329,7 @@ static bool idle_actions(void)
     (void)rt_mutex_release(status_lock);
     if (retry)
     {
-        memset(retry_waiting, 0, sizeof(retry_waiting));
-        memset(failures, 0, sizeof(failures));
+        memset(retries, 0, sizeof(retries));
         return true;
     }
     if (action == FILE_NONE)
@@ -431,8 +409,7 @@ static int wireless_connection(void)
         (void)rt_mutex_release(status_lock);
         if (retry)
         {
-            memset(retry_waiting, 0, sizeof(retry_waiting));
-            memset(failures, 0, sizeof(failures));
+            memset(retries, 0, sizeof(retries));
         }
         if (reply)
             (void)rtcp_bt_lubanlite_pairing_reply(request, accept);
@@ -542,8 +519,7 @@ static void demo_worker(void *argument)
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
             if (display_pending)
             {
-                memset(retry_waiting, 0, sizeof(retry_waiting));
-                memset(failures, 0, sizeof(failures));
+                memset(retries, 0, sizeof(retries));
             }
             applied_width = requested_width;
             display_pending = false;

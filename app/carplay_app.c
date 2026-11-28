@@ -9,6 +9,7 @@
  * the event cipher stay single-threaded.
  */
 #include "carplay_app.h"
+#include "receiver_session.h"
 #include "rtcp/receiver.h"
 
 #include <rtthread.h>
@@ -873,6 +874,14 @@ static void publish_phone_volume(app_state_t *app)
     }
 }
 
+static void prepare_phone_volume(rtcp_receiver_t *receiver, void *context)
+{
+    (void)receiver;
+    app_state_t *app = context;
+    if (app->audio_started)
+        publish_phone_volume(app);
+}
+
 static void on_volume(float volume_db, void *context)
 {
     app_state_t *app = context;
@@ -882,48 +891,6 @@ static void on_volume(float volume_db, void *context)
     publish_phone_volume(app);
 }
 #endif
-
-static void copy_phone_text(char *destination, size_t size, const char *text)
-{
-    if (text)
-        rt_snprintf(destination, size, "%s", text);
-}
-
-static void update_phone_track(carplay_phone_track_t *track, const rtcp_now_playing_details_t *update,
-                               bool artwork_has_transfer_lifecycle)
-{
-    if (update->invalidated)
-    {
-        *track = (carplay_phone_track_t){ 0 };
-        return;
-    }
-    if (update->item.title && strcmp(track->title, update->item.title))
-    {
-        track->has_duration = false;
-        track->has_elapsed = false;
-        /* iAP2 reports cover replacement separately via the file transfer ID. */
-        if (!artwork_has_transfer_lifecycle || !*update->item.title)
-            track->artwork_revision = 0;
-    }
-    copy_phone_text(track->title, sizeof(track->title), update->item.title);
-    copy_phone_text(track->artist, sizeof(track->artist), update->item.artist);
-    copy_phone_text(track->album, sizeof(track->album), update->item.album);
-    if (update->item.has_playing)
-    {
-        track->has_playing = true;
-        track->playing = update->item.playing;
-    }
-    if (update->has_duration)
-    {
-        track->has_duration = true;
-        track->duration_ms = update->duration_ms;
-    }
-    if (update->has_elapsed)
-    {
-        track->has_elapsed = true;
-        track->elapsed_ms = update->elapsed_ms;
-    }
-}
 
 static void update_phone_artwork(app_state_t *app, carplay_phone_track_t *track,
                                  const rtcp_now_playing_details_t *update)
@@ -965,7 +932,7 @@ static void on_airplay_metadata(const rtcp_now_playing_details_t *update, void *
     if (!app->lock || rt_mutex_take(app->lock, RT_WAITING_FOREVER) != RT_EOK)
         return;
     carplay_phone_track_t *track = &app->phone_media.track;
-    update_phone_track(track, update, false);
+    carplay_phone_track_update(track, update, false);
     update_phone_artwork(app, track, update);
     (void)rt_mutex_release(app->lock);
 }
@@ -987,6 +954,12 @@ static void clear_phone_media(app_state_t *app)
 }
 
 #if defined(RTCARPLAY_IAP2) || defined(RTCARPLAY_USB_HOST)
+static void copy_phone_text(char *destination, size_t size, const char *text)
+{
+    if (text)
+        rt_snprintf(destination, size, "%s", text);
+}
+
 static bool phone_metadata_enter(void)
 {
     if (!snapshot_enter())
@@ -1009,7 +982,7 @@ static void on_iap2_playback(const rtcp_now_playing_details_t *update, void *con
     on_classic_playback(update, context);
     if (!phone_metadata_enter())
         return;
-    update_phone_track(&s_app.iap2_track, update, true);
+    carplay_phone_track_update(&s_app.iap2_track, update, true);
     update_phone_artwork(&s_app, &s_app.iap2_track, update);
     phone_metadata_leave();
 }
@@ -1394,8 +1367,7 @@ static void shutdown_stack(app_state_t *app)
     rtcp_net_rtthread_multicast_interface(NULL);
     if (app->receiver != NULL)
     {
-        (void)rtcp_receiver_destroy(app->receiver);
-        app->receiver = NULL;
+        (void)carplay_session_close(&app->receiver);
     }
 #if defined(RTCARPLAY_VEHICLE_PROTOCOL_DEMO)
     /* Receiver borrows the model until destruction. */
@@ -2384,19 +2356,17 @@ static int carplay_app_start_owned(const carplay_app_config_t *config)
         receiver_config.media.volume_context = app;
     }
 #endif
-    result = rtcp_receiver_create(&receiver_config, &app->receiver);
-    if (result == RTCP_OK)
-        (void)rtcp_receiver_set_now_playing_details_callback(app->receiver, on_airplay_metadata, app);
+    const carplay_session_callbacks_t callbacks = {
+        .now_playing = on_airplay_metadata,
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
-    if (result == RTCP_OK)
-        (void)rtcp_receiver_set_host_ui_callback(app->receiver, on_host_ui, app);
+        .host_ui = on_host_ui,
 #endif
 #if defined(RTCARPLAY_AUDIO)
-    if (result == RTCP_OK && app->audio_started)
-        publish_phone_volume(app);
+        .prepare = prepare_phone_volume,
 #endif
-    if (result == RTCP_OK)
-        result = rtcp_receiver_start(app->receiver);
+        .context = app,
+    };
+    result = carplay_session_open(&app->receiver, &receiver_config, &callbacks);
     if (result != RTCP_OK)
     {
         APP_LOG("RTSP server start failed rc=%d", result);

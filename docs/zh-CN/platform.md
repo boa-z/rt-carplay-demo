@@ -4,7 +4,9 @@
 
 ## 所有权与数据流
 
-`app/connection_manager.c` 仲裁传输方式。`app/carplay_app.c` 的轮询线程唯一拥有 Receiver，发布复制后的会话快照，并消费命令队列。Launcher 和 Fusion 渲染快照并提交用户请求。停止和切换流程见[会话快照](session-snapshots.md)和[连接管理](connection-manager.md)。
+两个平台共用 `app/receiver_session.c` 创建和销毁 Receiver 并注册回调，使用 `app/connection_retry.c` 计算有界重试延迟，使用 `app/phone_track.c` 合并 Now Playing 更新。各平台的 Receiver 所有者决定何时启动和结束会话，并负责按顺序释放借用的媒体资源。公共 Phone Hub 根据复制后的曲目信息显示播放状态和进度。
+
+RT-Thread 由 `app/connection_manager.c` 仲裁传输方式。`app/carplay_app.c` 的轮询线程唯一拥有 Receiver，发布会话快照，并消费命令队列。Launcher 和 Fusion 渲染快照并提交用户请求。停止和切换流程见[会话快照](session-snapshots.md)和[连接管理](connection-manager.md)。
 
 平台输出端在异步解码、显示和 VSync 期间保留媒体缓冲区所有权。适配时延续有界队列、背压和释放路径。复用 SDK 的平台描述结构，让音视频缓冲区继续沿现有路径流转。
 
@@ -27,4 +29,8 @@ AIC8800D40 是支持 A/B OTA 的独立硬件目标。其 CPIO 使用专用兼容
 
 ## Linux 移植
 
-从现有 CMake LVGL Preview 开始。复用 SDK 的 Linux OS 和网络适配，再接入 Receiver 所有者及命令、快照边界。逐个验证有线和无线身份、音频、视频与触摸适配。RT-Thread 继续使用 SCons/Kconfig，Linux 适配可用后逐步加入生产 CMake 目标。
+Linux 主循环拥有 Receiver，并在同一线程同步处理 Launcher 命令。Launcher 读取包含 Receiver 和视频流代数的会话快照。切换端点时清理本地触点归属，避免把旧触点发送到新会话。libusb 和 ALSA 继续使用独立工作线程。Linux 在 USB 端点地址就绪时优先选择 USB，RT-Thread 通过连接管理线程预留传输方式。
+
+本机可使用 `cmake -S . -B build/linux -DRTCP_ROOT=/path/to/rt-carplay -DRTCP_MBEDTLS_DIR=/path/to/mbedtls` 和 `cmake --build build/linux` 构建 Linux LAN Receiver。`CARPLAY_USB`、`CARPLAY_BLUEZ`、`CARPLAY_ALSA`、`CARPLAY_LVGL` 和 `CARPLAY_AIC_MPP` 独立启用。使用 LVGL 时需传入 `-DLVGL_ROOT=/path/to/lvgl`，版本见 `.ci/dependencies.env`。Luban 的 D21x Linux 固件启用全部五项。Linux 的 `theme`、`display-mode` 和 RT-Thread 的 `CPUI` 继续使用现有文件格式。
+
+两个生产 Launcher 入口仍负责组装各自页面与绑定平台服务。外壳、Dashboard、Phone Hub 和 Fusion 仪表使用公共控件。RT-Thread Preview 使用其生产 Launcher 和这些公共控件。

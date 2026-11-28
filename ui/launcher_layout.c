@@ -5,6 +5,9 @@
 #include "system_shell.h"
 #include "ui_language.h"
 
+#include <stdio.h>
+#include <string.h>
+
 LV_FONT_DECLARE(carplay_ui_17);
 LV_FONT_DECLARE(carplay_ui_15);
 LV_FONT_DECLARE(carplay_ui_18);
@@ -13,6 +16,45 @@ LV_FONT_DECLARE(carplay_ui_34);
 LV_FONT_DECLARE(carplay_cjk_full_18);
 LV_FONT_DECLARE(carplay_display_58);
 LV_FONT_DECLARE(carplay_display_220);
+
+static void set_track_text(lv_obj_t *label, const char *value)
+{
+    if (strcmp(lv_label_get_text(label), value) != 0)
+        lv_label_set_text(label, value);
+}
+
+static void format_elapsed(char *text, size_t size, bool valid, uint32_t milliseconds)
+{
+    unsigned seconds = milliseconds / 1000U;
+    if (!valid)
+        snprintf(text, size, "--:--");
+    else if (seconds >= 3600)
+        snprintf(text, size, "%u:%02u:%02u", seconds / 3600U, seconds / 60U % 60U, seconds % 60U);
+    else
+        snprintf(text, size, "%u:%02u", seconds / 60U, seconds % 60U);
+}
+
+void carplay_phone_hub_track(carplay_phone_hub_t *hub, const carplay_phone_track_t *track)
+{
+    set_track_text(hub->title, track->title[0] ? track->title : "-");
+    char artist[sizeof(track->artist) + sizeof(track->album) + 3];
+    snprintf(artist, sizeof(artist), "%s%s%s", track->artist,
+             track->artist[0] && track->album[0] ? " / " : "", track->album);
+    set_track_text(hub->artist, artist);
+    carplay_ui_set_text(hub->playback, track->has_playing ? (track->playing ? "Playing" : "Not playing") : "");
+    uint32_t duration = track->duration_ms;
+    uint32_t elapsed = track->has_duration && track->elapsed_ms > duration ? duration : track->elapsed_ms;
+    int32_t progress = track->has_duration && track->has_elapsed && duration
+                           ? (int32_t)((uint64_t)elapsed * 1000U / duration)
+                           : 0;
+    lv_bar_set_value(hub->progress, progress, LV_ANIM_OFF);
+    char position[16], length[16], timing[sizeof(position) + sizeof(length) + 3];
+    format_elapsed(position, sizeof(position), track->has_elapsed, elapsed);
+    format_elapsed(length, sizeof(length), track->has_duration, duration);
+    snprintf(timing, sizeof(timing), "%s / %s", position, length);
+    set_track_text(hub->position, track->has_elapsed || track->has_duration ? timing : "");
+    carplay_ui_set_text(hub->media_caption, "Now Playing");
+}
 
 lv_obj_t *carplay_launcher_surface(lv_obj_t *screen, int width, int height)
 {

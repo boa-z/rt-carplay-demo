@@ -18,10 +18,12 @@
 #include "airplay_info_plist.h"
 #include "airplay_pairing_store.h"
 #include "airplay_txt.h"
+#include "connection_retry.h"
 #include "mdns_responder.h"
 #include "mbedtls/platform_util.h"
 #include "rtcp/version.h"
 #include "rtcp_linux.h"
+#include "receiver_session.h"
 
 #ifdef CARPLAY_LVGL
 #include "../../assets/rt-carplay-oem-png.h"
@@ -32,13 +34,29 @@ static const rtcp_oem_icon_t demo_oem_icon = {
     .width_pixels = CARPLAY_DEMO_OEM_ICON_SIZE,
     .height_pixels = CARPLAY_DEMO_OEM_ICON_SIZE,
 };
+
+static int launcher_set_projection(bool enabled, void *context)
+{
+    rtcp_receiver_t *receiver = *(rtcp_receiver_t **)context;
+    int result = rtcp_receiver_set_projection_enabled(receiver, enabled);
+    if (enabled && result == RTCP_OK)
+        rtcp_receiver_request_screen_keyframe(receiver);
+    return result;
+}
+
+static void launcher_send_touch(const rtcp_touch_contact_t *contacts, void *context)
+{
+    rtcp_receiver_t *receiver = *(rtcp_receiver_t **)context;
+    if (receiver)
+        rtcp_receiver_send_touch(receiver, contacts);
+}
 #endif
 
 static const char demo_name[] = "Luban CarPlay";
 static char active_interface[IF_NAMESIZE];
 static struct rtcp_net network;
 static pthread_mutex_t metadata_lock = PTHREAD_MUTEX_INITIALIZER;
-static demo_track_t current_track;
+static carplay_phone_track_t current_track;
 static demo_phone_status_t current_phone;
 static demo_route_t current_route;
 volatile sig_atomic_t demo_stop;
@@ -53,16 +71,7 @@ void demo_track_update(const rtcp_now_playing_details_t *update, void *context)
 {
     (void)context;
     pthread_mutex_lock(&metadata_lock);
-    if (update->invalidated)
-        current_track = (demo_track_t){ 0 };
-    if (update->item.title)
-        snprintf(current_track.title, sizeof(current_track.title), "%s", update->item.title);
-    if (update->item.artist)
-        snprintf(current_track.artist, sizeof(current_track.artist), "%s", update->item.artist);
-    if (update->item.album)
-        snprintf(current_track.album, sizeof(current_track.album), "%s", update->item.album);
-    if (update->item.has_playing)
-        current_track.playing = update->item.playing;
+    carplay_phone_track_update(&current_track, update, false);
     pthread_mutex_unlock(&metadata_lock);
 }
 
@@ -129,7 +138,7 @@ void demo_route_update(const rtcp_route_details_t *update, void *context)
     pthread_mutex_unlock(&metadata_lock);
 }
 
-void demo_phone_snapshot(demo_track_t *track, demo_phone_status_t *phone, demo_route_t *route)
+void demo_phone_snapshot(carplay_phone_track_t *track, demo_phone_status_t *phone, demo_route_t *route)
 {
     pthread_mutex_lock(&metadata_lock);
     *track = current_track;
@@ -266,6 +275,12 @@ static int lock_directory(const char *directory)
     return -1;
 }
 
+static bool same_endpoint(const demo_endpoint_t *left, const demo_endpoint_t *right)
+{
+    return left->generation == right->generation && !strcmp(left->interface, right->interface) &&
+           !strcmp(left->address, right->address);
+}
+
 static int run(demo_options_t *options)
 {
     rtcp_receiver_config_t config = { 0 };
@@ -347,9 +362,24 @@ static int run(demo_options_t *options)
     if (options->wired && (result = demo_wired_start(options, &identity)) != RTCP_OK)
         goto done;
 #endif
-    demo_endpoint_t active = { 0 };
+    const carplay_session_callbacks_t callbacks = {
+        .now_playing = demo_track_update,
+#ifdef CARPLAY_LVGL
+        .host_ui = options->headless ? NULL : demo_launcher_show_local,
+#endif
+    };
+#ifdef CARPLAY_LVGL
+    const demo_launcher_commands_t launcher = {
+        .set_projection = launcher_set_projection,
+        .send_touch = launcher_send_touch,
+        .context = &receiver,
+    };
+    uint64_t receiver_generation = 0;
+#endif
+    demo_endpoint_t active = { 0 }, candidate = { 0 };
     rtcp_receiver_state_t previous = { 0 };
-    uint64_t retry_after = 0, advertise_after = 0;
+    carplay_connection_retry_t retry = { 0 };
+    uint64_t advertise_after = 0;
     while (!demo_stop)
     {
         demo_endpoint_t endpoint = { 0 };
@@ -364,9 +394,12 @@ static int run(demo_options_t *options)
             snprintf(endpoint.interface, sizeof(endpoint.interface), "%s", options->interface);
         }
 
-        if (receiver && (strcmp(active.interface, endpoint.interface) ||
-                         strcmp(active.address, endpoint.address) ||
-                         active.generation != endpoint.generation))
+        if (!same_endpoint(&candidate, &endpoint))
+        {
+            candidate = endpoint;
+            retry = (carplay_connection_retry_t){ 0 };
+        }
+        if (receiver && !same_endpoint(&active, &endpoint))
         {
 #ifdef CARPLAY_BLUEZ
             if (options->wireless)
@@ -376,16 +409,19 @@ static int run(demo_options_t *options)
                 mdns_responder_close(mdns, &network);
             mdns_responder_destroy(mdns);
             mdns = NULL;
-            rtcp_receiver_destroy(receiver);
-            receiver = NULL;
+            result = carplay_session_close(&receiver);
+            if (result != RTCP_OK)
+                goto done;
 #ifdef CARPLAY_AIC_MPP
             demo_video_session(false);
 #endif
-            retry_after = 0;
+#ifdef CARPLAY_LVGL
+            ++receiver_generation;
+#endif
             demo_track_update(&(rtcp_now_playing_details_t){ .invalidated = true }, NULL);
         }
         uint64_t now = rtcp_os_linux.now_ms();
-        if (!receiver && endpoint.address[0] && now >= retry_after)
+        if (!receiver && endpoint.address[0] && !carplay_retry_remaining(&retry, (uint32_t)now))
         {
             memcpy(active_interface, endpoint.interface, sizeof(active_interface));
             config.family = endpoint.generation ? RTCP_AF_INET6 : RTCP_AF_INET;
@@ -394,22 +430,20 @@ static int run(demo_options_t *options)
             if (options->wireless && !endpoint.generation)
                 demo_wireless_backend(&config.iap2);
 #endif
-            result = rtcp_receiver_create(&config, &receiver);
-            if (result == RTCP_OK)
-                result = rtcp_receiver_start(receiver);
+            result = carplay_session_open(&receiver, &config, &callbacks);
             if (result != RTCP_OK)
             {
                 fprintf(stderr, "carplay: listen on %s failed (%d)\n", active_interface, result);
-                rtcp_receiver_destroy(receiver);
-                receiver = NULL;
-                retry_after = now + 2000;
+                carplay_retry_schedule(&retry, (uint32_t)now, result);
+                result = carplay_session_close(&receiver);
+                if (result != RTCP_OK)
+                    goto done;
             }
             else
             {
                 active = endpoint;
-                rtcp_receiver_set_now_playing_details_callback(receiver, demo_track_update, NULL);
 #ifdef CARPLAY_LVGL
-                demo_launcher_bind(receiver);
+                ++receiver_generation;
 #endif
                 fprintf(stderr, "carplay: RTSP ready on %s [%s]:%u\n", active.interface,
                         active.address, rtcp_receiver_port(receiver));
@@ -455,7 +489,15 @@ static int run(demo_options_t *options)
         projection = state.input_ready && demo_video_visible();
 #endif
 #ifdef CARPLAY_LVGL
-        demo_launcher_step(receiver, &state, active.generation != 0, projection);
+        const demo_launcher_snapshot_t snapshot = {
+            .receiver = state,
+            .projection_owner = rtcp_receiver_get_projection_owner(receiver),
+            .stream_generation = rtcp_receiver_get_projection_stream_generation(receiver),
+            .receiver_generation = receiver_generation,
+            .wired = active.generation != 0,
+            .projection_visible = projection,
+        };
+        demo_launcher_step(&launcher, &snapshot);
 #else
         (void)projection;
 #endif
@@ -468,7 +510,7 @@ done:
     if (mdns)
         mdns_responder_close(mdns, &network);
     mdns_responder_destroy(mdns);
-    rtcp_receiver_destroy(receiver);
+    (void)carplay_session_close(&receiver);
 #ifdef CARPLAY_BLUEZ
     demo_wireless_close();
 #endif

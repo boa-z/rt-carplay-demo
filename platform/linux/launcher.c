@@ -74,7 +74,7 @@ static struct
     carplay_phone_hub_t phone_hub;
     char theme_path[256], display_path[256];
     bool initialized, projected, want_project, want_local, phone_requested_local, event_connected;
-    uint64_t update_after;
+    uint64_t update_after, receiver_generation;
 #ifdef CARPLAY_AIC_MPP
     struct aicfb_alpha_config original_alpha;
     struct aicfb_layer_data original_layer;
@@ -123,7 +123,7 @@ static int coordinate(int raw, const struct input_absinfo *limits, int extent)
                  ((int64_t)limits->maximum - limits->minimum));
 }
 
-static void dispatch(rtcp_receiver_t *receiver)
+static void dispatch(const demo_launcher_commands_t *commands)
 {
     bool changed = false, pressed = false;
 #ifdef CARPLAY_AIC_MPP
@@ -192,11 +192,11 @@ static void dispatch(rtcp_receiver_t *receiver)
         }
     }
     ui.pointer_down = pressed;
-    if (changed && receiver && ui.projected)
-        rtcp_receiver_send_touch(receiver, ui.report);
+    if (changed && ui.projected)
+        commands->send_touch(ui.report, commands->context);
 }
 
-static void touch_events(rtcp_receiver_t *receiver)
+static void touch_events(const demo_launcher_commands_t *commands)
 {
     if (ui.touch < 0)
         return;
@@ -209,13 +209,13 @@ static void touch_events(rtcp_receiver_t *receiver)
             memset(ui.contacts, 0, sizeof(ui.contacts));
             memset(ui.report, 0, sizeof(ui.report));
             ui.pointer_down = false;
-            if (receiver && ui.projected)
-                rtcp_receiver_send_touch(receiver, ui.report);
+            if (ui.projected)
+                commands->send_touch(ui.report, commands->context);
         }
         else if (event.type == EV_SYN && event.code == SYN_REPORT)
         {
             ui.discard = false;
-            dispatch(receiver);
+            dispatch(commands);
         }
         else if (!ui.discard && event.type == EV_ABS)
         {
@@ -315,9 +315,11 @@ static void connect_phone(lv_event_t *event)
 #endif
 }
 
-static bool host_ui(void *context)
+bool demo_launcher_show_local(void *context)
 {
     (void)context;
+    if (!ui.initialized)
+        return false;
     ui.phone_requested_local = true;
     ui.want_local = true;
     fprintf(stderr, "carplay: phone requested host UI\n");
@@ -386,7 +388,6 @@ static void build_pages(void)
     lv_obj_set_style_text_font(ui.dashboard.media, &carplay_cjk_full_18, 0);
     lv_obj_set_style_text_font(ui.dashboard.artist, &carplay_cjk_full_18, 0);
     carplay_phone_hub_build(&ui.phone_hub, ui.pages[1], show_phone_details);
-    lv_obj_add_flag(ui.phone_hub.progress, LV_OBJ_FLAG_HIDDEN);
     lv_obj_t *connection = carplay_connection_card_build(ui.pages[1], &ui.connection, &ui.connection_transport);
     ui.project_button = carplay_connection_action(connection, connect_phone, &ui.project_label);
 #ifdef CARPLAY_AIC_MPP
@@ -445,7 +446,7 @@ static void build_pages(void)
 
 static void refresh_phone(void)
 {
-    demo_track_t track;
+    carplay_phone_track_t track;
     demo_phone_status_t phone;
     demo_route_t route;
     demo_phone_snapshot(&track, &phone, &route);
@@ -461,12 +462,7 @@ static void refresh_phone(void)
                                                                                                            : "No active route");
     carplay_ui_set_text(ui.phone_hub.road, route.road);
     carplay_ui_set_text(ui.phone_hub.turn_distance, route.distance);
-    char artist[sizeof(track.artist) + sizeof(track.album) + 3];
-    snprintf(artist, sizeof(artist), "%s%s%s", track.artist,
-             track.artist[0] && track.album[0] ? " / " : "", track.album);
-    carplay_ui_set_text(ui.phone_hub.title, track.title[0] ? track.title : "-");
-    carplay_ui_set_text(ui.phone_hub.artist, artist);
-    carplay_ui_set_text(ui.phone_hub.playback, track.title[0] && track.playing ? "Playing" : "");
+    carplay_phone_hub_track(&ui.phone_hub, &track);
     static const char * const charging[] = { "Not charging", "Charging", "Charged" };
     const char *power = phone.has_charging && phone.charging < 3 ? charging[phone.charging] : "";
     if (phone.has_battery)
@@ -626,22 +622,14 @@ int demo_launcher_open(demo_options_t *options)
     return RTCP_OK;
 }
 
-static void release_touches(rtcp_receiver_t *receiver)
+static void release_touches(const demo_launcher_commands_t *commands)
 {
     memset(ui.report, 0, sizeof(ui.report));
-    if (ui.projected && receiver)
-        rtcp_receiver_send_touch(receiver, ui.report);
+    if (ui.projected && commands)
+        commands->send_touch(ui.report, commands->context);
     for (unsigned index = 0; index < TOUCH_SLOTS; ++index)
         ui.contacts[index].owner = ui.contacts[index].active ? TOUCH_OUTSIDE : 0;
     ui.pointer_down = false;
-}
-
-void demo_launcher_bind(rtcp_receiver_t *receiver)
-{
-    if (!ui.initialized)
-        return;
-    if (receiver)
-        rtcp_receiver_set_host_ui_callback(receiver, host_ui, NULL);
 }
 
 #ifdef CARPLAY_AIC_MPP
@@ -664,34 +652,36 @@ void demo_launcher_attach_media(rtcp_media_backend_t *media)
 #endif
 }
 
-void demo_launcher_step(rtcp_receiver_t *receiver, const rtcp_receiver_state_t *state,
-                        bool wired, bool projection)
+void demo_launcher_step(const demo_launcher_commands_t *commands,
+                        const demo_launcher_snapshot_t *snapshot)
 {
     if (!ui.initialized)
         return;
+    const rtcp_receiver_state_t *state = &snapshot->receiver;
+    bool replaced = ui.receiver_generation != snapshot->receiver_generation;
+    ui.receiver_generation = snapshot->receiver_generation;
     uint64_t now = rtcp_os_linux.now_ms();
-#ifdef CARPLAY_AIC_MPP
-    uint32_t stream = rtcp_receiver_get_projection_stream_generation(receiver);
-    if (ui.event_connected && !state->input_ready)
+    if (ui.event_connected && (replaced || !state->input_ready))
     {
         ui.want_local = ui.want_project = ui.phone_requested_local = false;
+#ifdef CARPLAY_AIC_MPP
         ui.retained_stream = 0;
         ui.resume_until = 0;
         carplay_fusion_set_mode(ui.fusion_selected ? CARPLAY_FUSION : CARPLAY_FULLSCREEN);
         carplay_fusion_set_projection_hidden(false);
-    }
 #endif
+    }
     ui.event_connected = state->input_ready;
     if (ui.want_local)
     {
 #ifdef CARPLAY_AIC_MPP
-        ui.retained_stream = ui.projected ? stream : 0;
+        ui.retained_stream = ui.projected ? snapshot->stream_generation : 0;
         ui.resume_until = 0;
         carplay_fusion_set_projection_hidden(true);
 #endif
         if (!ui.phone_requested_local)
             fprintf(stderr, "carplay: projection pause rc=%d\n",
-                    rtcp_receiver_set_projection_enabled(receiver, false));
+                    commands->set_projection(false, commands->context));
         ui.phone_requested_local = false;
         ui.want_local = false;
         show_page(0);
@@ -701,7 +691,7 @@ void demo_launcher_step(rtcp_receiver_t *receiver, const rtcp_receiver_state_t *
 #ifdef CARPLAY_AIC_MPP
         ui.screen_owner_changed = false;
 #endif
-        int result = rtcp_receiver_set_projection_enabled(receiver, true);
+        int result = commands->set_projection(true, commands->context);
         fprintf(stderr, "carplay: projection resume rc=%d\n", result);
 #ifdef CARPLAY_AIC_MPP
         if (result == RTCP_OK)
@@ -709,16 +699,16 @@ void demo_launcher_step(rtcp_receiver_t *receiver, const rtcp_receiver_state_t *
             carplay_fusion_set_mode(ui.fusion_selected ? CARPLAY_FUSION : CARPLAY_FULLSCREEN);
             carplay_fusion_resume_projection_on_frame();
             ui.resume_until = now + 5000;
-            rtcp_receiver_request_screen_keyframe(receiver);
         }
 #endif
     }
     ui.want_project = false;
-    bool next = projection;
+    bool next = snapshot->projection_visible;
     bool fusion = false, geometry_changed = false;
 #ifdef CARPLAY_AIC_MPP
-    if (ui.resume_until && ui.screen_owner_changed && stream && stream == ui.retained_stream &&
-        rtcp_receiver_get_projection_owner(receiver) == RTCP_PROJECTION_PHONE &&
+    if (ui.resume_until && ui.screen_owner_changed && snapshot->stream_generation &&
+        snapshot->stream_generation == ui.retained_stream &&
+        snapshot->projection_owner == RTCP_PROJECTION_PHONE &&
         carplay_fusion_resume_latched_projection())
         fprintf(stderr, "carplay: projection resumed from retained frame\n");
     ui.screen_owner_changed = false;
@@ -740,8 +730,8 @@ void demo_launcher_step(rtcp_receiver_t *receiver, const rtcp_receiver_state_t *
 #else
     bool fusion_changed = false;
 #endif
-    if (geometry_changed || next != ui.projected || fusion_changed)
-        release_touches(receiver);
+    if (replaced || geometry_changed || next != ui.projected || fusion_changed)
+        release_touches(replaced ? NULL : commands);
     if (next != ui.projected || fusion_changed)
     {
         if (set_projection(next, fusion))
@@ -771,15 +761,15 @@ void demo_launcher_step(rtcp_receiver_t *receiver, const rtcp_receiver_state_t *
         }
 #endif
     }
-    touch_events(receiver);
+    touch_events(commands);
     if (now >= ui.update_after)
     {
         const char *name = ui.options->wireless ? "USB / Wi-Fi" : (ui.options->wired ? "USB" : "LAN");
         const char *status = state->input_ready ? "Connected" : (state->transport_connected ? "Starting CarPlay" : "Waiting for phone");
         lv_label_set_text_fmt(ui.status, "%s  ·  %s", name, status);
         carplay_ui_set_text(ui.connection, status);
-        const char *transport = wired ? "iPhone · USB" : ui.options->wireless ? "iPhone · Wireless"
-                                                                              : "LAN";
+        const char *transport = snapshot->wired ? "iPhone · USB" : ui.options->wireless ? "iPhone · Wireless"
+                                                                                        : "LAN";
         carplay_ui_set_text(ui.connection_transport, state->transport_connected ? transport : ui.options->wireless ? "Available over USB and Wi-Fi"
                                                                                                                    : "Available over USB");
         carplay_ui_set_text(ui.dashboard.connection, status);

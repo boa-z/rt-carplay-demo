@@ -9,6 +9,7 @@ CHERRYUSB_ROOT ?= $(SDK_ROOT)/packages/third-party/cherryusb
 IPHETH_ROOT ?= $(SDK_ROOT)/packages/third-party/cherryusb-ipheth
 LVGL_ROOT ?= $(SDK_ROOT)/packages/artinchip/lvgl-ui/lvgl_v9/lvgl
 BUILD ?= build
+APP_SESSION_SOURCES := app/receiver_session.c app/phone_track.c
 
 .PHONY: check-native-ncm
 check-native-ncm: | $(BUILD)
@@ -96,11 +97,11 @@ check-rtthread-app: $(BUILD)/test_rtthread_app
 check-wired-identity: check-rtthread-app | $(BUILD)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -Itests/wired_identity -Itests/internet_share -I$(SDK_ROOT)/kernel/rt-thread/components/net/lwip/lwip-2.1.2/src/include -ffunction-sections -fdata-sections tests/unit/test_wired_identity.c -Wl,--gc-sections -o $(BUILD)/test_wired_identity
 	$(BUILD)/test_wired_identity
-	$(CC) $(CFLAGS) $(CPPFLAGS) -DTEST_LEGACY_WIRED_IDENTITY -Itests/support/rtthread_app -Iplatform -Wno-unused-function -ffunction-sections -fdata-sections tests/unit/test_rtthread_app.c $(BUILD)/rtthread-app/os.o $(BUILD)/rtthread-app/net.o $(LIB) $(MBEDTLS_LIB) $(LDLIBS) -pthread -Wl,--gc-sections -o $(BUILD)/test_rtthread_app_legacy
+	$(CC) $(CFLAGS) $(CPPFLAGS) -DTEST_LEGACY_WIRED_IDENTITY -Itests/support/rtthread_app -Iplatform -Wno-unused-function -ffunction-sections -fdata-sections tests/unit/test_rtthread_app.c $(APP_SESSION_SOURCES) $(BUILD)/rtthread-app/os.o $(BUILD)/rtthread-app/net.o $(LIB) $(MBEDTLS_LIB) $(LDLIBS) -pthread -Wl,--gc-sections -o $(BUILD)/test_rtthread_app_legacy
 	$(BUILD)/test_rtthread_app_legacy
 
 $(BUILD)/test_rtthread_app: tests/unit/test_rtthread_app.c app/carplay_app.c \
-    app/carplay_app.h app/pairing_files.c \
+    app/carplay_app.h app/pairing_files.c $(APP_SESSION_SOURCES) app/receiver_session.h app/phone_track.h \
     tests/support/rtthread_app/rtthread.h $(RTCP_ROOT)/port/linux/rtcp_os_linux.c \
     $(RTCP_ROOT)/port/linux/rtcp_net_linux.c $(LIB) $(MBEDTLS_LIB) $(AUDIO_LIBS)
 	@mkdir -p $(BUILD)/rtthread-app
@@ -108,7 +109,7 @@ $(BUILD)/test_rtthread_app: tests/unit/test_rtthread_app.c app/carplay_app.c \
 	$(CC) $(CFLAGS) $(CPPFLAGS) -Drtcp_net_linux=rtcp_net_rtthread -c $(RTCP_ROOT)/port/linux/rtcp_net_linux.c -o $(BUILD)/rtthread-app/net.o
 	$(CC) $(CFLAGS) $(CPPFLAGS) -Itests/support/rtthread_app -Iplatform \
 	  -Wno-unused-function -ffunction-sections -fdata-sections tests/unit/test_rtthread_app.c \
-	  $(BUILD)/rtthread-app/os.o $(BUILD)/rtthread-app/net.o $(LIB) $(MBEDTLS_LIB) $(LDLIBS) \
+	  $(APP_SESSION_SOURCES) $(BUILD)/rtthread-app/os.o $(BUILD)/rtthread-app/net.o $(LIB) $(MBEDTLS_LIB) $(LDLIBS) \
 	  -pthread -Wl,--gc-sections -o $(BUILD)/test_rtthread_app
 
 .PHONY: check-vehicle-protocol-demo
@@ -116,7 +117,7 @@ check-vehicle-protocol-demo: $(BUILD)/test_rtthread_app
 	$(CC) $(CFLAGS) $(CPPFLAGS) -Itests/support/rtthread_app -Iplatform \
 	  -DRTCARPLAY_DEMO_LAUNCHER -DRTCARPLAY_VEHICLE_PROTOCOL_DEMO -DRTCARPLAY_SINGLE_SCREEN_FUSION \
 	  -Wno-unused-function -ffunction-sections -fdata-sections tests/unit/test_rtthread_app.c \
-	  app/vehicle_protocol_demo.c app/fusion_display.c $(BUILD)/rtthread-app/os.o $(BUILD)/rtthread-app/net.o \
+	  $(APP_SESSION_SOURCES) app/vehicle_protocol_demo.c app/fusion_display.c $(BUILD)/rtthread-app/os.o $(BUILD)/rtthread-app/net.o \
 	  $(LIB) $(MBEDTLS_LIB) $(LDLIBS) -pthread -Wl,--gc-sections -o $(BUILD)/test_rtthread_app_vehicle
 	$(BUILD)/test_rtthread_app_vehicle
 	$(CC) $(CFLAGS) $(CPPFLAGS) tests/unit/test_vehicle_protocol_demo.c \
@@ -174,16 +175,16 @@ check-auto-connections:
 	@mkdir -p $(BUILD)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -DRTCARPLAY_IAP2 -DLPKG_RT_CARPLAY_LUBANLITE_WIFI \
 	  -Itests/support/lubanlite_demo -DRTCP_CONNECTION_SOURCE='"$(abspath app/connection_manager.c)"' \
-	  tests/unit/test_connection_auto.c app/pairing_manager.c -o $(BUILD)/test_connection_auto_headless
+	  tests/unit/test_connection_auto.c app/pairing_manager.c app/connection_retry.c -o $(BUILD)/test_connection_auto_headless
 	$(BUILD)/test_connection_auto_headless
 	$(CC) $(CFLAGS) $(CPPFLAGS) -DRTCARPLAY_VIDEO -DRTCARPLAY_IAP2 -DLPKG_RT_CARPLAY_LUBANLITE_WIFI \
 	  -Itests/support/lubanlite_demo -DRTCP_CONNECTION_SOURCE='"$(abspath app/connection_manager.c)"' \
-	  tests/unit/test_connection_auto.c app/pairing_manager.c -o $(BUILD)/test_connection_auto_gui
+	  tests/unit/test_connection_auto.c app/pairing_manager.c app/connection_retry.c -o $(BUILD)/test_connection_auto_gui
 	$(BUILD)/test_connection_auto_gui
 	$(CC) $(CFLAGS) $(CPPFLAGS) -DRTCARPLAY_VIDEO -DRTCARPLAY_IAP2 -DLPKG_RT_CARPLAY_LUBANLITE_WIFI \
 	  -DRTCARPLAY_SINGLE_SCREEN_FUSION -Itests/support/lubanlite_demo \
 	  -DRTCP_CONNECTION_SOURCE='"$(abspath app/connection_manager.c)"' \
-	  tests/unit/test_connection_auto.c app/pairing_manager.c -o $(BUILD)/test_connection_auto_fusion
+	  tests/unit/test_connection_auto.c app/pairing_manager.c app/connection_retry.c -o $(BUILD)/test_connection_auto_fusion
 	$(BUILD)/test_connection_auto_fusion
 
 .PHONY: check-lubanlite-demo
@@ -199,7 +200,7 @@ check-lubanlite-demo:
 	  -Itests/support/lubanlite_demo -Iplatform \
 	  -I$(LVGL_ROOT) \
 	  -DRTCP_CONNECTION_SOURCE='"$(abspath app/connection_manager.c)"' \
-	  -ffunction-sections -fdata-sections tests/unit/test_lubanlite_demo.c app/pairing_manager.c platform/launcher_touch_lubanlite.c \
+	  -ffunction-sections -fdata-sections tests/unit/test_lubanlite_demo.c app/pairing_manager.c app/connection_retry.c platform/launcher_touch_lubanlite.c \
 	  -Wl,--gc-sections -o $(BUILD)/test_lubanlite_demo
 	$(BUILD)/test_lubanlite_demo
 

@@ -3,6 +3,7 @@
 
 #include "lvgl.h"
 #include "carplay_ui_theme.h"
+#include "phone_track.h"
 #include "vehicle_instruments.h"
 
 enum
@@ -42,6 +43,8 @@ typedef struct
     lv_obj_t *maneuvers[CARPLAY_HUB_MANEUVER_ROWS], *lane_strip;
     lv_obj_t *lanes[CARPLAY_HUB_LANES];
 } carplay_phone_hub_t;
+
+void carplay_phone_hub_track(carplay_phone_hub_t *hub, const carplay_phone_track_t *track);
 
 void carplay_phone_hub_build(carplay_phone_hub_t *hub, lv_obj_t *parent, lv_event_cb_t open_details);
 

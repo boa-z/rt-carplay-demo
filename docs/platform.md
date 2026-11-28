@@ -4,7 +4,9 @@
 
 ## Ownership and data flow
 
-`app/connection_manager.c` arbitrates transports. The poll worker in `app/carplay_app.c` owns the Receiver, publishes copied session snapshots and consumes a command queue. Launcher and Fusion display those snapshots and enqueue user requests. Refer to [session snapshots](session-snapshots.md) and [connection management](connection-manager.md) for shutdown and handoff.
+Both builds use `app/receiver_session.c` for Receiver creation, callback registration and destruction, `app/connection_retry.c` for bounded retry delays, and `app/phone_track.c` for merging Now Playing updates. Each platform owner controls when to start and retire a session, including the teardown order for borrowed media resources. The shared Phone Hub view renders copied track data, playback state and timing.
+
+On RT-Thread, `app/connection_manager.c` arbitrates transports. The poll worker in `app/carplay_app.c` owns the Receiver, publishes copied session snapshots and consumes a command queue. Launcher and Fusion display those snapshots and enqueue user requests. Refer to [session snapshots](session-snapshots.md) and [connection management](connection-manager.md) for shutdown and handoff.
 
 The platform sinks retain buffer ownership through asynchronous decode, presentation and VSync. Keep the bounded queues, backpressure and release paths when adapting new hardware. Reuse the SDK platform descriptors to keep audio/video buffers on their existing paths.
 
@@ -27,4 +29,8 @@ AIC8800D40 has a separate hardware target with A/B OTA. Its CPIO carries a speci
 
 ## Linux path
 
-Start with the existing CMake LVGL Preview. Reuse the SDK Linux OS/network ports, then connect the Receiver owner and the command/snapshot boundary. Validate USB and wireless identity, audio, video and touch as individual adapters. Keep RT-Thread on SCons/Kconfig and add production CMake targets as each Linux adapter becomes usable.
+The Linux main loop owns the Receiver and invokes Launcher commands synchronously on the same thread. The Launcher receives a session snapshot with the Receiver and screen-stream generations. On endpoint replacement it clears local touch ownership without sending the old contact report to the new Receiver. libusb and ALSA keep their worker threads. USB endpoint selection takes priority when its address is ready, while RT-Thread uses its transport reservation worker.
+
+Build the native Linux LAN Receiver with `cmake -S . -B build/linux -DRTCP_ROOT=/path/to/rt-carplay -DRTCP_MBEDTLS_DIR=/path/to/mbedtls` and `cmake --build build/linux`. `CARPLAY_USB`, `CARPLAY_BLUEZ`, `CARPLAY_ALSA`, `CARPLAY_LVGL` and `CARPLAY_AIC_MPP` are independent opt-ins. Enable LVGL with `-DLVGL_ROOT=/path/to/lvgl`, using the revision in `.ci/dependencies.env`. D21x Linux firmware enables all five options through the Luban integration. The Linux `theme` and `display-mode` files and the RT-Thread `CPUI` record keep their existing formats.
+
+Production Launcher entry points still compose platform-specific pages and bind their platform services. The common UI includes the shell, Dashboard, Phone Hub and Fusion strip. The RT-Thread preview exercises its production Launcher and the common UI widgets.

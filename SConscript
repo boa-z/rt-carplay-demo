@@ -19,7 +19,7 @@ if not os.path.isabs(repo):
     repo = os.path.join(cwd, repo)
 repo = os.path.normpath(repo)
 
-src = Glob('main.c') + Glob('app/carplay_app.c')
+src = Glob('main.c') + Glob('app/carplay_app.c') + Glob('app/receiver_session.c') + Glob('app/phone_track.c')
 if GetDepend('RTCARPLAY_DEMO_LAUNCHER'):
     src += Glob('ui/*.c')
     src += Glob('ui/fonts/*.c')
@@ -37,7 +37,7 @@ if GetDepend('RTCARPLAY_SINGLE_SCREEN_FUSION'):
 if GetDepend('RTCARPLAY_VEHICLE_PROTOCOL_DEMO'):
     src += Glob('app/vehicle_protocol_demo.c')
 if GetDepend('RTCARPLAY_AUTO_CONNECT'):
-    src += Glob('app/connection_manager.c')
+    src += Glob('app/connection_manager.c') + Glob('app/connection_retry.c')
     src += Glob('app/launcher_preferences.c')
 if GetDepend('RTCARPLAY_INTERNET_SHARE'):
     src += Glob('platform/internet_share_lubanlite.c')
