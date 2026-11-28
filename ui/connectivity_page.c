@@ -58,13 +58,7 @@ void carplay_connectivity_build(carplay_connectivity_view_t *view, lv_obj_t *pag
     lv_obj_t *card = carplay_connection_card_build(page, &view->state, &view->transport);
     view->capabilities = connection_label(card, "", &carplay_ui_18, CARPLAY_STYLE_MUTED);
     lv_obj_set_pos(view->capabilities, 76, 66);
-    view->action = carplay_settings_row(card, "Connect phone", &carplay_icon_link_24,
-                                        false, connect_phone, NULL);
-    lv_obj_set_size(view->action, 254, 64);
-    lv_obj_align(view->action, LV_ALIGN_RIGHT_MID, -16, 0);
-    view->action_label = lv_obj_get_child(view->action, 1);
-    carplay_ui_style(view->action, CARPLAY_STYLE_ACCENT_CARD);
-    carplay_ui_style_part(view->action, CARPLAY_STYLE_CARD_ALT, LV_STATE_DISABLED);
+    view->action = carplay_connection_action(card, connect_phone, &view->action_label);
 }
 
 const char *carplay_connectivity_state(const demo_status_t *status)

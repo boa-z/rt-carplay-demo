@@ -121,7 +121,10 @@ void demo_video_session(bool live);
 #endif
 #ifdef CARPLAY_LVGL
 int demo_launcher_open(demo_options_t *options);
-void demo_launcher_step(rtcp_receiver_t *receiver, bool projection);
+void demo_launcher_bind(rtcp_receiver_t *receiver);
+void demo_launcher_attach_media(rtcp_media_backend_t *media);
+void demo_launcher_step(rtcp_receiver_t *receiver, const rtcp_receiver_state_t *state,
+                        bool wired, bool projection);
 void demo_launcher_close(void);
 #endif
 

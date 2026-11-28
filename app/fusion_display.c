@@ -215,7 +215,8 @@ void carplay_fusion_video_latched(const rtcp_display_rect_t *rect, uint16_t widt
     fusion_guard_t guard = fusion_lock();
     if (state.initialized)
     {
-        bool resuming = resume_on_frame && new_frame;
+        bool resuming = resume_on_frame && new_frame && generation == state.generation &&
+                        state.requested != CARPLAY_LOCAL;
         if (resuming || !state.video_active || memcmp(&state.video_rect, rect, sizeof(*rect)) ||
             state.logical_width != width || state.logical_height != height)
             advance(&state.touch_epoch);

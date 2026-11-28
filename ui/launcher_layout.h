@@ -46,6 +46,7 @@ typedef struct
 void carplay_phone_hub_build(carplay_phone_hub_t *hub, lv_obj_t *parent, lv_event_cb_t open_details);
 
 lv_obj_t *carplay_connection_card_build(lv_obj_t *parent, lv_obj_t **state, lv_obj_t **transport);
+lv_obj_t *carplay_connection_action(lv_obj_t *card, lv_event_cb_t activate, lv_obj_t **label);
 
 enum
 {
@@ -58,4 +59,5 @@ enum
 lv_obj_t *carplay_settings_frame_build(lv_obj_t *parent, lv_obj_t **heading, lv_event_cb_t go_back);
 lv_obj_t *carplay_settings_detail_create(lv_obj_t *parent);
 void carplay_appearance_build(lv_obj_t *parent, int top, lv_obj_t *buttons[2], lv_event_cb_t select);
+lv_obj_t *carplay_projection_settings_build(lv_obj_t *parent, lv_obj_t *buttons[2], lv_event_cb_t select);
 void carplay_segments_select(lv_obj_t * const *buttons, unsigned count, unsigned selected);

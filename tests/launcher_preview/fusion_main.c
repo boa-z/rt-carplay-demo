@@ -2,7 +2,9 @@
 /* Actual LVGL software rendering of the V4 fusion strip. A modeled video latch
  * is layout input, never an assertion about DE, iPhone negotiation or Ultra. */
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "../../ui/fusion_dashboard.c"
 
 static uint8_t pixels[1024 * 600 * 4];
@@ -139,13 +141,8 @@ static void screenshot(const char *directory, const char *name, demo_status_t *s
         projection_armed = false;
     if (expect_visible && !lv_obj_has_flag(strip, LV_OBJ_FLAG_HIDDEN))
     {
-        inside(speed_caption);
-        inside(speed_label);
-        inside(unit_label);
-        inside(soc_caption);
-        inside(soc_label);
-        inside(soc_bar);
-        inside(home_button);
+        for (uint32_t index = 0; index < lv_obj_get_child_count(strip); ++index)
+            inside(lv_obj_get_child(strip, (int32_t)index));
     }
     char path[512];
     snprintf(path, sizeof(path), "%s/%s.ppm", directory, name);
@@ -189,6 +186,8 @@ int main(int argc, char **argv)
     carplay_fusion_video_latched(&rect, 768, 600, s.generation, now, true);
     status.stage = DEMO_LIVE;
     screenshot(argv[1], "05-fusion_dark_en", &status, true);
+    lv_obj_t *speed_label = lv_obj_get_child(strip, 2);
+    lv_obj_t *soc_label = lv_obj_get_child(strip, 6);
     assert(!strcmp(lv_label_get_text(speed_label), "26"));
     assert(!strcmp(lv_label_get_text(soc_label), "82%"));
 
@@ -213,7 +212,7 @@ int main(int argc, char **argv)
 
     /* "Dashboard" selects the dashboard page and hands the panel to it; the
      * projection request itself is unchanged, so Resume CarPlay can restore it. */
-    lv_obj_send_event(home_button, LV_EVENT_CLICKED, NULL);
+    lv_obj_send_event(lv_obj_get_child(strip, -1), LV_EVENT_CLICKED, NULL);
     assert(launcher_selected);
     assert(selected == CARPLAY_FUSION);
     assert(carplay_fusion_ui_update(&status) == false); /* launcher owns it now */
@@ -222,6 +221,8 @@ int main(int argc, char **argv)
     carplay_fusion_resume_projection_on_frame();
     assert(carplay_fusion_ui_update(&status) == false);
     carplay_fusion_snapshot(now, &s);
+    carplay_fusion_video_latched(&rect, 768, 600, s.generation - 1, now, true);
+    assert(carplay_fusion_ui_update(&status) == false);
     carplay_fusion_video_latched(&rect, 768, 600, s.generation, now, true);
     assert(carplay_fusion_ui_update(&status) == true);
 

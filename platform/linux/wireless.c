@@ -68,7 +68,7 @@ static struct
     uint8_t channel;
     uint8_t pending[16384];
     size_t pending_size;
-    bool link_failed, tunnel_failed, handoff;
+    bool link_failed, tunnel_failed, handoff, event_connected;
 } radio = { .fd = -1, .passkey = -1 };
 
 static void bluetooth_stop(void);
@@ -333,7 +333,8 @@ static void link_event(iap2_session_event_t event, void *context)
     bool *failed = context;
     if (event == IAP2_SESSION_EVENT_LINK_DEAD || event == IAP2_SESSION_EVENT_MFI_FAILED)
         *failed = true;
-    fprintf(stderr, "carplay: wireless iAP2 event %d\n", event);
+    fprintf(stderr, "carplay: wireless iAP2 %s event %d\n",
+            failed == &radio.tunnel_failed ? "tunnel" : "RFCOMM", event);
 }
 
 static iap2_session_t *new_link(bool tunnel)
@@ -353,7 +354,12 @@ static iap2_session_t *new_link(bool tunnel)
     };
     iap2_session_t *session = iap2_session_create(&config);
     if (session)
-        iap2_session_link_up(session, rtcp_os_linux.now_ms());
+    {
+        uint64_t now = rtcp_os_linux.now_ms();
+        iap2_session_link_up(session, now);
+        if (tunnel)
+            iap2_session_notify_airplay_event(session, true, now);
+    }
     return session;
 }
 
@@ -421,6 +427,7 @@ static void rfcomm_close(void)
     radio.peer_path[0] = '\0';
     radio.link_failed = false;
     radio.handoff = false;
+    radio.event_connected = false;
 }
 
 void demo_wireless_step(rtcp_receiver_t *receiver, const char *ip, bool active)
@@ -458,6 +465,13 @@ void demo_wireless_step(rtcp_receiver_t *receiver, const char *ip, bool active)
     {
         rfcomm_close();
         return;
+    }
+    rtcp_receiver_state_t state = { 0 };
+    rtcp_receiver_get_state(radio.receiver, &state);
+    if (state.input_ready != radio.event_connected)
+    {
+        radio.event_connected = state.input_ready;
+        iap2_session_notify_airplay_event(radio.link, state.input_ready, now);
     }
     if (radio.pending_size)
     {

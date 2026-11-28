@@ -23,6 +23,7 @@
 #include "ui_language.h"
 #ifdef CARPLAY_AIC_MPP
 #include <video/artinchip_fb.h>
+#include "fusion_dashboard.h"
 #include "fusion_display.h"
 #endif
 
@@ -31,7 +32,6 @@ LV_FONT_DECLARE(carplay_ui_18);
 LV_FONT_DECLARE(carplay_ui_21);
 LV_FONT_DECLARE(carplay_ui_34);
 LV_FONT_DECLARE(carplay_cjk_full_18);
-LV_FONT_DECLARE(carplay_display_58);
 enum
 {
     TOUCH_SLOTS = 16,
@@ -62,8 +62,8 @@ static struct
     rtcp_touch_contact_t report[RTCP_TOUCH_CONTACTS];
     lv_display_t *display;
     lv_obj_t *status, *clock, *pages[CARPLAY_SHELL_DESTINATIONS], *project_button;
-    lv_obj_t *connection, *connection_transport, *phone_details;
-    lv_obj_t *theme_buttons[2], *settings_status;
+    lv_obj_t *connection, *connection_transport, *project_label, *phone_details;
+    lv_obj_t *theme_buttons[2], *display_buttons[2], *settings_status;
     lv_obj_t *surface;
     lv_obj_t *power, *cellular, *call;
 #ifdef CARPLAY_BLUEZ
@@ -72,18 +72,20 @@ static struct
     carplay_system_shell_t shell;
     carplay_dashboard_t dashboard;
     carplay_phone_hub_t phone_hub;
-    char theme_path[256];
-    bool initialized, projected, show_local, want_project, want_local;
+    char theme_path[256], display_path[256];
+    bool initialized, projected, want_project, want_local, phone_requested_local, event_connected;
     uint64_t update_after;
 #ifdef CARPLAY_AIC_MPP
     struct aicfb_alpha_config original_alpha;
     struct aicfb_layer_data original_layer;
-    lv_obj_t *fusion_panel, *fusion_button, *fusion_track;
+    lv_obj_t *fusion_panel;
     carplay_instruments_t fusion_instruments;
-    uint32_t touch_epoch;
-    bool alpha_ready, fusion_ready, fusion_selected, fusion_active;
+    uint32_t touch_epoch, retained_stream;
+    uint64_t resume_until, display_retry;
+    bool alpha_ready, fusion_ready, fusion_selected, fusion_active, screen_owner_changed;
+    void (*audio_modes)(const rtcp_audio_modes_t *, void *);
 #endif
-} ui = { .fb = -1, .touch = -1, .show_local = true };
+} ui = { .fb = -1, .touch = -1 };
 
 static uint32_t tick(void)
 {
@@ -302,19 +304,21 @@ static void theme(lv_event_t *event)
     carplay_ui_set_text(ui.settings_status, "Settings saved.");
 }
 
-static void show_projection(lv_event_t *event)
+static void connect_phone(lv_event_t *event)
 {
-#ifdef CARPLAY_AIC_MPP
-    ui.fusion_selected = lv_event_get_user_data(event) != NULL;
-#else
     (void)event;
+    if (ui.event_connected)
+        ui.want_project = true;
+#ifdef CARPLAY_BLUEZ
+    else if (ui.options->wireless)
+        demo_wireless_discoverable();
 #endif
-    ui.want_project = true;
 }
 
 static bool host_ui(void *context)
 {
     (void)context;
+    ui.phone_requested_local = true;
     ui.want_local = true;
     fprintf(stderr, "carplay: phone requested host UI\n");
     return true;
@@ -324,52 +328,31 @@ static void show_home(lv_event_t *event)
 {
     (void)event;
     show_page(0);
-    ui.want_local = true;
 }
 
 #ifdef CARPLAY_AIC_MPP
-static void build_fusion_panel(lv_obj_t *screen)
+static void leave_projection(lv_event_t *event)
 {
-    ui.fusion_panel = carplay_settings_list(screen, 0, 0);
-    lv_obj_set_size(ui.fusion_panel, ui.width / 4, ui.height);
-    lv_obj_align(ui.fusion_panel, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_set_style_radius(ui.fusion_panel, 0, 0);
-    carplay_ui_style(ui.fusion_panel, CARPLAY_STYLE_STRIP);
-    lv_obj_t *speed_caption = lv_label_create(ui.fusion_panel);
-    carplay_ui_set_text(speed_caption, "Speed");
-    lv_obj_t *speed = lv_label_create(ui.fusion_panel);
-    lv_obj_set_style_text_font(speed, &carplay_display_58, 0);
-    lv_obj_t *unit = lv_label_create(ui.fusion_panel);
-    lv_label_set_text_static(unit, "km/h");
-    lv_obj_t *charge_caption = lv_label_create(ui.fusion_panel);
-    carplay_ui_set_text(charge_caption, "Battery");
-    lv_obj_t *charge = lv_label_create(ui.fusion_panel);
-    lv_obj_set_style_text_font(charge, &carplay_display_58, 0);
-    lv_obj_t *bar = lv_bar_create(ui.fusion_panel);
-    lv_obj_set_size(bar, lv_pct(100), 8);
-    lv_bar_set_range(bar, 0, 100);
-    lv_obj_remove_flag(bar, LV_OBJ_FLAG_CLICKABLE);
-    carplay_ui_style_part(bar, CARPLAY_STYLE_BAR_BG, LV_PART_MAIN);
-    carplay_ui_style_part(bar, CARPLAY_STYLE_BAR_FILL, LV_PART_INDICATOR);
-    carplay_instruments_bind(&ui.fusion_instruments, speed, charge, bar, true);
-    carplay_settings_row(ui.fusion_panel, "Full screen", &carplay_icon_smartphone_24,
-                         false, show_projection, NULL);
-    carplay_settings_row(ui.fusion_panel, "Dashboard", &carplay_icon_arrow_left_20,
-                         false, show_home, NULL);
-    ui.fusion_track = lv_label_create(ui.fusion_panel);
-    lv_obj_set_width(ui.fusion_track, lv_pct(100));
-    lv_label_set_long_mode(ui.fusion_track, LV_LABEL_LONG_WRAP);
-    lv_obj_add_flag(ui.fusion_panel, LV_OBJ_FLAG_HIDDEN);
+    (void)event;
+    ui.want_local = true;
 }
+
+static void select_display(lv_event_t *event)
+{
+    uint8_t choice = lv_event_get_user_data(event) != NULL;
+    if (carplay_file_save(ui.display_path, &choice, sizeof(choice)) != RTCP_OK)
+    {
+        carplay_ui_set_text(ui.settings_status, "Settings not saved.");
+        return;
+    }
+    ui.fusion_selected = choice != 0;
+    carplay_segments_select(ui.display_buttons, 2, choice);
+    carplay_ui_set_text(ui.settings_status, "Settings saved.");
+}
+
 #endif
 
 #ifdef CARPLAY_BLUEZ
-static void discoverable(lv_event_t *event)
-{
-    (void)event;
-    demo_wireless_discoverable();
-}
-
 static void confirm_pairing(lv_event_t *event)
 {
     demo_wireless_confirm(lv_event_get_user_data(event) != NULL);
@@ -405,18 +388,13 @@ static void build_pages(void)
     carplay_phone_hub_build(&ui.phone_hub, ui.pages[1], show_phone_details);
     lv_obj_add_flag(ui.phone_hub.progress, LV_OBJ_FLAG_HIDDEN);
     lv_obj_t *connection = carplay_connection_card_build(ui.pages[1], &ui.connection, &ui.connection_transport);
-    ui.project_button = carplay_settings_row(connection, "Full screen", &carplay_icon_smartphone_24,
-                                             false, show_projection, NULL);
-    lv_obj_set_size(ui.project_button, 176, 56);
-    lv_obj_align(ui.project_button, LV_ALIGN_RIGHT_MID, -16, 0);
+    ui.project_button = carplay_connection_action(connection, connect_phone, &ui.project_label);
 #ifdef CARPLAY_AIC_MPP
     if (ui.fusion_ready)
     {
-        ui.fusion_button = carplay_settings_row(connection, "Fusion", &carplay_icon_smartphone_24,
-                                                false, show_projection, ui.surface);
-        lv_obj_set_size(ui.fusion_button, 152, 56);
-        lv_obj_align(ui.fusion_button, LV_ALIGN_RIGHT_MID, -202, 0);
-        build_fusion_panel(screen);
+        ui.fusion_panel = carplay_fusion_strip_build(screen, ui.width, ui.height,
+                                                     &ui.fusion_instruments, leave_projection);
+        lv_obj_add_flag(ui.fusion_panel, LV_OBJ_FLAG_HIDDEN);
     }
 #endif
     ui.phone_details = carplay_launcher_panel(ui.shell.content, 0, 0, 1024, 484, 0, CARPLAY_STYLE_SCREEN);
@@ -438,16 +416,18 @@ static void build_pages(void)
                                              (void *)(uintptr_t)2);
     carplay_settings_tab_select(display, true);
     lv_obj_t *settings = carplay_settings_detail_create(ui.pages[2]);
-    carplay_appearance_build(settings, 0, ui.theme_buttons, theme);
-    ui.settings_status = carplay_launcher_label(settings, "", 6, 142, CARPLAY_SETTINGS_DETAIL_WIDTH - 12,
+    carplay_appearance_build(settings, 123, ui.theme_buttons, theme);
+    ui.settings_status = carplay_launcher_label(settings, "", 6, 100, CARPLAY_SETTINGS_DETAIL_WIDTH - 12,
                                                 &carplay_ui_17, CARPLAY_STYLE_MUTED);
+#ifdef CARPLAY_AIC_MPP
+    (void)carplay_projection_settings_build(settings, ui.display_buttons, select_display);
+    if (!ui.fusion_ready)
+        lv_obj_add_state(ui.display_buttons[1], LV_STATE_DISABLED);
+    carplay_segments_select(ui.display_buttons, 2, ui.fusion_selected);
+#endif
 #ifdef CARPLAY_BLUEZ
     if (ui.options->wireless)
     {
-        lv_obj_t *pair = carplay_settings_row(connection, "Pair phone", &carplay_icon_link_24,
-                                              false, discoverable, NULL);
-        lv_obj_set_size(pair, 158, 56);
-        lv_obj_align(pair, LV_ALIGN_RIGHT_MID, -366, 0);
         ui.pair_panel = carplay_settings_list(screen, 0, 0);
         lv_obj_set_size(ui.pair_panel, lv_pct(65), LV_SIZE_CONTENT);
         lv_obj_center(ui.pair_panel);
@@ -487,10 +467,6 @@ static void refresh_phone(void)
     carplay_ui_set_text(ui.phone_hub.title, track.title[0] ? track.title : "-");
     carplay_ui_set_text(ui.phone_hub.artist, artist);
     carplay_ui_set_text(ui.phone_hub.playback, track.title[0] && track.playing ? "Playing" : "");
-#ifdef CARPLAY_AIC_MPP
-    if (ui.fusion_track)
-        lv_label_set_text(ui.fusion_track, track.title[0] ? track.title : "No media playing");
-#endif
     static const char * const charging[] = { "Not charging", "Charging", "Charged" };
     const char *power = phone.has_charging && phone.charging < 3 ? charging[phone.charging] : "";
     if (phone.has_battery)
@@ -614,8 +590,8 @@ int demo_launcher_open(demo_options_t *options)
     }
     if (ui.touch < 0)
         fprintf(stderr, "carplay: no evdev touchscreen found\n");
-    if (snprintf(ui.theme_path, sizeof(ui.theme_path), "%s/theme", options->directory) >=
-        (int)sizeof(ui.theme_path))
+    if (snprintf(ui.theme_path, sizeof(ui.theme_path), "%s/theme", options->directory) >= (int)sizeof(ui.theme_path) ||
+        snprintf(ui.display_path, sizeof(ui.display_path), "%s/display-mode", options->directory) >= (int)sizeof(ui.display_path))
         return RTCP_EINVAL;
     lv_init();
     ui.initialized = true;
@@ -630,12 +606,22 @@ int demo_launcher_open(demo_options_t *options)
     uint8_t dark = 1;
     size_t length;
     int loaded = carplay_file_load(ui.theme_path, &dark, sizeof(dark), &length);
-    if (loaded != RTCP_OK || (length == 1 && dark > 1))
+    if (loaded != RTCP_OK || length > 1 || (length == 1 && dark > 1))
     {
         fprintf(stderr, "carplay: invalid display appearance setting, using dark theme\n");
         dark = 1;
     }
     carplay_ui_set_dark(dark == 1);
+#ifdef CARPLAY_AIC_MPP
+    uint8_t choice = 1;
+    loaded = carplay_file_load(ui.display_path, &choice, sizeof(choice), &length);
+    if (loaded != RTCP_OK || length > 1 || choice > 1)
+    {
+        fprintf(stderr, "carplay: invalid projection layout setting, using the default\n");
+        choice = 1;
+    }
+    ui.fusion_selected = ui.fusion_ready && choice != 0;
+#endif
     build_pages();
     return RTCP_OK;
 }
@@ -650,36 +636,104 @@ static void release_touches(rtcp_receiver_t *receiver)
     ui.pointer_down = false;
 }
 
-void demo_launcher_step(rtcp_receiver_t *receiver, bool projection)
+void demo_launcher_bind(rtcp_receiver_t *receiver)
 {
     if (!ui.initialized)
         return;
     if (receiver)
         rtcp_receiver_set_host_ui_callback(receiver, host_ui, NULL);
+}
+
+#ifdef CARPLAY_AIC_MPP
+static void on_audio_modes(const rtcp_audio_modes_t *modes, void *context)
+{
+    ui.screen_owner_changed |= modes->has_screen;
+    if (ui.audio_modes)
+        ui.audio_modes(modes, context);
+}
+#endif
+
+void demo_launcher_attach_media(rtcp_media_backend_t *media)
+{
+#ifdef CARPLAY_AIC_MPP
+    ui.audio_modes = media->on_audio_modes;
+    media->on_audio_modes = on_audio_modes;
+    carplay_fusion_set_mode(ui.fusion_selected ? CARPLAY_FUSION : CARPLAY_FULLSCREEN);
+#else
+    (void)media;
+#endif
+}
+
+void demo_launcher_step(rtcp_receiver_t *receiver, const rtcp_receiver_state_t *state,
+                        bool wired, bool projection)
+{
+    if (!ui.initialized)
+        return;
+    uint64_t now = rtcp_os_linux.now_ms();
+#ifdef CARPLAY_AIC_MPP
+    uint32_t stream = rtcp_receiver_get_projection_stream_generation(receiver);
+    if (ui.event_connected && !state->input_ready)
+    {
+        ui.want_local = ui.want_project = ui.phone_requested_local = false;
+        ui.retained_stream = 0;
+        ui.resume_until = 0;
+        carplay_fusion_set_mode(ui.fusion_selected ? CARPLAY_FUSION : CARPLAY_FULLSCREEN);
+        carplay_fusion_set_projection_hidden(false);
+    }
+#endif
+    ui.event_connected = state->input_ready;
     if (ui.want_local)
     {
-        if (receiver)
-            rtcp_receiver_set_projection_enabled(receiver, false);
-        ui.show_local = true;
+#ifdef CARPLAY_AIC_MPP
+        ui.retained_stream = ui.projected ? stream : 0;
+        ui.resume_until = 0;
+        carplay_fusion_set_projection_hidden(true);
+#endif
+        if (!ui.phone_requested_local)
+            fprintf(stderr, "carplay: projection pause rc=%d\n",
+                    rtcp_receiver_set_projection_enabled(receiver, false));
+        ui.phone_requested_local = false;
         ui.want_local = false;
         show_page(0);
     }
-    if (ui.want_project)
+    if (ui.want_project && state->input_ready)
     {
 #ifdef CARPLAY_AIC_MPP
-        carplay_display_mode_t mode = ui.fusion_selected ? CARPLAY_FUSION : CARPLAY_FULLSCREEN;
-        carplay_fusion_set_mode(mode);
+        ui.screen_owner_changed = false;
 #endif
-        ui.show_local = !receiver || rtcp_receiver_set_projection_enabled(receiver, true) != RTCP_OK;
-        ui.want_project = false;
+        int result = rtcp_receiver_set_projection_enabled(receiver, true);
+        fprintf(stderr, "carplay: projection resume rc=%d\n", result);
+#ifdef CARPLAY_AIC_MPP
+        if (result == RTCP_OK)
+        {
+            carplay_fusion_set_mode(ui.fusion_selected ? CARPLAY_FUSION : CARPLAY_FULLSCREEN);
+            carplay_fusion_resume_projection_on_frame();
+            ui.resume_until = now + 5000;
+            rtcp_receiver_request_screen_keyframe(receiver);
+        }
+#endif
     }
-    bool next = projection && !ui.show_local;
+    ui.want_project = false;
+    bool next = projection;
     bool fusion = false, geometry_changed = false;
 #ifdef CARPLAY_AIC_MPP
+    if (ui.resume_until && ui.screen_owner_changed && stream && stream == ui.retained_stream &&
+        rtcp_receiver_get_projection_owner(receiver) == RTCP_PROJECTION_PHONE &&
+        carplay_fusion_resume_latched_projection())
+        fprintf(stderr, "carplay: projection resumed from retained frame\n");
+    ui.screen_owner_changed = false;
     carplay_fusion_snapshot_t layout;
     carplay_fusion_snapshot(tick(), &layout);
-    next &= layout.video_active && layout.video_generation == layout.generation;
-    fusion = next && layout.requested == CARPLAY_FUSION;
+    next &= layout.effective != CARPLAY_LOCAL && layout.video_generation == layout.generation;
+    fusion = next && layout.effective == CARPLAY_FUSION;
+    if (next)
+        ui.resume_until = 0;
+    else if (ui.resume_until && now >= ui.resume_until)
+    {
+        ui.resume_until = 0;
+        carplay_fusion_set_projection_hidden(true);
+        fprintf(stderr, "carplay: projection resume timed out waiting for a frame\n");
+    }
     geometry_changed = ui.touch_epoch != layout.touch_epoch;
     ui.touch_epoch = layout.touch_epoch;
     bool fusion_changed = fusion != ui.fusion_active;
@@ -688,51 +742,59 @@ void demo_launcher_step(rtcp_receiver_t *receiver, bool projection)
 #endif
     if (geometry_changed || next != ui.projected || fusion_changed)
         release_touches(receiver);
-    if ((next != ui.projected || fusion_changed) && set_projection(next, fusion))
+    if (next != ui.projected || fusion_changed)
     {
-        ui.projected = next;
-#ifdef CARPLAY_AIC_MPP
-        ui.fusion_active = fusion;
-        if (ui.fusion_panel)
+        if (set_projection(next, fusion))
         {
-            if (fusion)
-                lv_obj_remove_flag(ui.fusion_panel, LV_OBJ_FLAG_HIDDEN);
-            else
-                lv_obj_add_flag(ui.fusion_panel, LV_OBJ_FLAG_HIDDEN);
+            ui.projected = next;
+            fprintf(stderr, "carplay: display %s\n", next ? (fusion ? "Fusion" : "Fullscreen") : "Dashboard");
+#ifdef CARPLAY_AIC_MPP
+            ui.fusion_active = fusion;
+            if (ui.fusion_panel)
+            {
+                if (fusion)
+                {
+                    lv_obj_move_foreground(ui.fusion_panel);
+                    lv_obj_remove_flag(ui.fusion_panel, LV_OBJ_FLAG_HIDDEN);
+                }
+                else
+                    lv_obj_add_flag(ui.fusion_panel, LV_OBJ_FLAG_HIDDEN);
+            }
+#endif
+        }
+#ifdef CARPLAY_AIC_MPP
+        else if (now >= ui.display_retry)
+        {
+            fprintf(stderr, "carplay: could not switch framebuffer presentation (projection=%u fusion=%u)\n",
+                    next, fusion);
+            ui.display_retry = now + 2000;
         }
 #endif
     }
     touch_events(receiver);
-    uint64_t now = rtcp_os_linux.now_ms();
     if (now >= ui.update_after)
     {
-        rtcp_receiver_state_t state = { 0 };
-        if (receiver)
-            rtcp_receiver_get_state(receiver, &state);
         const char *name = ui.options->wireless ? "USB / Wi-Fi" : (ui.options->wired ? "USB" : "LAN");
-        const char *status = state.input_ready ? "Connected" : (state.running ? "Connecting" : "Waiting for phone");
+        const char *status = state->input_ready ? "Connected" : (state->transport_connected ? "Starting CarPlay" : "Waiting for phone");
         lv_label_set_text_fmt(ui.status, "%s  ·  %s", name, status);
         carplay_ui_set_text(ui.connection, status);
-        carplay_ui_set_text(ui.connection_transport, ui.options->wireless ? "Available over USB and Wi-Fi"
-                                                                          : "Available over USB");
+        const char *transport = wired ? "iPhone · USB" : ui.options->wireless ? "iPhone · Wireless"
+                                                                              : "LAN";
+        carplay_ui_set_text(ui.connection_transport, state->transport_connected ? transport : ui.options->wireless ? "Available over USB and Wi-Fi"
+                                                                                                                   : "Available over USB");
         carplay_ui_set_text(ui.dashboard.connection, status);
         time_t seconds = time(NULL);
         struct tm local;
         char clock[8];
         if (localtime_r(&seconds, &local) && strftime(clock, sizeof(clock), "%H:%M", &local))
             carplay_ui_set_text(ui.clock, clock);
-        if (state.input_ready)
+        carplay_ui_set_text(ui.project_label, state->input_ready ? "Resume CarPlay" : "Connect phone");
+        if ((state->input_ready && !ui.projected) ||
+            (!state->transport_connected && ui.options->wireless))
             lv_obj_remove_state(ui.project_button, LV_STATE_DISABLED);
         else
             lv_obj_add_state(ui.project_button, LV_STATE_DISABLED);
 #ifdef CARPLAY_AIC_MPP
-        if (ui.fusion_button)
-        {
-            if (state.input_ready)
-                lv_obj_remove_state(ui.fusion_button, LV_STATE_DISABLED);
-            else
-                lv_obj_add_state(ui.fusion_button, LV_STATE_DISABLED);
-        }
         carplay_instruments_update(&ui.dashboard.instruments, layout.vehicle.available,
                                    layout.vehicle.speed_kph, layout.vehicle.battery_percent);
         if (ui.fusion_panel)

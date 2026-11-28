@@ -316,7 +316,6 @@ int demo_video_open(const demo_options_t *options, rtcp_media_backend_t *media)
         return RTCP_ENOTSUP;
     }
     carplay_fusion_set_mode(CARPLAY_FULLSCREEN);
-    carplay_fusion_set_projection_hidden(true);
     carplay_fusion_set_vehicle(&(carplay_vehicle_sample_t){ 0 });
     video.waiting_idr = true;
     for (unsigned index = 0; index < FRAME_COUNT; ++index)
@@ -349,6 +348,7 @@ void demo_video_session(bool live)
         video.config_size = 0;
         reset_queue();
         pthread_mutex_unlock(&video.mutex);
+        carplay_fusion_video_stopped();
     }
 }
 

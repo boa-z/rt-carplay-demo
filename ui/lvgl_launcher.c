@@ -824,26 +824,8 @@ static void build_display_settings(lv_obj_t *parent)
 
     carplay_appearance_build(parent, 123, theme_buttons, select_theme);
 
-    text(parent, "Phone projection", 6, 257, 280, &carplay_ui_15, CARPLAY_STYLE_MUTED);
-    lv_obj_t *display = panel(parent, 0, 278, SETTINGS_DETAIL_WIDTH - 4, 120, 12,
-                              CARPLAY_STYLE_CARD);
+    lv_obj_t *display = carplay_projection_settings_build(parent, display_buttons, select_display);
     const int controls_x = SETTINGS_DETAIL_WIDTH - 332;
-    text(display, "CarPlay display", 22, 18, 310, &carplay_ui_21, CARPLAY_STYLE_TEXT);
-    display_buttons[0] = segment(display, "Fullscreen", controls_x, 6, 150, 48, select_display,
-                                 (void *)0, &carplay_ui_15);
-    display_buttons[1] = segment(display, "Fusion", controls_x + 154, 6, 150, 48, select_display,
-                                 (void *)1, &carplay_ui_15);
-    for (unsigned index = 0; index < 2; ++index)
-    {
-        lv_obj_t *screen = panel(display_buttons[index], 12, 15, 30, 20, 4, CARPLAY_STYLE_BAR_FILL);
-        lv_obj_remove_flag(screen, LV_OBJ_FLAG_CLICKABLE);
-        if (index)
-        {
-            lv_obj_t *strip_preview = panel(screen, 23, 0, 7, 20, 0, CARPLAY_STYLE_BAR_BG);
-            lv_obj_remove_flag(strip_preview, LV_OBJ_FLAG_CLICKABLE);
-        }
-        lv_obj_align(lv_obj_get_child(display_buttons[index], 0), LV_ALIGN_CENTER, 16, 0);
-    }
     display_note = text(display, "", 22, 41, 310, &carplay_ui_14, CARPLAY_STYLE_MUTED);
     lv_label_set_long_mode(display_note, LV_LABEL_LONG_WRAP);
 #if !defined(RTCARPLAY_SINGLE_SCREEN_FUSION)

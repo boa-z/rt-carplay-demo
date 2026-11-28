@@ -197,6 +197,18 @@ lv_obj_t *carplay_connection_card_build(lv_obj_t *parent, lv_obj_t **state, lv_o
     return card;
 }
 
+lv_obj_t *carplay_connection_action(lv_obj_t *card, lv_event_cb_t activate, lv_obj_t **label)
+{
+    lv_obj_t *button = carplay_settings_row(card, "Connect phone", &carplay_icon_link_24,
+                                            false, activate, NULL);
+    lv_obj_set_size(button, 254, 64);
+    lv_obj_align(button, LV_ALIGN_RIGHT_MID, -16, 0);
+    *label = lv_obj_get_child(button, 1);
+    carplay_ui_style(button, CARPLAY_STYLE_ACCENT_CARD);
+    carplay_ui_style_part(button, CARPLAY_STYLE_CARD_ALT, LV_STATE_DISABLED);
+    return button;
+}
+
 lv_obj_t *carplay_settings_frame_build(lv_obj_t *parent, lv_obj_t **heading, lv_event_cb_t go_back)
 {
     enum
@@ -271,6 +283,34 @@ void carplay_appearance_build(lv_obj_t *parent, int top, lv_obj_t *buttons[2], l
         buttons[index] = tile;
     }
     carplay_segments_select(buttons, 2, carplay_ui_dark() ? 1U : 0U);
+}
+
+lv_obj_t *carplay_projection_settings_build(lv_obj_t *parent, lv_obj_t *buttons[2], lv_event_cb_t select)
+{
+    const char *modes[] = { "Fullscreen", "Fusion" };
+    carplay_launcher_label(parent, "Phone projection", 6, 257, 280, &carplay_ui_15, CARPLAY_STYLE_MUTED);
+    lv_obj_t *display = carplay_launcher_panel(parent, 0, 278, CARPLAY_SETTINGS_DETAIL_WIDTH - 4,
+                                               120, 12, CARPLAY_STYLE_CARD);
+    carplay_launcher_label(display, "CarPlay display", 22, 18, 310, &carplay_ui_21, CARPLAY_STYLE_TEXT);
+    for (unsigned index = 0; index < 2; ++index)
+    {
+        lv_obj_t *button = carplay_launcher_panel(display, CARPLAY_SETTINGS_DETAIL_WIDTH - 332 + 154 * (int)index,
+                                                  6, 150, 48, 9, CARPLAY_STYLE_SEGMENT);
+        lv_obj_add_flag(button, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(button, select, LV_EVENT_CLICKED, (void *)(uintptr_t)index);
+        lv_obj_t *caption = carplay_launcher_label(button, modes[index], 0, 0, 0,
+                                                   &carplay_ui_15, CARPLAY_STYLE_SEGMENT_TEXT);
+        lv_obj_align(caption, LV_ALIGN_CENTER, 16, 0);
+        lv_obj_t *screen = carplay_launcher_panel(button, 12, 15, 30, 20, 4, CARPLAY_STYLE_BAR_FILL);
+        lv_obj_remove_flag(screen, LV_OBJ_FLAG_CLICKABLE);
+        if (index)
+        {
+            lv_obj_t *strip = carplay_launcher_panel(screen, 23, 0, 7, 20, 0, CARPLAY_STYLE_BAR_BG);
+            lv_obj_remove_flag(strip, LV_OBJ_FLAG_CLICKABLE);
+        }
+        buttons[index] = button;
+    }
+    return display;
 }
 
 void carplay_segments_select(lv_obj_t * const *buttons, unsigned count, unsigned selected)

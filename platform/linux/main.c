@@ -306,6 +306,10 @@ static int run(demo_options_t *options)
     if (!options->headless)
         demo_audio_open(options, &config.media, &playback, &capture);
 #endif
+#ifdef CARPLAY_LVGL
+    if (!options->headless)
+        demo_launcher_attach_media(&config.media);
+#endif
     airplay_info_plist_config_t info = {
         .device_id = identity.device_id,
         .name = demo_name,
@@ -344,6 +348,7 @@ static int run(demo_options_t *options)
         goto done;
 #endif
     demo_endpoint_t active = { 0 };
+    rtcp_receiver_state_t previous = { 0 };
     uint64_t retry_after = 0, advertise_after = 0;
     while (!demo_stop)
     {
@@ -373,6 +378,9 @@ static int run(demo_options_t *options)
             mdns = NULL;
             rtcp_receiver_destroy(receiver);
             receiver = NULL;
+#ifdef CARPLAY_AIC_MPP
+            demo_video_session(false);
+#endif
             retry_after = 0;
             demo_track_update(&(rtcp_now_playing_details_t){ .invalidated = true }, NULL);
         }
@@ -400,6 +408,9 @@ static int run(demo_options_t *options)
             {
                 active = endpoint;
                 rtcp_receiver_set_now_playing_details_callback(receiver, demo_track_update, NULL);
+#ifdef CARPLAY_LVGL
+                demo_launcher_bind(receiver);
+#endif
                 fprintf(stderr, "carplay: RTSP ready on %s [%s]:%u\n", active.interface,
                         active.address, rtcp_receiver_port(receiver));
                 advertise_after = 0;
@@ -424,6 +435,12 @@ static int run(demo_options_t *options)
         }
         else
             rtcp_os_linux.sleep_ms(10);
+        if (state.transport_connected != previous.transport_connected ||
+            state.session_established != previous.session_established ||
+            state.input_ready != previous.input_ready || state.video_ready != previous.video_ready)
+            fprintf(stderr, "carplay: %s RTSP tcp=%u record=%u event=%u screen=%u\n", active.interface,
+                    state.transport_connected, state.session_established, state.input_ready, state.video_ready);
+        previous = state;
         if (mdns)
             mdns_responder_poll(mdns, &network, 0);
 #ifdef CARPLAY_USB
@@ -438,7 +455,7 @@ static int run(demo_options_t *options)
         projection = state.input_ready && demo_video_visible();
 #endif
 #ifdef CARPLAY_LVGL
-        demo_launcher_step(receiver, projection);
+        demo_launcher_step(receiver, &state, active.generation != 0, projection);
 #else
         (void)projection;
 #endif
