@@ -139,7 +139,8 @@ static bool submit(struct mpp_decoder *decoder, const encoded_frame_t *frame, un
     return mpp_decoder_put_packet(decoder, &packet) == DEC_OK;
 }
 
-static int layer(struct mpp_frame *frame, rtcp_display_rect_t *destination, uint32_t *layout_generation)
+static int layer(struct mpp_frame *frame, rtcp_display_rect_t *destination,
+                 rtcp_display_rect_t *viewport, uint32_t *layout_generation)
 {
     struct aicfb_layer_data data = { .layer_id = AICFB_LAYER_TYPE_VIDEO };
     if (frame)
@@ -147,9 +148,8 @@ static int layer(struct mpp_frame *frame, rtcp_display_rect_t *destination, uint
         data.enable = 1;
         data.buf = frame->buf;
         const struct mpp_buf *buffer = &frame->buf;
-        rtcp_display_rect_t panel;
-        if (!carplay_fusion_video_target(video.width, video.height, &panel, layout_generation) ||
-            !rtcp_display_fit(&panel, buffer->crop_en ? buffer->crop.width : buffer->size.width,
+        if (!carplay_fusion_video_target(video.width, video.height, viewport, layout_generation) ||
+            !rtcp_display_fit(viewport, buffer->crop_en ? buffer->crop.width : buffer->size.width,
                               buffer->crop_en ? buffer->crop.height : buffer->size.height, destination))
             return -1;
         data.pos.x = destination->x;
@@ -182,9 +182,9 @@ static bool show_frame(struct mpp_frame *frame, struct mpp_frame *previous, bool
             break;
         ++plane;
     }
-    rtcp_display_rect_t destination;
+    rtcp_display_rect_t destination, viewport;
     uint32_t layout_generation;
-    if (plane != 3 || layer(frame, &destination, &layout_generation) < 0)
+    if (plane != 3 || layer(frame, &destination, &viewport, &layout_generation) < 0)
     {
         remove_buffers(frame, plane);
         return false;
@@ -192,18 +192,23 @@ static bool show_frame(struct mpp_frame *frame, struct mpp_frame *previous, bool
     int synced = ioctl(video.fd, AICFB_WAIT_FOR_VSYNC, 0);
     if (synced < 0)
     {
-        layer(NULL, NULL, NULL);
+        layer(NULL, NULL, NULL, NULL);
         remove_buffers(frame, plane);
         return false;
     }
-    if (*retained)
+    if (!*retained)
+        fprintf(stderr, "carplay: video source %ux%u, viewport %ux%u, output %ux%u\n",
+                frame->buf.crop_en ? frame->buf.crop.width : frame->buf.size.width,
+                frame->buf.crop_en ? frame->buf.crop.height : frame->buf.size.height,
+                viewport.width, viewport.height, destination.width, destination.height);
+    else
     {
         remove_buffers(previous, 3);
         mpp_decoder_put_frame(decoder, previous);
     }
     *previous = *frame;
     *retained = true;
-    carplay_fusion_video_latched(&destination, video.width, video.height, layout_generation,
+    carplay_fusion_video_latched(&destination, viewport.width, viewport.height, layout_generation,
                                  (uint32_t)rtcp_os_linux.now_ms(), true);
     return true;
 }
@@ -212,7 +217,7 @@ static void release_output(struct mpp_decoder *decoder, struct mpp_frame *previo
 {
     if (*retained)
     {
-        layer(NULL, NULL, NULL);
+        layer(NULL, NULL, NULL, NULL);
         ioctl(video.fd, AICFB_WAIT_FOR_VSYNC, 0);
         remove_buffers(previous, 3);
         mpp_decoder_put_frame(decoder, previous);

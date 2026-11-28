@@ -16,6 +16,9 @@ option(CARPLAY_MFI_HARDWARE "Build the Linux I2C MFi coprocessor provider" ON)
 option(CARPLAY_BUILD_TESTS "Run native Linux Demo integration tests" OFF)
 
 find_package(Threads REQUIRED)
+if(CARPLAY_BLUEZ)
+    set(RTCP_LOG_PAIRING ON CACHE BOOL "Log AirPlay pairing and MFiSAP outcomes")
+endif()
 add_subdirectory("${RTCP_ROOT}" rt-carplay)
 add_executable(rt-carplay-demo platform/linux/main.c platform/linux/persistence.c
     platform/linux/mfi.c platform/linux/gnss.c platform/linux/boot_trace.c app/receiver_session.c app/connection_retry.c

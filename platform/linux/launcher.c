@@ -916,9 +916,25 @@ void demo_launcher_attach_media(rtcp_media_backend_t *media)
 #ifdef CARPLAY_AIC_MPP
     ui.audio_modes = media->on_audio_modes;
     media->on_audio_modes = on_audio_modes;
-    carplay_fusion_set_mode(ui.fusion_selected ? CARPLAY_FUSION : CARPLAY_FULLSCREEN);
+    ui.fusion_ready &= media->on_video != NULL;
 #else
     (void)media;
+#endif
+}
+
+uint16_t demo_launcher_projection_width(void)
+{
+#ifdef CARPLAY_AIC_MPP
+    if (ui.fusion_ready && ui.fusion_selected)
+        return ui.width - ui.width / 4;
+#endif
+    return ui.width;
+}
+
+void demo_launcher_apply_layout(void)
+{
+#ifdef CARPLAY_AIC_MPP
+    carplay_fusion_set_mode(ui.fusion_ready && ui.fusion_selected ? CARPLAY_FUSION : CARPLAY_FULLSCREEN);
 #endif
 }
 
@@ -942,7 +958,6 @@ void demo_launcher_step(const demo_launcher_commands_t *commands,
 #ifdef CARPLAY_AIC_MPP
         ui.retained_stream = 0;
         ui.resume_until = 0;
-        carplay_fusion_set_mode(ui.fusion_selected ? CARPLAY_FUSION : CARPLAY_FULLSCREEN);
         carplay_fusion_set_projection_hidden(false);
 #endif
     }
@@ -982,7 +997,6 @@ void demo_launcher_step(const demo_launcher_commands_t *commands,
 #ifdef CARPLAY_AIC_MPP
         if (result == RTCP_OK)
         {
-            carplay_fusion_set_mode(ui.fusion_selected ? CARPLAY_FUSION : CARPLAY_FULLSCREEN);
             carplay_fusion_resume_projection_on_frame();
             ui.resume_until = now + 5000;
             commands->request_keyframe(commands->context);

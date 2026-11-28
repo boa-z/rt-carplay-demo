@@ -443,7 +443,10 @@ static int run(demo_options_t *options, int *state_lock)
 #endif
 #ifdef CARPLAY_LVGL
     if (launcher_ready)
+    {
         demo_launcher_attach_media(&config.media);
+        demo_launcher_apply_layout();
+    }
 #endif
     airplay_info_plist_config_t info = {
         .device_id = identity.device_id,
@@ -457,6 +460,8 @@ static int run(demo_options_t *options, int *state_lock)
         .audio_compressed = playback,
     };
 #ifdef CARPLAY_LVGL
+    if (launcher_ready)
+        info.width_pixels = demo_launcher_projection_width();
     if (!options->headless)
     {
         info.oem_icons = &demo_oem_icon;
@@ -465,11 +470,6 @@ static int run(demo_options_t *options, int *state_lock)
     }
 #endif
     uint8_t plist[AIRPLAY_INFO_PLIST_MAX_BYTES];
-    if (!airplay_info_plist_build(&info, plist, sizeof(plist), &config.platform.info_plist_len))
-    {
-        result = RTCP_EINVAL;
-        goto done;
-    }
     network = rtcp_net_linux;
     network.listen = listen_on_interface;
     network.udp_open = udp_on_interface;
@@ -505,6 +505,7 @@ static int run(demo_options_t *options, int *state_lock)
 #ifdef CARPLAY_USB
     bool wired_ready = false;
     uint64_t wired_retry = 0;
+    uint64_t wired_layout_retry_until = 0;
 #endif
     while (!demo_stop)
     {
@@ -543,18 +544,40 @@ static int run(demo_options_t *options, int *state_lock)
                 lan.address[0] = '\0';
             address_rescan = now + (route_watch >= 0 ? 5000 : 500);
         }
-        if (!endpoint.address[0] && lan.address[0])
+        if (!endpoint.address[0] && lan.address[0]
+#ifdef CARPLAY_USB
+            && now >= wired_layout_retry_until
+#endif
+            )
             endpoint = lan;
 
-        if (!same_endpoint(&candidate, &endpoint))
+        bool layout_changed = false;
+#ifdef CARPLAY_LVGL
+        if (launcher_ready && info.width_pixels != demo_launcher_projection_width())
+        {
+            layout_changed = true;
+            info.width_pixels = demo_launcher_projection_width();
+            fprintf(stderr, "carplay: renegotiating display %ux%u @ %u fps\n",
+                    info.width_pixels, info.height_pixels, info.max_fps);
+        }
+#endif
+        if (layout_changed || !same_endpoint(&candidate, &endpoint))
         {
             candidate = endpoint;
             retry = (carplay_connection_retry_t){ 0 };
         }
-        if (receiver && !same_endpoint(&active, &endpoint))
+        if (receiver && (layout_changed || !same_endpoint(&active, &endpoint)))
         {
+#ifdef CARPLAY_USB
+            if (layout_changed && active.generation && active.generation == endpoint.generation)
+            {
+                demo_wired_reconnect(active.generation);
+                wired_layout_retry_until = now + 5000;
+                endpoint = (demo_endpoint_t){ 0 };
+            }
+#endif
 #ifdef CARPLAY_BLUEZ
-            if (options->wireless)
+            if (options->wireless && !same_endpoint(&active, &endpoint))
                 demo_wireless_step(NULL, NULL, false);
 #endif
             if (mdns)
@@ -576,8 +599,18 @@ static int run(demo_options_t *options, int *state_lock)
             previous_projection = false;
 #endif
         }
+#ifdef CARPLAY_LVGL
+        if (layout_changed)
+            demo_launcher_apply_layout();
+#endif
         if (!receiver && endpoint.address[0] && !carplay_retry_remaining(&retry, (uint32_t)now))
         {
+            info.width_physical_mm = (uint16_t)((200U * info.width_pixels + options->width / 2U) / options->width);
+            if (!airplay_info_plist_build(&info, plist, sizeof(plist), &config.platform.info_plist_len))
+            {
+                result = RTCP_EINVAL;
+                goto done;
+            }
             memcpy(active_interface, endpoint.interface, sizeof(active_interface));
             config.family = endpoint.generation ? RTCP_AF_INET6 : RTCP_AF_INET;
             config.iap2 = (rtcp_iap2_backend_t){ 0 };
@@ -600,8 +633,8 @@ static int run(demo_options_t *options, int *state_lock)
 #ifdef CARPLAY_LVGL
                 ++receiver_generation;
 #endif
-                fprintf(stderr, "carplay: RTSP ready on %s [%s]:%u\n", active.interface,
-                        active.address, rtcp_receiver_port(receiver));
+                fprintf(stderr, "carplay: RTSP ready on %s [%s]:%u, display %ux%u @ %u fps\n", active.interface,
+                        active.address, rtcp_receiver_port(receiver), info.width_pixels, info.height_pixels, info.max_fps);
                 demo_boot_mark(active.generation ? "wired-listener" : options->wireless ? "wireless-listener"
                                                                                         : "lan-listener");
                 advertise_after = 0;

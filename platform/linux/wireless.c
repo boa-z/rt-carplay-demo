@@ -67,12 +67,13 @@ static struct
     GDBusMethodInvocation *confirmation;
     guint profile, agent, owner_watch;
     bool profile_registered, agent_registered;
-    bool owner_changed, profile_released, startup_discovery_opened, call_pending;
+    bool owner_changed, profile_released, startup_discovery_opened, discovery_requested, call_pending;
     unsigned bus_generation;
     radio_step_t step;
     char *bluez_owner;
     int fd, passkey;
-    uint64_t deadline, retry;
+    uint64_t deadline, retry, attempt_deadline;
+    const char *attempt_stage;
     iap2_session_t *link, *tunnel;
     demo_gnss_stream_t gnss;
     rtcp_receiver_t *receiver;
@@ -90,12 +91,22 @@ static struct
 static void bluetooth_stop(void);
 static void bluetooth_advance(void);
 
+static void pairing_stage(const char *stage)
+{
+    radio.attempt_stage = stage;
+    radio.attempt_deadline = rtcp_os_linux.now_ms() + 45000;
+}
+
 void demo_wireless_confirm(bool accept)
 {
     if (radio.confirmation)
     {
+        fprintf(stderr, "carplay: Bluetooth pairing confirmation %s\n", accept ? "accepted" : "rejected");
         if (accept)
+        {
             g_dbus_method_invocation_return_value(radio.confirmation, NULL);
+            pairing_stage("waiting for an RFCOMM connection after confirmation");
+        }
         else
             g_dbus_method_invocation_return_dbus_error(radio.confirmation, "org.bluez.Error.Rejected", "Pairing declined");
         g_clear_object(&radio.confirmation);
@@ -131,10 +142,13 @@ static void method(GDBusConnection *connection, const gchar *sender, const gchar
             g_variant_get(arguments, "(&oh@a{sv})", &device, &handle, &properties);
             g_variant_unref(properties);
             GUnixFDList *list = g_dbus_message_get_unix_fd_list(g_dbus_method_invocation_get_message(invocation));
-            int fd = list && radio.fd < 0 && radio.receiver ? g_unix_fd_list_get(list, handle, NULL) : -1;
-            if (fd < 0 || !adapter_peer(device) || strlen(device) >= sizeof(radio.peer_path) ||
-                fcntl(fd, F_SETFL, O_NONBLOCK) != 0)
+            const char *reason = !adapter_peer(device) || strlen(device) >= sizeof(radio.peer_path) ? "wrong adapter" :
+                                 !radio.receiver ? "wireless listener or mDNS unavailable" :
+                                 radio.fd >= 0 ? "another RFCOMM connection is active" : NULL;
+            int fd = !reason && list ? g_unix_fd_list_get(list, handle, NULL) : -1;
+            if (fd < 0 || fcntl(fd, F_SETFL, O_NONBLOCK) != 0)
             {
+                fprintf(stderr, "carplay: Bluetooth RFCOMM rejected: %s\n", reason ? reason : "invalid socket");
                 if (fd >= 0)
                     close(fd);
                 g_dbus_method_invocation_return_dbus_error(invocation, "org.bluez.Error.Rejected", "CarPlay unavailable");
@@ -142,6 +156,8 @@ static void method(GDBusConnection *connection, const gchar *sender, const gchar
             }
             snprintf(radio.peer_path, sizeof(radio.peer_path), "%s", device);
             radio.fd = fd;
+            pairing_stage("waiting for iAP2 authentication over RFCOMM");
+            fprintf(stderr, "carplay: Bluetooth RFCOMM connected\n");
         }
         else if (!strcmp(operation, "Release"))
             radio.profile_released = true;
@@ -150,7 +166,10 @@ static void method(GDBusConnection *connection, const gchar *sender, const gchar
             const char *device;
             g_variant_get(arguments, "(&o)", &device);
             if (!strcmp(device, radio.peer_path))
+            {
+                fprintf(stderr, "carplay: BlueZ requested RFCOMM disconnect\n");
                 radio.link_failed = true;
+            }
         }
     }
     else if (!strcmp(operation, "RequestConfirmation"))
@@ -164,8 +183,10 @@ static void method(GDBusConnection *connection, const gchar *sender, const gchar
             radio.confirmation = g_object_ref(invocation);
             radio.passkey = (int)key;
             radio.deadline = rtcp_os_linux.now_ms() + 30000;
+            fprintf(stderr, "carplay: Bluetooth pairing awaiting confirmation on the launcher\n");
             return;
         }
+        fprintf(stderr, "carplay: Bluetooth pairing confirmation rejected: receiver, adapter or launcher unavailable\n");
         g_dbus_method_invocation_return_dbus_error(invocation, "org.bluez.Error.Rejected", "Confirmation requires the launcher");
         return;
     }
@@ -175,12 +196,16 @@ static void method(GDBusConnection *connection, const gchar *sender, const gchar
         g_variant_get(arguments, "(&o&s)", &device, &service);
         if (!radio.receiver || !adapter_peer(device) || g_ascii_strcasecmp(service, uuid))
         {
+            fprintf(stderr, "carplay: Bluetooth authorization rejected: CarPlay service or wireless listener unavailable\n");
             g_dbus_method_invocation_return_dbus_error(invocation, "org.bluez.Error.Rejected", "Service unavailable");
             return;
         }
     }
     else
+    {
+        fprintf(stderr, "carplay: BlueZ pairing agent %s\n", operation);
         demo_wireless_confirm(false);
+    }
     g_dbus_method_invocation_return_value(invocation, NULL);
 }
 
@@ -200,6 +225,7 @@ static void bluez_vanished(GDBusConnection *connection, const gchar *name, gpoin
     (void)name;
     (void)context;
     radio.owner_changed = true;
+    fprintf(stderr, "carplay: BlueZ unavailable on the system bus\n");
     bluetooth_stop();
     g_set_object(&radio.bus, connection);
     g_clear_pointer(&radio.bluez_owner, g_free);
@@ -238,15 +264,15 @@ static GVariant *profile_arguments(void)
 
 void demo_wireless_discoverable(void)
 {
-    if (!radio.receiver || radio.step != RADIO_READY)
-        return;
-    radio.step = RADIO_PAIRABLE_TIMEOUT;
-    bluetooth_advance();
+    radio.discovery_requested = true;
+    if (!radio.receiver)
+        fprintf(stderr, "carplay: Bluetooth pairing requested; waiting for the wireless listener and mDNS\n");
 }
 
 static void bluetooth_reply(GObject *object, GAsyncResult *result, gpointer context)
 {
-    GVariant *reply = g_dbus_connection_call_finish(G_DBUS_CONNECTION(object), result, NULL);
+    g_autoptr(GError) error = NULL;
+    GVariant *reply = g_dbus_connection_call_finish(G_DBUS_CONNECTION(object), result, &error);
     bool succeeded = reply != NULL;
     g_clear_pointer(&reply, g_variant_unref);
     if (GPOINTER_TO_UINT(context) != radio.bus_generation)
@@ -254,11 +280,17 @@ static void bluetooth_reply(GObject *object, GAsyncResult *result, gpointer cont
     radio.call_pending = false;
     if (!succeeded)
     {
+        static const char *const phase[] = {
+            [RADIO_POWER] = "power adapter", [RADIO_AGENT] = "register agent",
+            [RADIO_DEFAULT_AGENT] = "select default agent", [RADIO_PROFILE] = "register RFCOMM profile",
+            [RADIO_PAIRABLE_TIMEOUT] = "set pairable timeout", [RADIO_DISCOVERABLE_TIMEOUT] = "set discoverable timeout",
+            [RADIO_PAIRABLE] = "enable pairing", [RADIO_DISCOVERABLE] = "enable discovery",
+        };
+        g_autofree gchar *remote = error ? g_dbus_error_get_remote_error(error) : NULL;
+        fprintf(stderr, "carplay: BlueZ failed to %s (%s, code=%d)\n", phase[radio.step],
+                remote ? remote : "local D-Bus error", error ? error->code : 0);
         if (radio.step >= RADIO_PAIRABLE_TIMEOUT)
-        {
             radio.step = RADIO_READY;
-            fprintf(stderr, "carplay: could not open Bluetooth pairing window\n");
-        }
         else
             bluetooth_stop();
         radio.retry = rtcp_os_linux.now_ms() + 2000;
@@ -277,6 +309,7 @@ static void bluetooth_reply(GObject *object, GAsyncResult *result, gpointer cont
     if (radio.step == RADIO_DISCOVERABLE)
     {
         radio.startup_discovery_opened = true;
+        radio.discovery_requested = false;
         radio.step = RADIO_READY;
         demo_boot_mark("wireless-pairing");
         fprintf(stderr, "carplay: Bluetooth pairing available for 120 seconds\n");
@@ -355,10 +388,15 @@ static bool get_wifi(iap2_session_wifi_t *output, void *context)
         return false;
     int fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     if (fd < 0)
+    {
+        fprintf(stderr, "carplay: wireless iAP2 cannot open Wi-Fi interface socket: %s\n", strerror(errno));
         return false;
+    }
     struct ifreq request = { 0 };
     snprintf(request.ifr_name, sizeof(request.ifr_name), "%s", radio.options->interface);
     int result = ioctl(fd, SIOCGIFHWADDR, &request);
+    if (result != 0)
+        fprintf(stderr, "carplay: wireless iAP2 cannot read BSSID on %s: %s\n", request.ifr_name, strerror(errno));
     close(fd);
     if (result != 0)
         return false;
@@ -405,10 +443,32 @@ static bool send_tunnel(const uint8_t *bytes, size_t size, void *context)
 static void link_event(iap2_session_event_t event, void *context)
 {
     bool *failed = context;
-    if (event == IAP2_SESSION_EVENT_LINK_DEAD || event == IAP2_SESSION_EVENT_MFI_FAILED)
+    if (event == IAP2_SESSION_EVENT_LINK_DEAD || event == IAP2_SESSION_EVENT_MFI_FAILED ||
+        event == IAP2_SESSION_EVENT_IDENTIFICATION_REJECTED)
         *failed = true;
-    fprintf(stderr, "carplay: wireless iAP2 %s event %d\n",
-            failed == &radio.tunnel_failed ? "tunnel" : "RFCOMM", event);
+    static const char *const description[] = {
+        [IAP2_SESSION_EVENT_LINK_READY] = "link ready", [IAP2_SESSION_EVENT_LINK_DEAD] = "link lost",
+        [IAP2_SESSION_EVENT_IDENTIFICATION_ACCEPTED] = "identification accepted",
+        [IAP2_SESSION_EVENT_IDENTIFICATION_REJECTED] = "identification rejected",
+        [IAP2_SESSION_EVENT_MFI_AUTHENTICATED] = "MFi authenticated",
+        [IAP2_SESSION_EVENT_MFI_FAILED] = "MFi authentication failed",
+        [IAP2_SESSION_EVENT_MFI_CERT_FAILED] = "MFi certificate read or send failed",
+        [IAP2_SESSION_EVENT_MFI_CHALLENGE_INVALID] = "invalid MFi challenge",
+        [IAP2_SESSION_EVENT_MFI_SIGN_FAILED] = "MFi signing failed",
+        [IAP2_SESSION_EVENT_MFI_STATE_INVALID] = "unexpected MFi state",
+        [IAP2_SESSION_EVENT_MFI_ACK_FAILED] = "MFi response not acknowledged",
+        [IAP2_SESSION_EVENT_MFI_PHONE_REJECTED] = "phone rejected MFi authentication",
+        [IAP2_SESSION_EVENT_MFI_RESPONSE_SEND_FAILED] = "MFi response send failed",
+        [IAP2_SESSION_EVENT_WIFI_CONFIG_SENT] = "Wi-Fi configuration sent",
+        [IAP2_SESSION_EVENT_CARPLAY_INVITE_SENT] = "CarPlay invite sent",
+        [IAP2_SESSION_EVENT_CARPLAY_REINVITE_SENT] = "CarPlay invite retried",
+        [IAP2_SESSION_EVENT_CARPLAY_INVITE_ACKED] = "CarPlay invite link-acknowledged",
+    };
+    if (failed == &radio.link_failed && event == IAP2_SESSION_EVENT_WIFI_CONFIG_SENT)
+        pairing_stage("waiting for Wi-Fi handoff and the AirPlay event channel");
+    if ((unsigned)event < G_N_ELEMENTS(description) && description[event])
+        fprintf(stderr, "carplay: wireless iAP2 %s: %s\n",
+                failed == &radio.tunnel_failed ? "tunnel" : "RFCOMM", description[event]);
 }
 
 static iap2_session_t *new_link(bool tunnel)
@@ -525,17 +585,40 @@ void demo_wireless_step(rtcp_receiver_t *receiver, const char *ip, bool active)
         radio.retry = now + 2000;
     }
     if (radio.confirmation && (!radio.receiver || now >= radio.deadline))
+    {
+        fprintf(stderr, "carplay: Bluetooth confirmation %s\n", radio.receiver ? "timed out" : "interrupted by listener change");
         demo_wireless_confirm(false);
+    }
     if (radio.bluez_owner && radio.step == RADIO_IDLE && now >= radio.retry)
     {
         if (!bluetooth_start())
         {
+            fprintf(stderr, "carplay: could not register Bluetooth D-Bus objects\n");
             bluetooth_stop();
             radio.retry = now + 2000;
         }
     }
-    if (radio.receiver && radio.step == RADIO_READY && !radio.startup_discovery_opened && now >= radio.retry)
-        demo_wireless_discoverable();
+    if (radio.receiver && radio.step == RADIO_READY &&
+        (radio.discovery_requested || !radio.startup_discovery_opened) && now >= radio.retry)
+    {
+        radio.step = RADIO_PAIRABLE_TIMEOUT;
+        bluetooth_advance();
+    }
+    rtcp_receiver_state_t state = { 0 };
+    if (radio.receiver)
+        rtcp_receiver_get_state(radio.receiver, &state);
+    if (radio.attempt_deadline && (!radio.receiver || state.input_ready || now >= radio.attempt_deadline))
+    {
+        if (state.input_ready)
+            fprintf(stderr, "carplay: wireless AirPlay event channel ready\n");
+        else if (radio.receiver)
+        {
+            fprintf(stderr, "carplay: wireless setup timed out: %s (RTSP tcp=%u record=%u)\n",
+                    radio.attempt_stage, state.transport_connected, state.session_established);
+            rfcomm_close();
+        }
+        radio.attempt_deadline = 0;
+    }
     if (!radio.receiver || radio.link_failed || (radio.handoff && !radio.tunnel_failed && iap2_session_is_authenticated(radio.tunnel) && iap2_session_identification_accepted(radio.tunnel)))
         rfcomm_close();
     if (radio.fd < 0)
@@ -544,11 +627,10 @@ void demo_wireless_step(rtcp_receiver_t *receiver, const char *ip, bool active)
         radio.link = new_link(false);
     if (!radio.link)
     {
+        fprintf(stderr, "carplay: could not initialize wireless RFCOMM iAP2\n");
         rfcomm_close();
         return;
     }
-    rtcp_receiver_state_t state = { 0 };
-    rtcp_receiver_get_state(radio.receiver, &state);
     if (state.input_ready != radio.event_connected)
     {
         radio.event_connected = state.input_ready;
@@ -564,6 +646,7 @@ void demo_wireless_step(rtcp_receiver_t *receiver, const char *ip, bool active)
         }
         else if (written < 0 && errno != EAGAIN && errno != EINTR)
         {
+            fprintf(stderr, "carplay: Bluetooth RFCOMM send failed: %s\n", strerror(errno));
             rfcomm_close();
             return;
         }
@@ -574,6 +657,7 @@ void demo_wireless_step(rtcp_receiver_t *receiver, const char *ip, bool active)
         iap2_session_feed(radio.link, buffer, (size_t)read_bytes, now);
     else if (read_bytes == 0 || (errno != EAGAIN && errno != EINTR))
     {
+        fprintf(stderr, "carplay: Bluetooth RFCOMM %s\n", read_bytes == 0 ? "closed by peer" : strerror(errno));
         rfcomm_close();
         return;
     }
@@ -634,6 +718,7 @@ static void bluetooth_stop(void)
         g_dbus_node_info_unref(radio.node);
     radio.profile = radio.agent = 0;
     radio.profile_registered = radio.agent_registered = false;
+    radio.attempt_deadline = 0;
     radio.owner_changed = false;
     radio.profile_released = false;
     radio.call_pending = false;

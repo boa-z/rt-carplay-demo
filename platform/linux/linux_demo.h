@@ -107,6 +107,7 @@ void demo_gnss_tick(demo_gnss_stream_t *stream, iap2_session_t *session, uint64_
 int demo_wired_start(const demo_options_t *options, const demo_identity_t *identity);
 void demo_wired_stop(void);
 void demo_wired_snapshot(demo_endpoint_t *endpoint);
+void demo_wired_reconnect(uint64_t generation);
 void demo_wired_publish(uint64_t generation, uint16_t port, const rtcp_receiver_state_t *state);
 #endif
 #ifdef CARPLAY_BLUEZ
@@ -155,6 +156,8 @@ typedef struct
 int demo_launcher_open(demo_options_t *options);
 bool demo_launcher_show_local(void *context);
 void demo_launcher_attach_media(rtcp_media_backend_t *media);
+uint16_t demo_launcher_projection_width(void);
+void demo_launcher_apply_layout(void);
 void demo_launcher_step(const demo_launcher_commands_t *commands,
                         const demo_launcher_snapshot_t *snapshot);
 void demo_launcher_close(void);

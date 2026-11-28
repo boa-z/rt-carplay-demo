@@ -47,6 +47,7 @@ typedef struct
 static pthread_t worker;
 static bool worker_started;
 static atomic_bool worker_stop;
+static atomic_bool reconnect_requested;
 static pthread_mutex_t endpoint_lock = PTHREAD_MUTEX_INITIALIZER;
 static demo_endpoint_t endpoint;
 static uint64_t endpoint_generation;
@@ -521,7 +522,7 @@ static void serve(wired_phone_t *phone, int network_interface)
     iap2_session_link_up(session, rtcp_os_linux.now_ms());
     demo_gnss_stream_t gnss = { 0 };
     uint64_t next_scan = 0;
-    while (!atomic_load(&worker_stop) && !phone->link_failed)
+    while (!atomic_load(&worker_stop) && !atomic_exchange(&reconnect_requested, false) && !phone->link_failed)
     {
         uint8_t buffer[1024];
         int received = phone->service.ops->read(phone->service.context, buffer, sizeof(buffer), 100);
@@ -597,6 +598,7 @@ static void *work(void *context)
                 serve(phone, interface);
             pthread_mutex_lock(&endpoint_lock);
             endpoint = (demo_endpoint_t){ 0 };
+            atomic_store(&reconnect_requested, false);
             pthread_mutex_unlock(&endpoint_lock);
             rtcp_lockdown_session_close(&phone->lockdown);
             mbedtls_platform_zeroize(&phone->record, sizeof(phone->record));
@@ -670,6 +672,17 @@ void demo_wired_publish(uint64_t generation, uint16_t port, const rtcp_receiver_
         endpoint.port = port;
         endpoint.event = state->input_ready;
         endpoint.transport = state->transport_connected;
+    }
+    pthread_mutex_unlock(&endpoint_lock);
+}
+
+void demo_wired_reconnect(uint64_t generation)
+{
+    pthread_mutex_lock(&endpoint_lock);
+    if (generation && endpoint.generation == generation)
+    {
+        endpoint = (demo_endpoint_t){ 0 };
+        atomic_store(&reconnect_requested, true);
     }
     pthread_mutex_unlock(&endpoint_lock);
 }
