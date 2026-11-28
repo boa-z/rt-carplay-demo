@@ -2,7 +2,7 @@
 
 # rt-carplay-demo
 
-本项目是 [rt-carplay SDK](https://github.com/boa-z/rt-carplay) 的 C 与 LVGL 参考应用，用于 Receiver 集成和验证。D213 基线使用 RT-Thread、RTL8733BS 和 1024×600 启动器，支持 USB 与无线 CarPlay。Linux 目前提供 Host 模型与 LVGL Preview，完整 Receiver 为后续计划。
+本项目是 rt-carplay SDK 的 C 与 LVGL 参考应用，用于 Receiver 集成和验证。D213 支持 RT-Thread 和 Linux，提供 USB 与无线 CarPlay 及 1024×600 启动器。也可在 Linux PC 上构建和测试 Receiver。[SDK](https://github.com/boa-z/rt-carplay)
 
 ## 构建和连接
 
@@ -45,6 +45,7 @@ carplay_iap2 status
 | 全屏、融合、触摸映射和 30/60 FPS | [显示指南](docs/zh-CN/single-screen-fusion.md) |
 | USB 枚举、信任或网络启动 | [有线启动](docs/zh-CN/wired-startup.md)和[原生 NCM](docs/zh-CN/wired-native-ncm.md) |
 | 无线配对、重连和有线／无线交接 | [连接管理器](docs/zh-CN/connection-manager.md)和[蓝牙检查](docs/zh-CN/mobility-cockpit-v4.md#蓝牙名称) |
+| MFi 芯片、软件认证身份与外部认证设备 | [认证配置](docs/zh-CN/platform.md#classic-配件认证) |
 | 音频路由、Siri 和麦克风恢复 | [音频恢复](docs/zh-CN/audio-recovery.md) |
 | AIC8800D40 和 RTL8733BS 热点及 Wi-Fi 维护 | [平台指南](docs/zh-CN/platform.md) |
 | 网络、USB 文件及固件 | [网络管理器](docs/zh-CN/network-manager.md)、[网络共享](docs/zh-CN/internet-sharing.md)、[USB 文件](docs/zh-CN/usb-files.md)、[A/B OTA](docs/zh-CN/ota.md)和 [更新镜像](docs/zh-CN/ota-mirror.md) |

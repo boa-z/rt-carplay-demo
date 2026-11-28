@@ -59,12 +59,12 @@ static bool test_send_location(iap2_session_t *session, const char *sentence, si
 struct test_thread { void (*entry)(void *); void *argument; };
 static rt_thread_t pending, current;
 static bool receiver_up = true, claimed, fail_create, fail_startup, drain_on_wait = true;
-static bool fail_install, stop_in_probe, stop_in_enable, stop_in_address, check_self;
+static bool fail_provider, stop_in_provider, stop_in_enable, stop_in_address, check_self;
 static bool accept_failure, stop_in_accept, stop_in_accept_success;
 static bool stop_in_claim;
-static unsigned creates, deletes, claims, releases, probes, installs, provider_releases;
+static unsigned creates, deletes, claims, releases, provider_requests;
 static unsigned enables, listens, disconnects, writes, waits, receives;
-static struct rtcp_mfi provider;
+static const rtcp_mfi_provider_t provider;
 static atomic_bool reader_done;
 static atomic_uint reads;
 
@@ -75,23 +75,12 @@ int rt_kprintf(const char *format, ...) {
     }
     return 0;
 }
-int rtcp_mfi_lubanlite_start(const char *bus, uint8_t address) {
-    assert(!strcmp(bus, RTCARPLAY_MFI_I2C_BUS) && address == RTCARPLAY_MFI_I2C_ADDR);
-    ++probes;
-    if (stop_in_probe) carplay_iap2_request_stop();
-    return RTCP_OK;
-}
-const struct rtcp_mfi *rtcp_mfi_lubanlite(void) { return &provider; }
-const struct rtcp_mfi *rtcp_mfi_lubanlite_lazy(const char *bus, uint8_t address) {
-    (void)bus; (void)address; assert(false); return NULL;
-}
-int carplay_mfi_provider_install(const struct rtcp_mfi *mfi) {
-    assert(mfi == &provider && s_link.running); ++installs;
-    return fail_install ? RTCP_EIO : RTCP_OK;
-}
-void carplay_mfi_provider_release(const struct rtcp_mfi *mfi) {
-    assert(mfi == &provider && !fail_install && s_link.running && !s_link.session);
-    ++provider_releases;
+int carplay_mfi_provider_get(const rtcp_mfi_provider_t **out, bool prepare) {
+    assert(!prepare || s_link.running);
+    ++provider_requests;
+    if (stop_in_provider) carplay_iap2_request_stop();
+    *out = fail_provider ? NULL : &provider;
+    return fail_provider ? RTCP_EIO : RTCP_OK;
 }
 bool carplay_bt_claim(carplay_bt_owner_t owner) {
     assert(owner == CARPLAY_BT_OWNER_IAP2);
@@ -215,31 +204,35 @@ int main(void) {
     fail_startup = false;
     assert(carplay_iap2_start() == RTCP_OK && pending && claimed);
     assert(carplay_iap2_start() == RTCP_ESTATE);
-    assert(carplay_iap2_stop() == RTCP_OK && !probes && !enables && !disconnects && !writes);
+    assert(carplay_iap2_stop() == RTCP_OK && !provider_requests && !enables && !disconnects && !writes);
     unsigned old = disconnects;
     assert(carplay_iap2_stop() == RTCP_OK && disconnects == old);
 
     assert(carplay_iap2_start() == RTCP_OK); drain_on_wait = false;
     assert(carplay_iap2_stop() == RTCP_ETIMEDOUT && s_link.running && pending && claimed);
     assert(carplay_iap2_start() == RTCP_ESTATE); run_pending(); drain_on_wait = true;
-    assert(!enables && !probes);
+    assert(!enables && !provider_requests);
 
     stop_in_claim = true;
     assert(carplay_iap2_start() == RTCP_OK && !s_serve); run_pending();
-    assert(!enables && !probes); stop_in_claim = false;
+    assert(!enables && !provider_requests); stop_in_claim = false;
 
-    stop_in_probe = true;
+    stop_in_provider = true;
     assert(carplay_iap2_start() == RTCP_OK); run_pending();
-    assert(probes == 1 && !installs && !provider_releases && !enables); stop_in_probe = false;
+    assert(provider_requests == 1 && !enables); stop_in_provider = false;
     stop_in_enable = true;
     assert(carplay_iap2_start() == RTCP_OK); run_pending();
-    assert(enables == 1 && !listens && installs == 1 && provider_releases == 1 && disconnects == 1);
+    assert(enables == 1 && !listens && provider_requests == 2 && disconnects == 1);
     stop_in_enable = false; stop_in_address = true;
     assert(carplay_iap2_start() == RTCP_OK); run_pending(); assert(!listens && !writes);
-    stop_in_address = false; fail_install = true; stop_in_accept = true;
-    old = provider_releases;
-    assert(carplay_iap2_start() == RTCP_OK); run_pending(); assert(provider_releases == old);
-    fail_install = false; stop_in_accept = false; stop_in_accept_success = true;
+    stop_in_address = false; fail_provider = true;
+    old = enables;
+    assert(carplay_iap2_start() == RTCP_OK); run_pending();
+    assert(s_link.error == RTCP_EIO && enables == old && !listens);
+    assert(!carplay_iap2_tunnel_bytes(NULL, 0, NULL) && !s_tunnel.session);
+    fail_provider = false; stop_in_accept = true;
+    assert(carplay_iap2_start() == RTCP_OK); run_pending();
+    stop_in_accept = false; stop_in_accept_success = true;
     old = writes;
     assert(carplay_iap2_start() == RTCP_OK); run_pending(); assert(writes == old);
     stop_in_accept_success = false; accept_failure = true;
@@ -346,7 +339,7 @@ int main(void) {
     assert(!gnss.tunnel && !gnss.requested && !gnss.gga_queued && !gnss.rmc_queued);
     assert(cmd_carplay_gnss(0, NULL) == RTCP_OK);
     puts("Simulated GNSS: offer, subscription, signed checksummed NMEA, paced A-to-B motion, arrival, restart, dateline and stop passed");
-    puts("Actual wireless iAP2 owner: rollback, command gate, pre-scheduling stop, startup cancellation, provider ownership, self-join, timeout retention and 32 restarts with concurrent atomic readers passed");
+    puts("Actual wireless iAP2 owner: rollback, command gate, pre-scheduling stop, startup cancellation, provider failure, self-join, timeout retention and 32 restarts with concurrent atomic readers passed");
 }
 '''
 with tempfile.TemporaryDirectory(prefix="wireless-iap2-worker-") as directory:

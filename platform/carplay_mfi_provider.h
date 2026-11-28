@@ -1,31 +1,31 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-/*
- * Shared AirPlay MFiSAP provider lifecycle.
- *
- * The AirPlay /auth-setup handler reads a process-wide provider installed by
- * core/airplay/airplay_mfi_sap.c.  Both transports -- Bluetooth iAP2 and the
- * wired USB carkit stream -- talk to the same MFi coprocessor, so the
- * provider must be installed for either mode and must stay installed while
- * an AirPlay session can reach /auth-setup.
- *
- * Install before a transport starts its session; release only after its
- * session (and therefore its AirPlay connection) has stopped.  Both calls
- * serialize on an RT-Thread mutex and refcount installations of the same
- * coprocessor handle, so starting wired and wireless sessions does not make
- * one release pull the provider out from under the other.
- */
 #ifndef CARPLAY_MFI_PROVIDER_H
 #define CARPLAY_MFI_PROVIDER_H
 
+#include <stdbool.h>
+
 #include "rtcp/mfi.h"
 
-/* Returns RTCP_OK when the provider is installed.  Installing the same
- * handle twice increments a reference count.  A NULL or different handle is
- * rejected while another handle owns the provider. */
-int carplay_mfi_provider_install(const struct rtcp_mfi *mfi);
+/* Shared by the Receiver and both transports for the product lifetime.
+ * A configured software/external provider is retained after successful loading.
+ * Prepare allows the transport worker to try the chip before a phone
+ * requests authentication. A failed probe is retried by provider callbacks. */
+int carplay_mfi_provider_get(const rtcp_mfi_provider_t **provider, bool prepare);
 
-/* Drop one reference.  Clears the core provider when the last user of this
- * handle releases it.  Releasing a handle that is not installed is a no-op. */
-void carplay_mfi_provider_release(const struct rtcp_mfi *mfi);
+#ifdef RTCARPLAY_DEMO_MFI_SOFTWARE
+#include "rtcp/mfi_software.h"
 
-#endif /* CARPLAY_MFI_PROVIDER_H */
+/* Fill the certificate/key fields with borrowed data in memory. The release
+ * hook retires those buffers when create returns, including on failure.
+ * The Demo supplies its own TRNG and OS operations. */
+int carplay_product_mfi_load(rtcp_mfi_software_config_t *identity);
+void carplay_product_mfi_release(rtcp_mfi_software_config_t *identity);
+#endif
+
+#ifdef RTCARPLAY_DEMO_MFI_EXTERNAL
+/* Return an initialized, serialized provider valid for the product lifetime.
+ * Classic CarPlay requires both IAP2 and SAP capabilities. */
+int carplay_product_mfi_external(const rtcp_mfi_provider_t **provider);
+#endif
+
+#endif

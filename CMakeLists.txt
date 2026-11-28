@@ -12,6 +12,8 @@ option(CARPLAY_ALSA "Build the ALSA backend" OFF)
 option(CARPLAY_USB "Build the Linux USB host transport" OFF)
 option(CARPLAY_LVGL "Build the LVGL launcher" OFF)
 option(CARPLAY_BLUEZ "Build the Classic Bluetooth iAP2 transport" OFF)
+option(CARPLAY_MFI_HARDWARE "Build the Linux I2C MFi coprocessor provider" ON)
+option(CARPLAY_BUILD_TESTS "Run native Linux Demo integration tests" OFF)
 
 find_package(Threads REQUIRED)
 add_subdirectory("${RTCP_ROOT}" rt-carplay)
@@ -21,6 +23,9 @@ add_executable(rt-carplay-demo platform/linux/main.c platform/linux/persistence.
 target_include_directories(rt-carplay-demo PRIVATE app platform/linux)
 target_compile_options(rt-carplay-demo PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(rt-carplay-demo PRIVATE rtcp_core rtcp_port_linux Threads::Threads)
+if(CARPLAY_MFI_HARDWARE)
+    target_compile_definitions(rt-carplay-demo PRIVATE CARPLAY_MFI_HARDWARE)
+endif()
 
 if(CARPLAY_ALSA OR CARPLAY_USB OR CARPLAY_BLUEZ)
     find_package(PkgConfig REQUIRED)
@@ -79,3 +84,16 @@ if(CARPLAY_LVGL)
 endif()
 
 install(TARGETS rt-carplay-demo RUNTIME DESTINATION bin)
+
+if(CARPLAY_BUILD_TESTS AND NOT CMAKE_CROSSCOMPILING AND RTCP_MFI_SOFTWARE)
+    enable_testing()
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    find_program(OPENSSL_EXECUTABLE openssl)
+    if(NOT OPENSSL_EXECUTABLE)
+        message(FATAL_ERROR "OpenSSL CLI is required for synthetic MFi test identities")
+    endif()
+    add_test(NAME linux_mfi_selection
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_linux_mfi_selection.py"
+            $<TARGET_FILE:rt-carplay-demo> "${OPENSSL_EXECUTABLE}")
+    set_tests_properties(linux_mfi_selection PROPERTIES TIMEOUT 30)
+endif()

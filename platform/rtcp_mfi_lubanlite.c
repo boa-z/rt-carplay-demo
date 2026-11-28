@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /*
- * MFi 2.0C authentication coprocessor over the Luban-Lite I2C bus.
+ * MFi 2.0C/3.0 authentication coprocessor over the Luban-Lite I2C bus.
  *
  * The register engine lives in core/mfi/mfi2c.c; this file supplies the
  * rtcp_mfi2c_bus transaction layer and adapts it to struct rtcp_mfi for the
@@ -19,6 +19,7 @@
  */
 #include "rtcp_lubanlite.h"
 
+#include <stdatomic.h>
 #include <string.h>
 
 #if defined(__has_include)
@@ -45,7 +46,7 @@ static struct
     uint8_t address;
     rtcp_mfi2c_t device;
     struct rtcp_mfi_info info;
-    bool ready;
+    atomic_bool ready;
     /* The certificate is read once and reused.  This MFi 2.0C class is known
      * to be unreliable under rapid repeated full reads (carplayd's field
      * notes: "the MFi chip fails a rapid second full cert read"), and iAP2
@@ -184,18 +185,17 @@ static const struct rtcp_mfi s_mfi_ops;
 /* A complete certificate/sign/probe is one coprocessor transaction. The bus
  * lock alone covers individual transfers, not the multi-register engine. */
 static struct rt_mutex s_mfi_transaction;
-static bool s_mfi_lock_ready;
-static void mfi_lock(void)
+static int init_mfi_transaction(void)
 {
-    rt_enter_critical();
-    if (!s_mfi_lock_ready)
-    {
-        rt_mutex_init(&s_mfi_transaction, "cp-mfi", RT_IPC_FLAG_PRIO);
-        s_mfi_lock_ready = true;
-    }
-    rt_exit_critical();
-    rt_mutex_take(&s_mfi_transaction, RT_WAITING_FOREVER);
+    return rt_mutex_init(&s_mfi_transaction, "cp-mfi", RT_IPC_FLAG_PRIO);
 }
+INIT_PREV_EXPORT(init_mfi_transaction);
+
+static int mfi_lock(void)
+{
+    return rt_mutex_take(&s_mfi_transaction, RT_WAITING_FOREVER) == RT_EOK ? RTCP_OK : RTCP_EIO;
+}
+
 static int mfi_start_unlocked(const char *i2c_bus_name, uint8_t address)
 {
     if (s_mfi.ready)
@@ -335,6 +335,11 @@ void rtcp_mfi_lubanlite_dump(const char *i2c_bus_name, uint8_t address)
         rt_kprintf("[mfi] bus %s not found\n", i2c_bus_name);
         return;
     }
+    if (mfi_lock() != RTCP_OK)
+    {
+        rt_kprintf("[mfi] cannot lock coprocessor for diagnostics\n");
+        return;
+    }
 
     rt_kprintf("[mfi] dump on %s addr 0x%02x\n", i2c_bus_name, address);
 
@@ -383,6 +388,7 @@ void rtcp_mfi_lubanlite_dump(const char *i2c_bus_name, uint8_t address)
         }
     }
     rt_kprintf(" (%d ACK)\n", acked);
+    rt_mutex_release(&s_mfi_transaction);
 }
 
 /* ------------------------------------------------------------------ */
@@ -453,11 +459,8 @@ static int mfi_read_cert_unlocked(uint8_t *der, size_t cap, size_t *der_len)
             s_mfi.cert_checksum = mfi_fnv1a32(der, n);
             s_mfi.cert_valid = true;
             *der_len = n;
-            RTCP_LOGI("mfi", "certificate %u bytes header %02X %02X %02X %02X "
-                             "tail %02X %02X %02X %02X checksum=%08X attempt=%d",
-                      (unsigned)n, der[0], der[1], der[2], der[3],
-                      der[n - 4U], der[n - 3U], der[n - 2U], der[n - 1U],
-                      (unsigned)s_mfi.cert_checksum, attempt);
+            RTCP_LOGI("mfi", "certificate %u bytes checksum=%08X attempt=%d",
+                      (unsigned)n, (unsigned)s_mfi.cert_checksum, attempt);
             return RTCP_OK;
         }
 
@@ -482,21 +485,24 @@ static int mfi_read_cert_unlocked(uint8_t *der, size_t cap, size_t *der_len)
 
 int rtcp_mfi_lubanlite_start(const char *bus, uint8_t address)
 {
-    mfi_lock();
+    if (mfi_lock() != RTCP_OK)
+        return RTCP_EIO;
     int result = mfi_start_unlocked(bus, address);
     rt_mutex_release(&s_mfi_transaction);
     return result;
 }
 static int mfi_sign(const uint8_t *challenge, size_t len, uint8_t *sig, size_t cap, size_t *written)
 {
-    mfi_lock();
+    if (mfi_lock() != RTCP_OK)
+        return RTCP_EIO;
     int result = mfi_sign_unlocked(challenge, len, sig, cap, written);
     rt_mutex_release(&s_mfi_transaction);
     return result;
 }
 static int mfi_read_cert(uint8_t *der, size_t cap, size_t *written)
 {
-    mfi_lock();
+    if (mfi_lock() != RTCP_OK)
+        return RTCP_EIO;
     int result = mfi_read_cert_unlocked(der, cap, written);
     rt_mutex_release(&s_mfi_transaction);
     return result;
@@ -506,69 +512,5 @@ static const struct rtcp_mfi s_mfi_ops = {
     .sign = mfi_sign,
     .read_cert = mfi_read_cert,
 };
-
-/* ------------------------------------------------------------------ */
-/* Lazy session handle                                                 */
-/* ------------------------------------------------------------------ */
-
-/*
- * Keep the lazy handle as a safety net: the eager probe still runs before
- * Bluetooth is enabled, and if the part is not answering at that point the
- * session must be able to probe again when the phone requests the
- * certificate.  The earlier "reads 0x32 for a while after boot" theory was
- * a symptom of the missing per-byte settling delay in bus_read(), now fixed;
- * a genuine absence costs one extra probe and then fails cleanly at the same
- * point.
- */
-static char s_lazy_bus[16];
-static uint8_t s_lazy_addr;
-
-static int lazy_ensure(void)
-{
-    if (s_mfi.ready)
-        return RTCP_OK;
-    if (s_lazy_bus[0] == '\0')
-        return RTCP_ESTATE;
-    return rtcp_mfi_lubanlite_start(s_lazy_bus, s_lazy_addr);
-}
-
-static int lazy_info(struct rtcp_mfi_info *out)
-{
-    if (lazy_ensure() != RTCP_OK)
-        return RTCP_ESTATE;
-    return mfi_info(out);
-}
-
-static int lazy_sign(const uint8_t *challenge, size_t len, uint8_t *sig,
-                     size_t sig_cap, size_t *sig_len)
-{
-    if (lazy_ensure() != RTCP_OK)
-        return RTCP_ESTATE;
-    return mfi_sign(challenge, len, sig, sig_cap, sig_len);
-}
-
-static int lazy_read_cert(uint8_t *der, size_t cap, size_t *der_len)
-{
-    if (lazy_ensure() != RTCP_OK)
-        return RTCP_ESTATE;
-    return mfi_read_cert(der, cap, der_len);
-}
-
-static const struct rtcp_mfi s_lazy_ops = {
-    .info = lazy_info,
-    .sign = lazy_sign,
-    .read_cert = lazy_read_cert,
-};
-
-const struct rtcp_mfi *rtcp_mfi_lubanlite_lazy(const char *i2c_bus_name,
-                                               uint8_t address)
-{
-    size_t len = i2c_bus_name != NULL ? strlen(i2c_bus_name) : 0U;
-    if (len == 0U || len >= sizeof(s_lazy_bus))
-        return NULL;
-    memcpy(s_lazy_bus, i2c_bus_name, len + 1U);
-    s_lazy_addr = address;
-    return &s_lazy_ops;
-}
 
 #endif /* LPKG_RT_CARPLAY_LUBANLITE_MFI */

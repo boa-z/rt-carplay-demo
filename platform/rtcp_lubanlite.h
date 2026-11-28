@@ -191,24 +191,12 @@ int rtcp_bt_lubanlite_local_bdaddr(uint8_t address[6]);
  * (0x11 also answers; i2c0 runs at 100 kHz).  The 0x6A device on the same
  * bus is the vendor RJGT204 device lock, not the MFi coprocessor.
  * start() is idempotent and probes once; it returns RTCP_ENOENT when the
- * bus does not exist and the probe error otherwise.  On failure the iAP2
- * session must be created with .mfi = NULL (it then stops after
- * IdentificationInformation).
+ * bus does not exist and the probe error otherwise. The shared Provider
+ * retries the probe as needed and propagates a failed transaction.
  */
 int rtcp_mfi_lubanlite_start(const char *i2c_bus_name, uint8_t address);
 bool rtcp_mfi_lubanlite_ready(void);
 const struct rtcp_mfi *rtcp_mfi_lubanlite(void);
-
-/*
- * Lazy variant for the iAP2 session.  The returned ops probe the coprocessor
- * on first use instead of returning NULL after a boot-time probe failure.
- * Board-verified 2026-11-09: the 2.0C answers 0x32 to every register for a
- * while after reset/RTL8733BS firmware download, but reads correctly when the
- * phone connects later, so the session should retry at certificate time.
- * The bus name and address are copied from this call and used for the retry.
- */
-const struct rtcp_mfi *rtcp_mfi_lubanlite_lazy(const char *i2c_bus_name,
-                                               uint8_t address);
 
 /*
  * Bring-up diagnostic.  Prints the raw bytes read from the coprocessor with

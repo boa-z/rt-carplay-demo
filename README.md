@@ -2,7 +2,7 @@
 
 # rt-carplay-demo
 
-This C and LVGL reference application integrates and validates the [rt-carplay SDK](https://github.com/boa-z/rt-carplay). The D213 baseline runs RT-Thread with RTL8733BS and a 1024×600 launcher for USB and wireless CarPlay. Linux currently has Host models and an LVGL Preview. A Linux Receiver is planned.
+This C and LVGL reference application integrates and validates the rt-carplay SDK. The D213 targets support RT-Thread and Linux, with USB and wireless CarPlay and a 1024×600 launcher. The Linux Receiver can also be built and exercised on a PC. [SDK](https://github.com/boa-z/rt-carplay)
 
 ## Build and connect
 
@@ -45,6 +45,7 @@ The local `Kconfig` and `SConscript` select board features. SDK protocol switche
 | Fullscreen, Fusion, touch mapping and 30/60 FPS | [Display guide](docs/single-screen-fusion.md) |
 | USB enumeration, trust or network bring-up | [Wired startup](docs/wired-startup.md) and [native NCM](docs/wired-native-ncm.md) |
 | Wireless pairing, reconnect and wired/wireless handoff | [Connection manager](docs/connection-manager.md) and [Bluetooth checks](docs/mobility-cockpit-v4.md#bluetooth-name) |
+| MFi coprocessor, provisioned software identity and external devices | [Authentication setup](docs/platform.md#classic-accessory-authentication) |
 | Audio routing, Siri, and microphone recovery | [Audio recovery](docs/audio-recovery.md) |
 | AIC8800D40 and RTL8733BS SoftAP and Wi-Fi maintenance | [Platform guide](docs/platform.md) |
 | Network, USB files and firmware | [Network manager](docs/network-manager.md), [Internet sharing](docs/internet-sharing.md), [USB files](docs/usb-files.md), [A/B OTA](docs/ota.md) and [update mirrors](docs/ota-mirror.md) |

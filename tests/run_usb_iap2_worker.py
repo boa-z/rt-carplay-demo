@@ -51,19 +51,14 @@ static atomic_flag s_usb_call = ATOMIC_FLAG_INIT;
 static atomic_uint s_usb_stop_generation;
 struct test_thread { void (*entry)(void *); void *context; };
 static rt_thread_t pending;
-static unsigned releases, deletes, writes;
+static unsigned deletes, writes;
 static bool fail_create, fail_startup, hold_worker, detached_in_create;
 static rt_thread_t self;
-static struct rtcp_mfi provider;
 static void iap2_usb_request_stop(void);
 static uint32_t iap2_usb_now_ms(void) { return 1234; }
 int rt_kprintf(const char *format, ...) {
     if (strstr(format, "stopped (events=")) assert(s_iap2_usb.running);
     return 0;
-}
-void carplay_mfi_provider_release(const struct rtcp_mfi *mfi) {
-    assert(mfi == &provider);
-    assert(s_iap2_usb.session == NULL); ++releases;
 }
 rt_thread_t rt_thread_create(const char *name, void (*entry)(void *), void *context,
                             unsigned stack, unsigned priority, unsigned tick) {
@@ -90,7 +85,6 @@ rt_thread_t rt_thread_self(void) { return self; }
 '''
 source += function("static bool usb_call_enter(")
 source += function("static void usb_call_leave(")
-source += function("static void iap2_usb_release_provider(")
 source += function("static void iap2_usb_reset(")
 source += function("static void iap2_usb_event(")
 source += function("static void iap2_usb_thread(")
@@ -149,8 +143,7 @@ static void prepare(void) {
     config.transport = IAP2_SESSION_TRANSPORT_WIRED_USB;
     config.on_event = iap2_usb_event; config.context = &s_iap2_usb;
     s_iap2_usb.session = iap2_session_create(&config);
-    assert(s_iap2_usb.session); s_iap2_usb.mfi = &provider;
-    s_iap2_usb.provider_installed = true;
+    assert(s_iap2_usb.session);
 }
 static void *open_command(void *unused) {
     (void)unused; assert(carplay_usb_open() == RTCP_EIO); return NULL;
@@ -174,60 +167,50 @@ static void run_failed_peer(int result) {
     static const rtcp_stream_ops_t ops = {.read = peer_read};
     rtcp_stream_t stream = {.ops = &ops};
     iap2_stream_rx_init(&s_iap2_usb.rx, &stream);
-    unsigned released = releases;
     assert(iap2_usb_start_worker() == RTCP_OK);
     rt_thread_t thread = pending; pending = NULL;
     thread->entry(thread->context); free(thread);
     assert(reads == (result == 9 ? 2U : 1U));
     assert(!s_iap2_usb.running && !s_iap2_usb.run && !s_iap2_usb.session);
-    assert(!s_iap2_usb.mfi && releases == released + 1);
     assert(cmd_iap2_stop()); /* cleanup remains idempotent */
 }
 int main(void) {
     prepare(); fail_create = true;
     assert(iap2_usb_start_worker() == RTCP_ENOMEM);
     assert(!s_iap2_usb.running && !s_iap2_usb.run && !s_iap2_usb.session);
-    assert(!s_iap2_usb.mfi && !pending && releases == 1);
+    assert(!pending);
     prepare(); fail_create = false; fail_startup = true;
     assert(iap2_usb_start_worker() == RTCP_EIO);
     assert(!s_iap2_usb.running && !s_iap2_usb.run && !s_iap2_usb.session);
-    assert(!s_iap2_usb.thread && !s_iap2_usb.mfi && !pending && releases == 2 && deletes == 1);
+    assert(!s_iap2_usb.thread && !pending && deletes == 1);
     prepare(); fail_startup = false;
     assert(iap2_usb_start_worker() == RTCP_OK);
     assert(pending && s_iap2_usb.running);
     assert(cmd_iap2_stop()); /* Before first scheduling: no late protocol TX. */
     assert(!s_iap2_usb.running && !s_iap2_usb.run && !s_iap2_usb.session);
-    assert(!s_iap2_usb.mfi && !pending && releases == 3 && !writes);
+    assert(!pending && !writes);
     assert(cmd_iap2_stop());
-
-    /* A failed provider install must not decrement another owner's ref. */
-    prepare(); s_iap2_usb.provider_installed = false;
-    assert(iap2_usb_start_worker() == RTCP_OK);
-    assert(cmd_iap2_stop()); assert(releases == 3 && !s_iap2_usb.mfi);
-    prepare(); s_iap2_usb.provider_installed = false; fail_create = true;
-    assert(iap2_usb_start_worker() == RTCP_ENOMEM);
-    assert(releases == 3 && !s_iap2_usb.mfi); fail_create = false;
 
     /* Detach during bootstrap and scheduler creation remains stopped. */
     prepare(); iap2_usb_request_stop();
     assert(iap2_usb_start_worker() == RTCP_OK && !s_iap2_usb.run);
-    assert(cmd_iap2_stop()); assert(!writes && releases == 4);
+    assert(cmd_iap2_stop()); assert(!writes);
     prepare(); detached_in_create = true;
     assert(iap2_usb_start_worker() == RTCP_OK && !s_iap2_usb.run);
     detached_in_create = false;
-    assert(cmd_iap2_stop()); assert(!writes && releases == 5);
+    assert(cmd_iap2_stop()); assert(!writes);
 
     prepare(); assert(iap2_usb_start_worker() == RTCP_OK);
     self = pending; assert(!cmd_iap2_stop());
-    assert(s_iap2_usb.run && s_iap2_usb.running && releases == 5); self = NULL;
+    assert(s_iap2_usb.run && s_iap2_usb.running); self = NULL;
     hold_worker = true;
     assert(carplay_usb_close_session() == RTCP_ETIMEDOUT);
-    assert(s_iap2_usb.running && s_iap2_usb.session && releases == 5 && !closes);
+    assert(s_iap2_usb.running && s_iap2_usb.session && !closes);
     assert(!activation_revoked);
     assert(usb_call_enter()); usb_call_leave(); /* timeout releases gate only */
     hold_worker = false;
     assert(carplay_usb_close_session() == RTCP_OK);
-    assert(!s_iap2_usb.running && releases == 6 && closes == 1);
+    assert(!s_iap2_usb.running && closes == 1);
     assert(activation_revoked == 1);
 
     /* Real competing caller, while the first is blocked in modeled I/O. */
@@ -246,15 +229,15 @@ int main(void) {
     assert(usb_call_enter()); usb_call_leave();
     for (unsigned cycle = 0; cycle < 32; ++cycle) {
         prepare(); assert(iap2_usb_start_worker() == RTCP_OK);
-        assert(cmd_iap2_stop()); assert(!s_iap2_usb.session && !s_iap2_usb.mfi);
+        assert(cmd_iap2_stop()); assert(!s_iap2_usb.session);
     }
-    assert(releases == 38 && !writes);
+    assert(!writes);
     for (unsigned cycle = 0; cycle < 32; ++cycle) {
         run_failed_peer(9); /* real iAP2 RESET event, not an injected callback */
         run_failed_peer(0);
         run_failed_peer(RTCP_EIO);
     }
-    puts("Actual USB iAP2: command contention, rollback, provider ownership, detach generation, self-join, timeout retention and 32 restarts passed");
+    puts("Actual USB iAP2: command contention, rollback, detach generation, self-join, timeout retention and 32 restarts passed");
     puts("Actual USB iAP2: idle then peer RESET, EOF and I/O error clean up once over 32 cycles each");
 }
 '''

@@ -501,7 +501,7 @@ static void serve(wired_phone_t *phone, int network_interface)
     phone->service = rtcp_lockdown_session_service(&phone->lockdown);
     iap2_session_config_t config = {
         .identity = { .name = "Luban CarPlay", .model_identifier = "D213", .manufacturer = "ArtInChip", .serial_number = identity->device_id, .firmware_version = "0.1", .hardware_version = "DEMO128", .language = "en", .provide_location = demo_gnss_available() },
-        .mfi = &demo_mfi,
+        .mfi_provider = options->mfi_provider,
         .tx = iap2_send,
         .get_airplay = get_airplay,
         .on_event = iap2_event,

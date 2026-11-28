@@ -415,7 +415,7 @@ static iap2_session_t *new_link(bool tunnel)
 {
     iap2_session_config_t config = {
         .identity = { .name = "Luban CarPlay", .model_identifier = "D213", .manufacturer = "ArtInChip", .serial_number = radio.identity->device_id, .firmware_version = "0.1", .hardware_version = "DEMO128", .language = "en", .wifi_ssid = radio.ssid, .provide_location = tunnel && demo_gnss_available() },
-        .mfi = &demo_mfi,
+        .mfi_provider = radio.options->mfi_provider,
         .tx = tunnel ? send_tunnel : send_rfcomm,
         .get_wifi = get_wifi,
         .get_airplay = get_airplay,

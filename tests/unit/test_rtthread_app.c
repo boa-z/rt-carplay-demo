@@ -41,6 +41,14 @@ static pthread_barrier_t snapshot_barrier;
 static atomic_bool release_snapshot = ATOMIC_VAR_INIT(false);
 static unsigned snapshot_waits;
 
+int carplay_mfi_provider_get(const rtcp_mfi_provider_t **provider, bool prepare)
+{
+    assert(!prepare);
+    static const rtcp_mfi_provider_t fake;
+    *provider = &fake;
+    return RTCP_OK;
+}
+
 #if defined(RTCARPLAY_SINGLE_SCREEN_FUSION)
 static pthread_mutex_t irq_lock = PTHREAD_MUTEX_INITIALIZER;
 

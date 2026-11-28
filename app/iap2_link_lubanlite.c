@@ -287,55 +287,13 @@ static void link_event(iap2_session_event_t event, void *context)
     }
 }
 
-/*
- * The coprocessor is optional at runtime: a board with the part absent (or
- * wired to another bus/address) must still run the identify-only flow so the
- * transport can be tested.  The probe touches I2C once, when the session is
- * created; on failure the session gets a lazy handle that re-probes at
- * certificate time.
- */
-static const struct rtcp_mfi *link_mfi(void)
-{
-#if defined(RTCARPLAY_MFI)
-    int result = RTCP_EIO;
-
-    /* Two attempts at start time only; the coprocessor may still be
-     * settling (it answered 0x32 to every register right after boot even
-     * with the Bluetooth controller untouched).  If both fail the session
-     * still gets a lazy handle: the first certificate request re-probes,
-     * by which time the phone has connected and the part has recovered. */
-    for (int attempt = 0; attempt < 2; attempt++)
-    {
-        result = rtcp_mfi_lubanlite_start(RTCARPLAY_MFI_I2C_BUS,
-                                          RTCARPLAY_MFI_I2C_ADDR);
-        if (result == RTCP_OK)
-            return rtcp_mfi_lubanlite();
-        if (attempt == 0)
-            rt_thread_mdelay(100);
-    }
-    IAP2_LOG("MFi coprocessor not ready at start rc=%d; retrying when the "
-             "phone requests the certificate",
-             result);
-    const struct rtcp_mfi *lazy = rtcp_mfi_lubanlite_lazy(
-        RTCARPLAY_MFI_I2C_BUS, RTCARPLAY_MFI_I2C_ADDR);
-    if (lazy != NULL)
-        return lazy;
-    IAP2_LOG("MFi lazy handle unavailable; the session will stop after "
-             "identification");
-#else
-    IAP2_LOG("MFi support not built in; the session will stop after "
-             "identification");
-#endif
-    return NULL;
-}
-
 static void link_device_time(const rtcp_device_time_t *update, void *context)
 {
     const iap2_link_t *link = context;
     link->tunnel_callbacks->on_device_time(update, link->tunnel_callbacks->context);
 }
 
-static int link_session_create(iap2_link_t *link, const struct rtcp_mfi *mfi)
+static int link_session_create(iap2_link_t *link, const rtcp_mfi_provider_t *mfi)
 {
     carplay_app_iap2_info_t snapshot;
     int result = carplay_app_iap2_info(&snapshot);
@@ -370,7 +328,7 @@ static int link_session_create(iap2_link_t *link, const struct rtcp_mfi *mfi)
     iap2_session_config_t config;
     memset(&config, 0, sizeof(config));
     config.identity = identity;
-    config.mfi = mfi;
+    config.mfi_provider = mfi;
     config.tx = link_tx;
     config.get_wifi = link_get_wifi;
     config.get_airplay = link_get_airplay;
@@ -408,42 +366,22 @@ static void link_reset_progress(iap2_link_t *link)
     link->identification_accepted = false;
 }
 
-/*
- * After AirPlay pair-verify the phone proves the accessory is MFi licensed
- * with POST /auth-setup: a 33-byte MFiSAP request (X25519 public key) that
- * the accessory answers with its certificate and an AES-CTR-encrypted
- * coprocessor signature.  core/airplay reads a process-wide provider for
- * this; carplay_mfi_provider.c owns its lifecycle so the wired USB transport
- * installs the same provider (without it the handler answers "503 Service
- * Unavailable" and iOS drops the RTSP connection after pair-verify).
- */
-
 static void link_thread(void *parameter)
 {
     iap2_link_t *link = parameter;
-    const struct rtcp_mfi *mfi = NULL;
-    bool provider_installed = false;
+    const rtcp_mfi_provider_t *mfi;
     bool transport_attempted = false;
     int result = RTCP_OK;
     char bt_name[CARPLAY_BT_NAME_MAX + 1];
     if (!s_serve)
         goto done;
 
-    /* Probe the coprocessor before the Bluetooth controller is enabled so a
-     * healthy part is ready by the time the phone connects.  Board logs show
-     * the 2.0C can still answer 0x32 to every register this early in boot
-     * (even with Bluetooth untouched), so link_mfi() keeps a lazy handle
-     * that re-probes at certificate time. */
-    mfi = link_mfi();
-    if (!s_serve)
-        goto done;
-    if (mfi != NULL)
+    result = carplay_mfi_provider_get(&mfi, true);
+    if (result != RTCP_OK)
     {
-        provider_installed = carplay_mfi_provider_install(mfi) == RTCP_OK;
-        if (!provider_installed)
-            IAP2_LOG("AirPlay /auth-setup MFi provider unavailable");
+        IAP2_LOG("MFi provider unavailable rc=%d", result);
+        goto done;
     }
-
     if (!s_serve)
         goto done;
     transport_attempted = true;
@@ -595,13 +533,11 @@ done:
         iap2_session_destroy(link->session);
         link->session = NULL;
     }
-    if (provider_installed)
-        carplay_mfi_provider_release(mfi);
     s_serve = false;
     carplay_bt_release(CARPLAY_BT_OWNER_IAP2);
     IAP2_LOG("service stopped");
     /* Publish quiescence last: a mode switch may now replace the receiver
-     * strings, MFi provider and this singleton's storage. */
+     * strings and this singleton's storage. */
     s_link_thread = NULL;
     link->running = false;
 }
@@ -1141,7 +1077,9 @@ bool carplay_iap2_tunnel_bytes(const uint8_t *bytes, size_t len, void *context)
     {
         link_reset_service(&s_tunnel);
         s_tunnel.tunnel_callbacks = context;
-        if (link_session_create(&s_tunnel, link_mfi()) != RTCP_OK)
+        const rtcp_mfi_provider_t *mfi;
+        if (carplay_mfi_provider_get(&mfi, false) != RTCP_OK ||
+            link_session_create(&s_tunnel, mfi) != RTCP_OK)
             return false;
         s_tunnel.link_up = true;
         IAP2_LOG("Wi-Fi tunnel iAP2 starting");

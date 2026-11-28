@@ -34,3 +34,40 @@ The Linux main loop owns the Receiver and invokes Launcher commands synchronousl
 Build the native Linux LAN Receiver with `cmake -S . -B build/linux -DRTCP_ROOT=/path/to/rt-carplay -DRTCP_MBEDTLS_DIR=/path/to/mbedtls` and `cmake --build build/linux`. `CARPLAY_USB`, `CARPLAY_BLUEZ`, `CARPLAY_ALSA`, `CARPLAY_LVGL` and `CARPLAY_AIC_MPP` are independent opt-ins. Enable LVGL with `-DLVGL_ROOT=/path/to/lvgl`, using the revision in `.ci/dependencies.env`. D21x Linux firmware enables all five options through the Luban integration. The Linux `theme` and `display-mode` files and the RT-Thread `CPUI` record keep their existing formats.
 
 Production Launcher entry points still compose platform-specific pages and bind their platform services. The common UI includes the shell, Dashboard, Phone Hub and Fusion strip. The RT-Thread preview exercises its production Launcher and the common UI widgets.
+
+## Classic accessory authentication
+
+The application selects one `rtcp_mfi_provider_t` for USB iAP2, Bluetooth RFCOMM iAP2, the Wi-Fi tunnel and AirPlay MFiSAP. Linux owns it until the USB worker, Receiver and wireless services have stopped. The RT-Thread product retains the selected provider across Receiver restarts and serializes coprocessor transactions. The hardware adapter retries a failed probe when authentication next needs the chip.
+
+| Backend | Linux | RT-Thread |
+| --- | --- | --- |
+| MFi 2.0C / 3.0 coprocessor | The default for USB and wireless. Select the bus with `--i2c DEVICE`. | `RTCARPLAY_MFI`, with board settings `RTCARPLAY_MFI_I2C_BUS` and `RTCARPLAY_MFI_I2C_ADDR`. |
+| Authorized software identity | `--mfi-mode software` with certificate, key and protocol. `--mfi-mode auto` uses a configured identity or selects hardware when no identity was configured. | `LPKG_RT_CARPLAY_MFI_SOFTWARE` and `RTCARPLAY_DEMO_MFI_SOFTWARE`, with a product provisioning hook. |
+| External device/service | SDK integrators can supply an instance through `rtcp_mfi_provider_t`. | `RTCARPLAY_DEMO_MFI_EXTERNAL` with a product hook. |
+| Synthetic identity | Native CTest generates and removes its own identity. | SDK Host tests exercise the Provider contract independently of a BSP. |
+
+The accessory certificate and signer are provisioned separately from the local AirPlay Ed25519 receiver identity, AirPlay Pair-Setup records, USB Lockdown trust records and BlueZ or Zephyr bonds. Keep the pairing files and Bluetooth bonds across reboot or compatible updates. The Demo reports the backend and protocol version at Linux startup. A `MFi ... provider ready` log confirms local key and certificate initialization. Live iPhone acceptance must be checked separately.
+
+### Linux setup
+
+Enable `RTCP_MFI_SOFTWARE` in the SDK CMake build. To ship a software-only application, set `CARPLAY_MFI_HARDWARE=OFF`. Provide an authorized Classic accessory certificate as DER certificates-only PKCS#7 or a DER X.509 leaf accepted by the peer. The leaf must match the supplied unencrypted DER key. Use `2` for RSA/SHA-1 or `3` for P-256/SHA-256, per the provisioned identity. DiPlay's local Classic configuration uses protocol `3`, a P-256 PKCS#8 DER `identity.pk8` and DER PKCS#7 `certificate.p7b`. The Linux key file must be a regular file owned by the service user, with no group or other permissions. Use mode `0600` or `0400`. Configure all three options together.
+
+```sh
+build/linux/rt-carplay-demo --headless --lan eth0 \
+  --state-dir /var/lib/carplay \
+  --mfi-mode software --mfi-protocol 3 \
+  --mfi-cert /var/lib/carplay-mfi/certificate.p7b \
+  --mfi-key /var/lib/carplay-mfi/identity.pk8
+```
+
+Use `--wired` when libusb is enabled. To enable wireless alongside wired, build with `CARPLAY_BLUEZ=ON` and pass `--wired --wireless wlan0 --ap-config FILE` with the board's configured AP, DHCP and BlueZ services. The same MFi flags apply. Plain `--lan IFACE` keeps the existing LAN development flow and answers `/auth-setup` with 503 when the peer asks for MFiSAP. Missing or unusable explicitly configured credentials keep CarPlay offline. The graphical app can continue showing its local Launcher while retrying startup.
+
+### RT-Thread setup
+
+Build the D213 hardware baseline from the pinned Luban-Lite BSP and matching SDK. For a second firmware variant, use a separate integration tree with the same D213 defconfig, then enable both software symbols in Kconfig and rebuild. These symbols remove the Demo coprocessor backend. The product implements `carplay_product_mfi_load()` and `carplay_product_mfi_release()` declared in `platform/carplay_mfi_provider.h`. Supply the certificate and key through memory buffers from protected, provisioned storage. The D213 reference `/data` volume uses FatFS without per-user access control and the development USB file service can expose files under that mount. The reference load hook returns `RTCP_ENOENT` until the product supplies protected storage. Release and wipe the temporary key buffer after the SDK parses it. Signing uses the board TRNG. To integrate an external signer instead, select `RTCARPLAY_DEMO_MFI_EXTERNAL` and implement `carplay_product_mfi_external()` with the SDK callbacks for both iAP2 and SAP. A missing hook fails closed. The HMI and its local settings remain available.
+
+### Validation
+
+Use the native Linux CMake build with `-DCARPLAY_BUILD_TESTS=ON -DRTCP_MFI_SOFTWARE=ON` and run `ctest --test-dir build/linux --output-on-failure`. The test needs Python 3 and the OpenSSL CLI. It exercises a loopback RTSP request, software and auto selection, missing hardware, malformed configuration, key permissions and key mismatch. The test certificates are generated inside the local test run. Run `make check` with the matching SDK for the modeled RT-Thread USB, wireless and Receiver owner regressions. SDK and Demo revisions for these tests should be updated together in `.ci/dependencies.env` when the SDK revision is published.
+
+On D213 or a Linux PC with compatible USB and Bluetooth hardware, use an iPhone and the authorized identity for the selected variant. First connect by USB and approve trust. Unplug and reconnect, then restart the receiver and verify that the same pairing records work without a new trust prompt. Establish a wireless connection and repeat the restart; then connect a USB cable during wireless projection and verify the configured transport policy. Exercise H.264 video, media audio, Siri and microphone, calls, touch, Now Playing, navigation and vehicle state on each working transport. Record the board, firmware and SDK revisions, mode, iOS version and failure stage. Keep private keys and device credentials out of captured logs and CI artifacts. Host tests and target compilation leave iPhone interoperability and performance to the board run.

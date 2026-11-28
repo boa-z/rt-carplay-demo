@@ -71,6 +71,15 @@ The release keeps the SDK filenames for both the USB IMG and [OTA package](ota.m
 
 Build logs are uploaded on failure. A successful workflow confirms cross-compilation and packaging; physical USB upgrade, NAND boot, panel, audio and iPhone acceptance require a separate board run and are recorded as `NOT_RUN` in the source manifest.
 
+The Demo D213 AIC8800D40 firmware matrix builds hardware and software MFi variants using `RTTHREAD_FIRMWARE_BSP_REF` and `RT_CARPLAY_REF` from `.ci/dependencies.env`. CI checks for the SDK authentication header before running coupled Demo jobs. Update the published SDK and integration pins together to enable those jobs. Locally, place the matching SDK and Demo in their submodule directories of a disposable integration checkout and run one command per checkout.
+
+```sh
+bash tools/build_d213_mfi.sh /path/to/isolated/luban-lite-hardware hardware
+bash tools/build_d213_mfi.sh /path/to/isolated/luban-lite-software software
+```
+
+The wrapper uses the integration's image and CPIO verification and checks the resulting firmware symbols against the selected backend. `output/ci/d213-demo128-nand-carplay-aic8800d40/` contains the output for that checkout. The software variant uses OTA compatibility ID `demo128-nand-carplay-aic8800d40-mfi-software`, which separates its CPIO from the hardware variant. Provision software identities independently of firmware and CI artifacts.
+
 ## CherryUSB baremetal integration
 
 The SDK overlay in `packages/third-party/cherryusb-luban` supplies an interrupt-safe semaphore and bounded queue implementation, foreground timers, Hub polling, SDK upgrade compatibility functions and the ArtInChip upgrade descriptor callbacks. It uses SDK allocation, time, critical-section and delay APIs. It does not pretend to create threads. The generated Hub build copy replaces its thread with `usbh_hub_poll()` only for `KERNEL_BAREMETAL`; the RT-Thread Hub source remains unchanged.

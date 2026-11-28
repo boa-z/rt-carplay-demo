@@ -140,8 +140,8 @@ if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_BT'):
         cpppath.append(os.path.join(zephyr, 'include'))
         cpppath.append(os.path.join(zephyr, 'porting'))
 
-# Luban-Lite MFi seam: 2.0C authentication coprocessor on the I2C bus.
-if GetDepend('LPKG_RT_CARPLAY_LUBANLITE_MFI'):
+# Luban-Lite MFi seam: I2C authentication coprocessor.
+if GetDepend('RTCARPLAY_MFI') and GetDepend('LPKG_RT_CARPLAY_LUBANLITE_MFI'):
     src += Glob('platform/rtcp_mfi_lubanlite.c')
 
 if GetDepend('RTCARPLAY_MICROPHONE'):

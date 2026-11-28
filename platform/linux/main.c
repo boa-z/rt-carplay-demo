@@ -267,6 +267,7 @@ static void usage(FILE *stream)
     fprintf(stream, "rt-carplay-demo [--wired | --lan IFACE] [--headless]\n"
                     "  --wireless AP_IFACE --ap-config FILE --bluetooth-adapter hci0\n"
                     "  --state-dir DIR --framebuffer DEVICE --touch DEVICE --i2c DEVICE\n"
+                    "  --mfi-mode hardware|software|auto --mfi-cert DER --mfi-key DER --mfi-protocol 2|3\n"
                     "  --playback PCM --capture PCM --port PORT --fps 30|60 --gnss TTY\n"
                     "  --help --version\n");
 }
@@ -325,6 +326,7 @@ typedef struct
     const demo_options_t *options;
     demo_identity_t *identity;
     rtcp_pairing_provider_t *pairing;
+    demo_mfi_t **mfi;
     int *lock;
     bool identity_ready;
     int result;
@@ -347,9 +349,8 @@ static void *prepare_credentials(void *data)
     }
     if (credentials->identity_ready)
     {
-        credentials->result = options->wired || options->wireless ? demo_mfi_open(options->i2c) : RTCP_OK;
-        if (credentials->result != RTCP_OK)
-            fprintf(stderr, "carplay: MFi coprocessor unavailable on %s\n", options->i2c);
+        bool use_mfi = options->wired || options->wireless || options->mfi_mode != DEMO_MFI_DEFAULT;
+        credentials->result = use_mfi ? demo_mfi_open(options, credentials->mfi) : RTCP_OK;
     }
     atomic_store(&credentials->finished, true);
     return NULL;
@@ -359,6 +360,7 @@ static int run(demo_options_t *options, int *state_lock)
 {
     rtcp_receiver_config_t config = { 0 };
     demo_identity_t identity = { 0 };
+    demo_mfi_t *mfi = NULL;
     rtcp_receiver_t *receiver = NULL;
     mdns_responder_t *mdns = NULL;
     int route_watch = -1;
@@ -380,6 +382,7 @@ static int run(demo_options_t *options, int *state_lock)
         .options = options,
         .identity = &identity,
         .pairing = &config.platform.pairing,
+        .mfi = &mfi,
         .lock = state_lock,
     };
     while (!demo_stop)
@@ -421,6 +424,8 @@ static int run(demo_options_t *options, int *state_lock)
         result = RTCP_OK;
         goto done;
     }
+    options->mfi_provider = demo_mfi_provider(mfi);
+    config.platform.mfi_provider = options->mfi_provider;
     demo_boot_mark("receiver-identity");
     if (options->gnss && !demo_gnss_open(options->gnss))
         fprintf(stderr, "carplay: GNSS unavailable on %s\n", options->gnss);
@@ -686,7 +691,7 @@ done:
 #ifdef CARPLAY_LVGL
     demo_launcher_close();
 #endif
-    demo_mfi_close();
+    demo_mfi_close(mfi);
     demo_gnss_close();
     mbedtls_platform_zeroize(&identity, sizeof(identity));
     return result;
@@ -706,6 +711,10 @@ int main(int argc, char **argv)
         OPTION_FB,
         OPTION_TOUCH,
         OPTION_I2C,
+        OPTION_MFI_MODE,
+        OPTION_MFI_CERT,
+        OPTION_MFI_KEY,
+        OPTION_MFI_PROTOCOL,
         OPTION_PLAYBACK,
         OPTION_CAPTURE,
         OPTION_PORT,
@@ -723,6 +732,10 @@ int main(int argc, char **argv)
         { "framebuffer", required_argument, NULL, OPTION_FB },
         { "touch", required_argument, NULL, OPTION_TOUCH },
         { "i2c", required_argument, NULL, OPTION_I2C },
+        { "mfi-mode", required_argument, NULL, OPTION_MFI_MODE },
+        { "mfi-cert", required_argument, NULL, OPTION_MFI_CERT },
+        { "mfi-key", required_argument, NULL, OPTION_MFI_KEY },
+        { "mfi-protocol", required_argument, NULL, OPTION_MFI_PROTOCOL },
         { "playback", required_argument, NULL, OPTION_PLAYBACK },
         { "capture", required_argument, NULL, OPTION_CAPTURE },
         { "port", required_argument, NULL, OPTION_PORT },
@@ -784,6 +797,27 @@ int main(int argc, char **argv)
         case OPTION_I2C:
             options.i2c = optarg;
             break;
+        case OPTION_MFI_MODE:
+            if (!strcmp(optarg, "hardware"))
+                options.mfi_mode = DEMO_MFI_HARDWARE;
+            else if (!strcmp(optarg, "software"))
+                options.mfi_mode = DEMO_MFI_SOFTWARE;
+            else if (!strcmp(optarg, "auto"))
+                options.mfi_mode = DEMO_MFI_AUTO;
+            else
+                return 2;
+            break;
+        case OPTION_MFI_CERT:
+            options.mfi_cert = optarg;
+            break;
+        case OPTION_MFI_KEY:
+            options.mfi_key = optarg;
+            break;
+        case OPTION_MFI_PROTOCOL:
+            if (!number(optarg, 3, &value) || value < 2)
+                return 2;
+            options.mfi_protocol = (uint8_t)value;
+            break;
         case OPTION_GNSS:
             options.gnss = optarg;
             break;
@@ -817,6 +851,14 @@ int main(int argc, char **argv)
     if (optind != argc || ((!options.wired || options.wireless) && (!options.interface || !options.interface[0] || strlen(options.interface) >= IF_NAMESIZE)) ||
         (options.wireless && !options.wired))
         return 2;
+    bool has_software_args = options.mfi_cert || options.mfi_key || options.mfi_protocol;
+    if ((options.mfi_mode == DEMO_MFI_SOFTWARE || (options.mfi_mode == DEMO_MFI_AUTO && has_software_args))
+            ? !options.mfi_cert || !options.mfi_key || !options.mfi_protocol
+            : has_software_args)
+    {
+        fprintf(stderr, "carplay: select software or auto and supply the MFi certificate, key and protocol together\n");
+        return 2;
+    }
 #ifndef CARPLAY_BLUEZ
     if (options.wireless)
         return 2;

@@ -9,7 +9,18 @@
 #include "airplay_ed25519.h"
 #include "iap2_session.h"
 #include "phone_track.h"
+#include "rtcp/mfi.h"
 #include "rtcp/receiver.h"
+
+typedef enum
+{
+    DEMO_MFI_DEFAULT,
+    DEMO_MFI_HARDWARE,
+    DEMO_MFI_SOFTWARE,
+    DEMO_MFI_AUTO,
+} demo_mfi_mode_t;
+
+typedef struct demo_mfi demo_mfi_t;
 
 typedef struct
 {
@@ -20,6 +31,11 @@ typedef struct
     const char *framebuffer;
     const char *touch;
     const char *i2c;
+    const char *mfi_cert;
+    const char *mfi_key;
+    demo_mfi_mode_t mfi_mode;
+    uint8_t mfi_protocol;
+    const rtcp_mfi_provider_t *mfi_provider;
     const char *gnss;
     const char *playback;
     const char *capture;
@@ -75,9 +91,9 @@ extern volatile sig_atomic_t demo_stop;
 void demo_boot_mark(const char *stage);
 int demo_identity_open(demo_identity_t *identity, const char *directory,
                        rtcp_pairing_provider_t *pairing);
-int demo_mfi_open(const char *device);
-void demo_mfi_close(void);
-extern const struct rtcp_mfi demo_mfi;
+int demo_mfi_open(const demo_options_t *options, demo_mfi_t **out);
+const rtcp_mfi_provider_t *demo_mfi_provider(const demo_mfi_t *mfi);
+void demo_mfi_close(demo_mfi_t *mfi);
 void demo_track_update(const rtcp_now_playing_details_t *update, void *context);
 void demo_phone_update(const rtcp_phone_status_t *update, void *context);
 void demo_route_update(const rtcp_route_details_t *update, void *context);

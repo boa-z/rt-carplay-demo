@@ -38,6 +38,7 @@
 #include "rtcp/input.h"
 #include "rtcp/rtcp.h"
 #include "rtcp_lubanlite.h"
+#include "carplay_mfi_provider.h"
 #include "rtcp_rtthread.h"
 #if defined(RTCARPLAY_DEMO_LAUNCHER)
 #include "../assets/rt-carplay-oem-png.h"
@@ -2238,7 +2239,14 @@ static int carplay_app_start_owned(const carplay_app_config_t *config)
     }
     app->channel = config->channel != 0U ? config->channel : DEFAULT_CHANNEL;
 
-    int result = build_identity(app, config->pair_code, app->seed_path);
+    const rtcp_mfi_provider_t *mfi_provider;
+    int result = carplay_mfi_provider_get(&mfi_provider, false);
+    if (result != RTCP_OK)
+    {
+        APP_LOG("MFi provider unavailable rc=%d", result);
+        return result;
+    }
+    result = build_identity(app, config->pair_code, app->seed_path);
     if (result != RTCP_OK)
         return result;
 
@@ -2308,6 +2316,7 @@ static int carplay_app_start_owned(const carplay_app_config_t *config)
     memset(&receiver_config, 0, sizeof(receiver_config));
     receiver_config.platform.os = &app->os;
     receiver_config.platform.net = &rtcp_net_rtthread;
+    receiver_config.platform.mfi_provider = mfi_provider;
     fill_pairing(app, &receiver_config.platform.pairing);
     receiver_config.platform.info_plist = app->info_plist;
     receiver_config.platform.info_plist_len = app->info_plist_len;

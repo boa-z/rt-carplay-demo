@@ -71,6 +71,15 @@ Ubuntu 需要安装 `build-essential`、`patch`、`dosfstools`、`mtools`、`dev
 
 失败时上传构建日志。工作流成功表示交叉编译和打包通过；实际 USB 升级、NAND 启动、面板、音频和 iPhone 验收需要另行上板，源码清单中记录为 `NOT_RUN`。
 
+Demo 的 D213 AIC8800D40 固件矩阵使用 `.ci/dependencies.env` 中的 `RTTHREAD_FIRMWARE_BSP_REF` 和 `RT_CARPLAY_REF` 构建硬件与软件 MFi 变体。CI 会先检查 SDK 认证头文件，再执行依赖新接口的 Demo 任务。同步更新已发布的 SDK 和集成固定版本后启用这些任务。本地可将匹配的 SDK 和 Demo 放在独立集成检出目录的对应子模块下，每个目录执行一条命令。
+
+```sh
+bash tools/build_d213_mfi.sh /path/to/isolated/luban-lite-hardware hardware
+bash tools/build_d213_mfi.sh /path/to/isolated/luban-lite-software software
+```
+
+脚本使用集成项目的镜像和 CPIO 校验，并核对最终固件符号是否符合所选后端。该检出目录的产物位于 `output/ci/d213-demo128-nand-carplay-aic8800d40/`。软件版使用 OTA 兼容 ID `demo128-nand-carplay-aic8800d40-mfi-software`，与硬件版的 CPIO 分开。软件身份在固件和 CI 产物之外单独配置。
+
 ## CherryUSB 裸机集成
 
 `packages/third-party/cherryusb-luban` 中的 SDK 适配层提供可与中断安全交互的信号量和有界队列、前台定时器、Hub 轮询、SDK 升级兼容函数及 ArtInChip 升级描述符回调。适配使用 SDK 的内存、时间、临界区和延时接口，不模拟创建线程。生成的 Hub 构建副本仅在 `KERNEL_BAREMETAL` 下以 `usbh_hub_poll()` 替代线程，RT-Thread 使用的 Hub 源码保持原样。

@@ -700,20 +700,10 @@ typedef struct
     bool airplay_unavailable_logged;
     char ip_address[64];
     carplay_app_wired_info_t endpoint;
-    const struct rtcp_mfi *mfi;
-    bool provider_installed; /* release only our successful install */
     unsigned stop_generation;
 } iap2_usb_link_t;
 
 static iap2_usb_link_t s_iap2_usb;
-
-static void iap2_usb_release_provider(iap2_usb_link_t *link)
-{
-    if (link->provider_installed)
-        carplay_mfi_provider_release(link->mfi);
-    link->provider_installed = false;
-    link->mfi = NULL;
-}
 
 /* Caller owns the command gate and has observed worker quiescence. Readers
  * may still load running/thread, so do not memset or reinitialize atomics. */
@@ -730,8 +720,6 @@ static void iap2_usb_reset(unsigned stop_generation)
     s_iap2_usb.airplay_unavailable_logged = false;
     memset(s_iap2_usb.ip_address, 0, sizeof(s_iap2_usb.ip_address));
     memset(&s_iap2_usb.endpoint, 0, sizeof(s_iap2_usb.endpoint));
-    s_iap2_usb.mfi = NULL;
-    s_iap2_usb.provider_installed = false;
     s_iap2_usb.stop_generation = stop_generation;
 }
 
@@ -950,25 +938,6 @@ static iap2_identity_config_t iap2_usb_identity(void)
     return identity;
 }
 
-static const struct rtcp_mfi *iap2_usb_mfi(void)
-{
-#if defined(RTCARPLAY_MFI)
-    int ret = rtcp_mfi_lubanlite_start(RTCARPLAY_MFI_I2C_BUS,
-                                       RTCARPLAY_MFI_I2C_ADDR);
-    if (ret == RTCP_OK)
-    {
-        return rtcp_mfi_lubanlite();
-    }
-    rt_kprintf("[carplay_usb] iap2: MFi coprocessor not ready rc=%d; the "
-               "phone's authentication request will fail\n",
-               ret);
-#else
-    rt_kprintf("[carplay_usb] iap2: MFi support not built in; only "
-               "identification can complete\n");
-#endif
-    return NULL;
-}
-
 static void iap2_usb_thread(void *parameter)
 {
     iap2_usb_link_t *link = parameter;
@@ -1011,7 +980,6 @@ static void iap2_usb_thread(void *parameter)
     iap2_session_link_down(link->session);
     iap2_session_destroy(link->session);
     link->session = NULL;
-    iap2_usb_release_provider(link);
     link->run = false;
     rt_kprintf("[carplay_usb] iap2: stopped (events=%u)\n", link->events);
     /* No link/session access after publishing quiescence. */
@@ -1040,7 +1008,6 @@ static int iap2_usb_start_worker(void)
     }
     iap2_session_destroy(s_iap2_usb.session);
     s_iap2_usb.session = NULL;
-    iap2_usb_release_provider(&s_iap2_usb);
     s_iap2_usb.run = false;
     s_iap2_usb.running = false;
     return result;
@@ -1100,17 +1067,11 @@ static int cmd_iap2(void)
     iap2_session_config_t config;
     memset(&config, 0, sizeof(config));
     config.identity = identity;
-    s_iap2_usb.mfi = iap2_usb_mfi();
-    config.mfi = s_iap2_usb.mfi;
-    if (s_iap2_usb.mfi != NULL)
+    ret = carplay_mfi_provider_get(&config.mfi_provider, true);
+    if (ret != RTCP_OK)
     {
-        s_iap2_usb.provider_installed =
-            carplay_mfi_provider_install(s_iap2_usb.mfi) == RTCP_OK;
-    }
-    if (s_iap2_usb.mfi != NULL && !s_iap2_usb.provider_installed)
-    {
-        rt_kprintf("[carplay_usb] iap2: AirPlay /auth-setup MFi provider "
-                   "unavailable; auth-setup would return 503\n");
+        rt_kprintf("[carplay_usb] iap2: MFi provider unavailable rc=%d\n", ret);
+        return ret;
     }
     config.tx = iap2_usb_tx;
     config.get_airplay = iap2_usb_get_airplay;
@@ -1133,7 +1094,6 @@ static int cmd_iap2(void)
     s_iap2_usb.session = iap2_session_create(&config);
     if (s_iap2_usb.session == NULL)
     {
-        iap2_usb_release_provider(&s_iap2_usb);
         rt_kprintf("[carplay_usb] iap2: cannot allocate the session\n");
         return 0;
     }

@@ -13,6 +13,8 @@ jobs:
   host:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      rtt_auth: ${{ steps.auth-api.outputs.rtt }}
     steps:
       - uses: actions/checkout@v4
       - name: Read pinned dependency versions
@@ -46,10 +48,38 @@ jobs:
           ref: ${{ steps.pins.outputs.LINUX_MBEDTLS_REF }}
           path: .deps/linux-mbedtls
           persist-credentials: false
+      - name: Select pinned SDK for RT-Thread model tests
+        run: |
+          set -euo pipefail
+          . .ci/dependencies.env
+          sdk=.deps/luban-lite/packages/third-party/rt-carplay
+          if [[ $(git -C "$sdk" rev-parse HEAD) != "$RT_CARPLAY_REF" ]]; then
+            git -C "$sdk" fetch --no-tags origin "$RT_CARPLAY_REF"
+            git -C "$sdk" checkout --detach FETCH_HEAD
+          fi
+      - name: Check pinned SDK authentication API
+        id: auth-api
+        run: |
+          set -euo pipefail
+          for platform in rtt linux; do
+            if [[ $platform == rtt ]]; then
+              sdk=.deps/luban-lite/packages/third-party/rt-carplay
+            else
+              sdk=.deps/linux-rt-carplay
+            fi
+            has_api=false
+            if [[ -f "$sdk/include/rtcp/mfi_software.h" ]]; then
+              has_api=true
+            else
+              echo "::notice::The pinned $platform SDK predates the authentication API, so coupled Demo builds for it are skipped."
+            fi
+            echo "$platform=$has_api" >> "$GITHUB_OUTPUT"
+          done
       - name: Validate pinned SDK and Demo
         env:
           ASAN_OPTIONS: detect_leaks=1
           UBSAN_OPTIONS: halt_on_error=1
+          RTTHREAD_AUTH_API: ${{ steps.auth-api.outputs.rtt }}
         run: |
           set -euo pipefail
           . .ci/dependencies.env
@@ -68,15 +98,19 @@ jobs:
           make check-docs
           bash "$rtcp/scripts/fetch-mbedtls.sh"
           make -C "$rtcp" -j8 check 2>&1 | tee build/reports/sdk.log
-          make -j8 check 2>&1 | tee build/reports/demo.log
+          if [[ $RTTHREAD_AUTH_API == true ]]; then
+            make -j8 check 2>&1 | tee build/reports/demo.log
+          fi
       - name: Build and run the native Linux application
+        if: steps.auth-api.outputs.linux == 'true'
         run: |
           set -euo pipefail
           cmake -S . -B build/linux-native -DRTCP_ROOT="$PWD/.deps/linux-rt-carplay" \
             -DRTCP_MBEDTLS_DIR="$PWD/.deps/linux-mbedtls" \
-            -DCARPLAY_LVGL=ON -DLVGL_ROOT="$PWD/.deps/lvgl"
+            -DCARPLAY_LVGL=ON -DLVGL_ROOT="$PWD/.deps/lvgl" -DCARPLAY_BUILD_TESTS=ON
           cmake --build build/linux-native -j8 2>&1 | tee build/reports/linux-native.log
           build/linux-native/rt-carplay-demo --version
+          ctest --test-dir build/linux-native --output-on-failure 2>&1 | tee build/reports/linux-test.log
       - name: Render the LVGL Launcher and Fusion strip
         run: |
           cmake -S tests/launcher_preview -B build/preview -DCMAKE_BUILD_TYPE=Debug \
@@ -94,3 +128,66 @@ jobs:
         with:
           name: carplay-demo-host-${{ github.sha }}
           path: build/reports/
+  d213-firmware:
+    name: D213 RT-Thread (${{ matrix.authentication }})
+    needs: host
+    if: needs.host.outputs.rtt_auth == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        authentication: [hardware, software]
+    env:
+      AUTH_MODE: ${{ matrix.authentication }}
+      BSP: .deps/luban-lite
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Read pinned dependency versions
+        id: pins
+        run: cat .ci/dependencies.env >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: boa-z/luban-lite-carplay
+          ref: ${{ steps.pins.outputs.RTTHREAD_FIRMWARE_BSP_REF }}
+          path: .deps/luban-lite
+          lfs: true
+          submodules: recursive
+          persist-credentials: false
+      - name: Select the Demo revision under test
+        run: |
+          set -euo pipefail
+          . .ci/dependencies.env
+          sdk="$BSP/packages/third-party/rt-carplay"
+          demo="$BSP/application/rt-thread/rt-carplay-demo"
+          if [[ $(git -C "$sdk" rev-parse HEAD) != "$RT_CARPLAY_REF" ]]; then
+            git -C "$sdk" fetch --no-tags origin "$RT_CARPLAY_REF"
+            git -C "$sdk" checkout --detach FETCH_HEAD
+          fi
+          test "$(git -C "$sdk" rev-parse HEAD)" = "$RT_CARPLAY_REF"
+          git -C "$demo" fetch --no-tags "$PWD" HEAD
+          git -C "$demo" checkout --detach FETCH_HEAD
+          test "$(git -C "$demo" rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Install firmware build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake patch dosfstools mtools device-tree-compiler u-boot-tools cpio
+          python3 -m venv .ci-venv
+          .ci-venv/bin/pip install -r "$BSP/.ci/requirements.txt"
+          echo "$PWD/.ci-venv/bin" >> "$GITHUB_PATH"
+      - name: Build and verify D213 firmware
+        run: bash tools/build_d213_mfi.sh "$BSP" "$AUTH_MODE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: d213-rtthread-${{ matrix.authentication }}-${{ github.sha }}
+          path: .deps/luban-lite/output/ci/d213-demo128-nand-carplay-aic8800d40/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: d213-rtthread-${{ matrix.authentication }}-logs-${{ github.sha }}
+          path: .deps/luban-lite/output/ci-logs/d213-demo128-nand-carplay-aic8800d40/
+          if-no-files-found: ignore
