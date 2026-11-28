@@ -63,12 +63,12 @@ static int bulk_send(void *context, const uint8_t *bytes, size_t length)
     int transferred;
     if (atomic_load(&worker_stop) ||
         libusb_bulk_transfer(phone->handle, phone->output, (uint8_t *)bytes,
-                              (int)length, &transferred, 1000) != 0 ||
+                             (int)length, &transferred, 1000) != 0 ||
         (size_t)transferred != length)
         return RTCP_EIO;
     if (length && length % phone->packet_size == 0 &&
         libusb_bulk_transfer(phone->handle, phone->output, (uint8_t *)bytes,
-                              0, &transferred, 1000) != 0)
+                             0, &transferred, 1000) != 0)
         return RTCP_EIO;
     return RTCP_OK;
 }
@@ -173,10 +173,18 @@ static int pair(wired_phone_t *phone, uint8_t serial_index)
     if (cached != RTCP_OK && cached != RTCP_ENOENT)
         return cached;
     rtcp_lockdown_session_config_t config = {
-        .open_connection = stream_open, .close_connection = stream_close, .connection_user = phone,
-        .sleep_ms = sleep_retry, .rng = random_bytes, .label = "rt-carplay", .record = &phone->record,
-        .resume_pairing = cached == RTCP_OK, .step_timeout_ms = 5000, .pair_retry_ms = 1000,
-        .pair_attempts = 30, .now_ms = now_ms,
+        .open_connection = stream_open,
+        .close_connection = stream_close,
+        .connection_user = phone,
+        .sleep_ms = sleep_retry,
+        .rng = random_bytes,
+        .label = "rt-carplay",
+        .record = &phone->record,
+        .resume_pairing = cached == RTCP_OK,
+        .step_timeout_ms = 5000,
+        .pair_retry_ms = 1000,
+        .pair_attempts = 30,
+        .now_ms = now_ms,
     };
     result = rtcp_lockdown_session_open(&phone->lockdown, &config);
     const char *error = phone->lockdown.remote_error;
@@ -236,7 +244,7 @@ static bool configuration(libusb_device_handle *handle, rtcp_usb_device_t *choic
 
 static bool configure(wired_phone_t *phone, libusb_device *device, int *network_interface)
 {
-    rtcp_usb_device_t choice = {0};
+    rtcp_usb_device_t choice = { 0 };
     if (!configuration(phone->handle, &choice))
     {
         uint8_t response;
@@ -251,7 +259,7 @@ static bool configure(wired_phone_t *phone, libusb_device *device, int *network_
         }
     }
     int mux = rtcp_usb_find_interface(&choice, RTCP_USB_CLASS_VENDOR,
-                                     RTCP_USB_APPLE_SUBCLASS_USBMUX, RTCP_USB_APPLE_PROTOCOL_USBMUX);
+                                      RTCP_USB_APPLE_SUBCLASS_USBMUX, RTCP_USB_APPLE_PROTOCOL_USBMUX);
     *network_interface = rtcp_usb_carplay_interface_number(&choice);
     if (mux < 0 || *network_interface < 0 ||
         !device_path(device, choice.configuration_value, *network_interface, phone->path))
@@ -296,13 +304,13 @@ static bool configure(wired_phone_t *phone, libusb_device *device, int *network_
         }
     }
     return selected && (selected->alternate_setting == 0 ||
-        libusb_set_interface_alt_setting(phone->handle, interface->number,
-                                         selected->alternate_setting) == 0);
+                        libusb_set_interface_alt_setting(phone->handle, interface->number,
+                                                         selected->alternate_setting) == 0);
 }
 
 static void find_network(wired_phone_t *phone)
 {
-    char path[128], interface[IF_NAMESIZE] = {0};
+    char path[128], interface[IF_NAMESIZE] = { 0 };
     snprintf(path, sizeof(path), "/sys/bus/usb/devices/%s/net", phone->path);
     DIR *directory = opendir(path);
     if (directory)
@@ -318,13 +326,13 @@ static void find_network(wired_phone_t *phone)
         }
         closedir(directory);
     }
-    char address[64] = {0};
+    char address[64] = { 0 };
     if (interface[0])
     {
         int fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
         if (fd >= 0)
         {
-            struct ifreq request = {0};
+            struct ifreq request = { 0 };
             memcpy(request.ifr_name, interface, sizeof(interface));
             if (ioctl(fd, SIOCGIFFLAGS, &request) == 0 && !(request.ifr_flags & IFF_UP))
             {
@@ -354,7 +362,7 @@ static void find_network(wired_phone_t *phone)
     pthread_mutex_lock(&endpoint_lock);
     if (strcmp(endpoint.interface, interface) || strcmp(endpoint.address, address))
     {
-        endpoint = (demo_endpoint_t){0};
+        endpoint = (demo_endpoint_t){ 0 };
         endpoint.generation = ++endpoint_generation;
         memcpy(endpoint.interface, interface, sizeof(interface));
         memcpy(endpoint.address, address, sizeof(address));
@@ -371,10 +379,14 @@ static bool get_airplay(iap2_session_airplay_t *out, void *context)
         return false;
     memcpy(phone->address, snapshot.address, sizeof(phone->address));
     *out = (iap2_session_airplay_t){
-        .airplay_port = snapshot.port, .ip_address = phone->address,
-        .device_identifier = identity->device_id, .public_key = identity->public_key,
-        .source_version = AIRPLAY_INFO_DEFAULT_SOURCE_VERSION, .mdns_ready = true,
-        .event_connected = snapshot.event, .transport_connected = snapshot.transport,
+        .airplay_port = snapshot.port,
+        .ip_address = phone->address,
+        .device_identifier = identity->device_id,
+        .public_key = identity->public_key,
+        .source_version = AIRPLAY_INFO_DEFAULT_SOURCE_VERSION,
+        .mdns_ready = true,
+        .event_connected = snapshot.event,
+        .transport_connected = snapshot.transport,
     };
     return true;
 }
@@ -397,12 +409,15 @@ static void serve(wired_phone_t *phone, int network_interface)
 {
     phone->service = rtcp_lockdown_session_service(&phone->lockdown);
     iap2_session_config_t config = {
-        .identity = { .name = "Luban CarPlay", .model_identifier = "D213", .manufacturer = "ArtInChip",
-                      .serial_number = identity->device_id, .firmware_version = "0.1",
-                      .hardware_version = "DEMO128", .language = "en", .provide_location = demo_gnss_available() },
-        .mfi = &demo_mfi, .tx = iap2_send, .get_airplay = get_airplay, .on_event = iap2_event,
-        .context = phone, .transport = IAP2_SESSION_TRANSPORT_WIRED_USB,
-        .car_play_interface_number = (uint8_t)network_interface, .wired_reinvite_delay_ms = 5000,
+        .identity = { .name = "Luban CarPlay", .model_identifier = "D213", .manufacturer = "ArtInChip", .serial_number = identity->device_id, .firmware_version = "0.1", .hardware_version = "DEMO128", .language = "en", .provide_location = demo_gnss_available() },
+        .mfi = &demo_mfi,
+        .tx = iap2_send,
+        .get_airplay = get_airplay,
+        .on_event = iap2_event,
+        .context = phone,
+        .transport = IAP2_SESSION_TRANSPORT_WIRED_USB,
+        .car_play_interface_number = (uint8_t)network_interface,
+        .wired_reinvite_delay_ms = 5000,
         .on_now_playing_details = demo_track_update,
         .on_phone_status = demo_phone_update,
         .on_route_details = demo_route_update,
@@ -413,7 +428,7 @@ static void serve(wired_phone_t *phone, int network_interface)
     if (!session)
         return;
     iap2_session_link_up(session, rtcp_os_linux.now_ms());
-    demo_gnss_stream_t gnss = {0};
+    demo_gnss_stream_t gnss = { 0 };
     uint64_t next_scan = 0;
     while (!atomic_load(&worker_stop) && !phone->link_failed)
     {
@@ -469,7 +484,7 @@ static void *work(void *context)
             if (configure(phone, device, &interface) && pair(phone, descriptor.iSerialNumber) == RTCP_OK)
                 serve(phone, interface);
             pthread_mutex_lock(&endpoint_lock);
-            endpoint = (demo_endpoint_t){0};
+            endpoint = (demo_endpoint_t){ 0 };
             pthread_mutex_unlock(&endpoint_lock);
             rtcp_lockdown_session_close(&phone->lockdown);
             mbedtls_platform_zeroize(&phone->record, sizeof(phone->record));

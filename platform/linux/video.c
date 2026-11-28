@@ -15,7 +15,12 @@
 #include "mpp_decoder.h"
 #include "rtcp_linux.h"
 
-enum { FRAME_COUNT = 3, FRAME_CAP = 1024 * 1024, CONFIG_CAP = 16 * 1024 };
+enum
+{
+    FRAME_COUNT = 3,
+    FRAME_CAP = 1024 * 1024,
+    CONFIG_CAP = 16 * 1024
+};
 typedef struct
 {
     uint8_t *bytes;
@@ -38,7 +43,9 @@ static struct
     uint8_t config[CONFIG_CAP];
     size_t config_size;
 } video = {
-    .fd = -1, .mutex = PTHREAD_MUTEX_INITIALIZER, .ready = PTHREAD_COND_INITIALIZER,
+    .fd = -1,
+    .mutex = PTHREAD_MUTEX_INITIALIZER,
+    .ready = PTHREAD_COND_INITIALIZER,
 };
 
 static bool contains_idr(const uint8_t *bytes, size_t size)
@@ -107,8 +114,10 @@ static int packet_in(rtcp_video_message_type_t type, uint8_t *bytes, size_t size
 static struct mpp_decoder *open_decoder(void)
 {
     struct decode_config config = {
-        .pix_fmt = MPP_FMT_YUV420P, .bitstream_buffer_size = 2 * FRAME_CAP,
-        .packet_count = 4, .extra_frame_num = 2,
+        .pix_fmt = MPP_FMT_YUV420P,
+        .bitstream_buffer_size = 2 * FRAME_CAP,
+        .packet_count = 4,
+        .extra_frame_num = 2,
     };
     struct mpp_decoder *decoder = mpp_decoder_create(MPP_CODEC_VIDEO_DECODER_H264);
     if (decoder && mpp_decoder_init(decoder, &config) == DEC_OK)
@@ -120,7 +129,7 @@ static struct mpp_decoder *open_decoder(void)
 
 static bool submit(struct mpp_decoder *decoder, const encoded_frame_t *frame, unsigned flags)
 {
-    struct mpp_packet packet = {0};
+    struct mpp_packet packet = { 0 };
     if (mpp_decoder_get_packet(decoder, &packet, (int)frame->size) != DEC_OK)
         return false;
     memcpy(packet.data, frame->bytes, frame->size);
@@ -235,7 +244,7 @@ static void *decode(void *context)
         encoded_frame_t config = { .bytes = extra, .size = video.config_size };
         if (changed && config.size)
             memcpy(extra, video.config, config.size);
-        encoded_frame_t frame = {0};
+        encoded_frame_t frame = { 0 };
         if (video.count)
             frame = video.frames[video.first];
         if (changed)
@@ -251,7 +260,7 @@ static void *decode(void *context)
             continue;
         }
         bool ok = frame.size && !needs_config &&
-            submit(decoder, &frame, frame.idr ? PACKET_FLAG_KEY : 0);
+                  submit(decoder, &frame, frame.idr ? PACKET_FLAG_KEY : 0);
         video.first = (video.first + 1) % FRAME_COUNT;
         --video.count;
         pthread_mutex_unlock(&video.mutex);
@@ -308,7 +317,7 @@ int demo_video_open(const demo_options_t *options, rtcp_media_backend_t *media)
     }
     carplay_fusion_set_mode(CARPLAY_FULLSCREEN);
     carplay_fusion_set_projection_hidden(true);
-    carplay_fusion_set_vehicle(&(carplay_vehicle_sample_t){0});
+    carplay_fusion_set_vehicle(&(carplay_vehicle_sample_t){ 0 });
     video.waiting_idr = true;
     for (unsigned index = 0; index < FRAME_COUNT; ++index)
     {

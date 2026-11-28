@@ -17,7 +17,10 @@
 static const char profile_path[] = "/org/luban/CarPlay/Profile";
 static const char agent_path[] = "/org/luban/CarPlay/Agent";
 static const char uuid[] = "00000000-deca-fade-deca-deafdecacaff";
-enum { RFCOMM_CHANNEL = 8 };
+enum
+{
+    RFCOMM_CHANNEL = 8
+};
 static const char service_record[] =
     "<record>"
     "<attribute id='0x0001'><sequence><uuid value='%s'/></sequence></attribute>"
@@ -115,8 +118,8 @@ static bool adapter_peer(const char *device)
 }
 
 static void method(GDBusConnection *connection, const gchar *sender, const gchar *object,
-                    const gchar *interface, const gchar *operation, GVariant *arguments,
-                    GDBusMethodInvocation *invocation, gpointer context)
+                   const gchar *interface, const gchar *operation, GVariant *arguments,
+                   GDBusMethodInvocation *invocation, gpointer context)
 {
     (void)connection;
     (void)object;
@@ -214,11 +217,11 @@ static bool bluetooth_start(void)
     if (!radio.bus)
         return false;
     radio.owner_watch = g_dbus_connection_signal_subscribe(radio.bus, "org.freedesktop.DBus",
-        "org.freedesktop.DBus", "NameOwnerChanged", "/org/freedesktop/DBus", "org.bluez",
-        G_DBUS_SIGNAL_FLAGS_NONE, owner_changed, NULL, NULL);
+                                                           "org.freedesktop.DBus", "NameOwnerChanged", "/org/freedesktop/DBus", "org.bluez",
+                                                           G_DBUS_SIGNAL_FLAGS_NONE, owner_changed, NULL, NULL);
     GVariant *owner = g_dbus_connection_call_sync(radio.bus, "org.freedesktop.DBus", "/org/freedesktop/DBus",
-        "org.freedesktop.DBus", "GetNameOwner", g_variant_new("(s)", "org.bluez"),
-        G_VARIANT_TYPE("(s)"), G_DBUS_CALL_FLAGS_NONE, 750, NULL, NULL);
+                                                  "org.freedesktop.DBus", "GetNameOwner", g_variant_new("(s)", "org.bluez"),
+                                                  G_VARIANT_TYPE("(s)"), G_DBUS_CALL_FLAGS_NONE, 750, NULL, NULL);
     if (!owner)
         return false;
     g_variant_get(owner, "(s)", &radio.bluez_owner);
@@ -227,15 +230,15 @@ static bool bluetooth_start(void)
     if (!radio.node)
         return false;
     radio.profile = g_dbus_connection_register_object(radio.bus, profile_path, radio.node->interfaces[0],
-                                                       &methods, NULL, NULL, NULL);
+                                                      &methods, NULL, NULL, NULL);
     radio.agent = g_dbus_connection_register_object(radio.bus, agent_path, radio.node->interfaces[1],
-                                                     &methods, NULL, NULL, NULL);
+                                                    &methods, NULL, NULL, NULL);
     if (!radio.profile || !radio.agent || !adapter_property("Powered", g_variant_new_boolean(true)))
         return false;
     radio.agent_registered = register_bluez("org.bluez.AgentManager1", "RegisterAgent",
-                                             g_variant_new("(os)", agent_path, "DisplayYesNo"));
+                                            g_variant_new("(os)", agent_path, "DisplayYesNo"));
     if (!radio.agent_registered || !register_bluez("org.bluez.AgentManager1", "RequestDefaultAgent",
-                                                  g_variant_new("(o)", agent_path)))
+                                                   g_variant_new("(o)", agent_path)))
         return false;
     GVariantBuilder properties;
     g_variant_builder_init(&properties, G_VARIANT_TYPE_VARDICT);
@@ -246,7 +249,7 @@ static bool bluetooth_start(void)
     char *record = g_strdup_printf(service_record, uuid, (unsigned)RFCOMM_CHANNEL);
     g_variant_builder_add(&properties, "{sv}", "ServiceRecord", g_variant_new_take_string(record));
     radio.profile_registered = register_bluez("org.bluez.ProfileManager1", "RegisterProfile",
-        g_variant_new("(os@a{sv})", profile_path, uuid, g_variant_builder_end(&properties)));
+                                              g_variant_new("(os@a{sv})", profile_path, uuid, g_variant_builder_end(&properties)));
     return radio.profile_registered;
 }
 
@@ -279,14 +282,13 @@ static bool get_wifi(iap2_session_wifi_t *output, void *context)
     int fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     if (fd < 0)
         return false;
-    struct ifreq request = {0};
+    struct ifreq request = { 0 };
     snprintf(request.ifr_name, sizeof(request.ifr_name), "%s", radio.options->interface);
     int result = ioctl(fd, SIOCGIFHWADDR, &request);
     close(fd);
     if (result != 0)
         return false;
-    *output = (iap2_session_wifi_t){ .ssid = radio.ssid, .passphrase = radio.password,
-                                   .channel = radio.channel, .security_type = 2 };
+    *output = (iap2_session_wifi_t){ .ssid = radio.ssid, .passphrase = radio.password, .channel = radio.channel, .security_type = 2 };
     memcpy(output->bssid, request.ifr_hwaddr.sa_data, sizeof(output->bssid));
     return true;
 }
@@ -298,10 +300,14 @@ static bool get_airplay(iap2_session_airplay_t *output, void *context)
     if (!radio.receiver || !radio.address[0] || rtcp_receiver_get_state(radio.receiver, &state) != RTCP_OK)
         return false;
     *output = (iap2_session_airplay_t){
-        .airplay_port = rtcp_receiver_port(radio.receiver), .ip_address = radio.address,
-        .device_identifier = radio.identity->device_id, .public_key = radio.identity->public_key,
-        .source_version = AIRPLAY_INFO_DEFAULT_SOURCE_VERSION, .mdns_ready = true,
-        .event_connected = state.input_ready, .transport_connected = state.transport_connected,
+        .airplay_port = rtcp_receiver_port(radio.receiver),
+        .ip_address = radio.address,
+        .device_identifier = radio.identity->device_id,
+        .public_key = radio.identity->public_key,
+        .source_version = AIRPLAY_INFO_DEFAULT_SOURCE_VERSION,
+        .mdns_ready = true,
+        .event_connected = state.input_ready,
+        .transport_connected = state.transport_connected,
     };
     return true;
 }
@@ -333,14 +339,15 @@ static void link_event(iap2_session_event_t event, void *context)
 static iap2_session_t *new_link(bool tunnel)
 {
     iap2_session_config_t config = {
-        .identity = { .name = "Luban CarPlay", .model_identifier = "D213", .manufacturer = "ArtInChip",
-                      .serial_number = radio.identity->device_id, .firmware_version = "0.1",
-                      .hardware_version = "DEMO128", .language = "en", .wifi_ssid = radio.ssid,
-                      .provide_location = tunnel && demo_gnss_available() },
-        .mfi = &demo_mfi, .tx = tunnel ? send_tunnel : send_rfcomm, .get_wifi = get_wifi,
-        .get_airplay = get_airplay, .on_event = link_event,
+        .identity = { .name = "Luban CarPlay", .model_identifier = "D213", .manufacturer = "ArtInChip", .serial_number = radio.identity->device_id, .firmware_version = "0.1", .hardware_version = "DEMO128", .language = "en", .wifi_ssid = radio.ssid, .provide_location = tunnel && demo_gnss_available() },
+        .mfi = &demo_mfi,
+        .tx = tunnel ? send_tunnel : send_rfcomm,
+        .get_wifi = get_wifi,
+        .get_airplay = get_airplay,
+        .on_event = link_event,
         .context = tunnel ? &radio.tunnel_failed : &radio.link_failed,
-        .airplay_tunnel = tunnel, .on_now_playing_details = tunnel ? demo_track_update : NULL,
+        .airplay_tunnel = tunnel,
+        .on_now_playing_details = tunnel ? demo_track_update : NULL,
         .on_phone_status = tunnel ? demo_phone_update : NULL,
         .on_route_details = tunnel ? demo_route_update : NULL,
     };
@@ -360,7 +367,7 @@ static void tunnel_stop(void *context)
         radio.tunnel = NULL;
     }
     radio.tunnel_failed = false;
-    radio.gnss = (demo_gnss_stream_t){0};
+    radio.gnss = (demo_gnss_stream_t){ 0 };
 }
 
 static bool tunnel_bytes(const uint8_t *bytes, size_t length, void *context)
@@ -396,8 +403,7 @@ static bool handoff(const char *device, void *context)
 
 void demo_wireless_backend(rtcp_iap2_backend_t *backend)
 {
-    *backend = (rtcp_iap2_backend_t){ .on_bytes = tunnel_bytes, .on_tick = tunnel_tick,
-                                    .on_stop = tunnel_stop, .disable_bluetooth = handoff };
+    *backend = (rtcp_iap2_backend_t){ .on_bytes = tunnel_bytes, .on_tick = tunnel_tick, .on_stop = tunnel_stop, .disable_bluetooth = handoff };
 }
 
 static void rfcomm_close(void)
@@ -442,8 +448,7 @@ void demo_wireless_step(rtcp_receiver_t *receiver, const char *ip, bool active)
                 demo_wireless_discoverable();
         }
     }
-    if (!radio.receiver || radio.link_failed || (radio.handoff && !radio.tunnel_failed &&
-        iap2_session_is_authenticated(radio.tunnel) && iap2_session_identification_accepted(radio.tunnel)))
+    if (!radio.receiver || radio.link_failed || (radio.handoff && !radio.tunnel_failed && iap2_session_is_authenticated(radio.tunnel) && iap2_session_identification_accepted(radio.tunnel)))
         rfcomm_close();
     if (radio.fd < 0)
         return;
@@ -487,7 +492,7 @@ int demo_wireless_configure(const demo_options_t *options, const demo_identity_t
     if (!options->adapter[0] ||
         strspn(options->adapter, "abcdefghijklmnopqrstuvwxyz0123456789") != strlen(options->adapter) ||
         snprintf(radio.adapter_path, sizeof(radio.adapter_path), "/org/bluez/%s", options->adapter) >=
-        (int)sizeof(radio.adapter_path))
+            (int)sizeof(radio.adapter_path))
         return RTCP_EINVAL;
     FILE *configuration = fopen(options->ap_config, "r");
     if (!configuration)

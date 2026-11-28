@@ -135,12 +135,11 @@ int demo_identity_open(demo_identity_t *identity, const char *directory,
     int result = file_load(path, seed, sizeof(seed), &length, &exists);
     if (result == RTCP_OK && !exists)
     {
-        result = random_bytes(seed, sizeof(seed), NULL) ?
-            carplay_file_save(path, seed, sizeof(seed)) : RTCP_EIO;
+        result = random_bytes(seed, sizeof(seed), NULL) ? carplay_file_save(path, seed, sizeof(seed)) : RTCP_EIO;
         length = sizeof(seed);
     }
     bool ready = result == RTCP_OK && length == sizeof(seed) &&
-        airplay_ed25519_keypair_from_seed(seed, &identity->keys);
+                 airplay_ed25519_keypair_from_seed(seed, &identity->keys);
     mbedtls_platform_zeroize(seed, sizeof(seed));
     if (!ready)
         return RTCP_EIO;
@@ -160,14 +159,20 @@ int demo_identity_open(demo_identity_t *identity, const char *directory,
         .accessory_identifier = (const uint8_t *)identity->device_id,
         .accessory_identifier_len = strlen(identity->device_id),
         .accessory_public_key = key,
-        .random = random_bytes, .sign_accessory = sign, .verify_controller = verify,
-        .save_pairing = airplay_pairing_store_save_pairing, .provider_context = identity,
+        .random = random_bytes,
+        .sign_accessory = sign,
+        .verify_controller = verify,
+        .save_pairing = airplay_pairing_store_save_pairing,
+        .provider_context = identity,
     };
     pairing->pair_verify = (rtcp_pair_verify_provider_t){
         .accessory_identifier = pairing->pair_setup.accessory_identifier,
         .accessory_identifier_len = pairing->pair_setup.accessory_identifier_len,
-        .random = random_bytes, .sign_accessory = sign, .verify_controller = verify,
-        .lookup_controller = airplay_pairing_store_lookup_controller, .provider_context = identity,
+        .random = random_bytes,
+        .sign_accessory = sign,
+        .verify_controller = verify,
+        .lookup_controller = airplay_pairing_store_lookup_controller,
+        .provider_context = identity,
     };
     return RTCP_OK;
 }

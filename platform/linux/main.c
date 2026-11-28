@@ -54,7 +54,7 @@ void demo_track_update(const rtcp_now_playing_details_t *update, void *context)
     (void)context;
     pthread_mutex_lock(&metadata_lock);
     if (update->invalidated)
-        current_track = (demo_track_t){0};
+        current_track = (demo_track_t){ 0 };
     if (update->item.title)
         snprintf(current_track.title, sizeof(current_track.title), "%s", update->item.title);
     if (update->item.artist)
@@ -73,7 +73,7 @@ void demo_phone_update(const rtcp_phone_status_t *update, void *context)
     switch (update->kind)
     {
     case RTCP_PHONE_STATUS_INVALIDATED:
-        current_phone = (demo_phone_status_t){0};
+        current_phone = (demo_phone_status_t){ 0 };
         break;
     case RTCP_PHONE_STATUS_POWER:
         if (update->data.power.has_battery_level)
@@ -115,7 +115,7 @@ void demo_route_update(const rtcp_route_details_t *update, void *context)
     (void)context;
     pthread_mutex_lock(&metadata_lock);
     if (update->invalidated)
-        current_route = (demo_route_t){0};
+        current_route = (demo_route_t){ 0 };
     else
     {
         const rtcp_route_guidance_t *route = &update->guidance;
@@ -153,8 +153,10 @@ static int join_on_interface(int fd, const uint8_t group[4])
     struct ip_mreqn request = { .imr_ifindex = (int)if_nametoindex(active_interface) };
     memcpy(&request.imr_multiaddr, group, 4);
     return request.imr_ifindex != 0 &&
-        setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &request, sizeof(request)) == 0 &&
-        setsockopt(fd, IPPROTO_IP, IP_MULTICAST_IF, &request, sizeof(request)) == 0 ? RTCP_OK : RTCP_EIO;
+                   setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &request, sizeof(request)) == 0 &&
+                   setsockopt(fd, IPPROTO_IP, IP_MULTICAST_IF, &request, sizeof(request)) == 0
+               ? RTCP_OK
+               : RTCP_EIO;
 }
 
 static bool lan_address(const char *interface, char address[64])
@@ -185,16 +187,22 @@ static mdns_responder_t *advertise(const demo_endpoint_t *endpoint,
         return NULL;
     snprintf(host, sizeof(host), "luban-%.12s", identity->public_key);
     airplay_txt_config_t text = {
-        .device_id = identity->device_id, .public_key = identity->public_key,
-        .pairing_id = identity->device_id, .features = features,
-        .model = info->model, .source_version = AIRPLAY_INFO_DEFAULT_SOURCE_VERSION,
+        .device_id = identity->device_id,
+        .public_key = identity->public_key,
+        .pairing_id = identity->device_id,
+        .features = features,
+        .model = info->model,
+        .source_version = AIRPLAY_INFO_DEFAULT_SOURCE_VERSION,
         .protocol_version = "1.1",
     };
     airplay_txt_record_t records[AIRPLAY_TXT_MAX_RECORDS];
     size_t count = airplay_txt_build(&text, records, AIRPLAY_TXT_MAX_RECORDS);
     uint8_t txt[768];
     mdns_responder_config_t config = {
-        .host_name = host, .instance_name = demo_name, .port = port, .txt = txt,
+        .host_name = host,
+        .instance_name = demo_name,
+        .port = port,
+        .txt = txt,
         .txt_len = airplay_txt_encode(records, count, txt, sizeof(txt)),
     };
     if (!config.txt_len || inet_pton(AF_INET, endpoint->address, config.ipv4) != 1)
@@ -209,10 +217,10 @@ static mdns_responder_t *advertise(const demo_endpoint_t *endpoint,
 static void usage(FILE *stream)
 {
     fprintf(stream, "rt-carplay-demo [--wired | --lan IFACE] [--headless]\n"
-            "  --wireless AP_IFACE --ap-config FILE --bluetooth-adapter hci0\n"
-            "  --state-dir DIR --framebuffer DEVICE --touch DEVICE --i2c DEVICE\n"
-            "  --playback PCM --capture PCM --port PORT --fps 30|60 --gnss TTY\n"
-            "  --help --version\n");
+                    "  --wireless AP_IFACE --ap-config FILE --bluetooth-adapter hci0\n"
+                    "  --state-dir DIR --framebuffer DEVICE --touch DEVICE --i2c DEVICE\n"
+                    "  --playback PCM --capture PCM --port PORT --fps 30|60 --gnss TTY\n"
+                    "  --help --version\n");
 }
 
 static bool number(const char *text, unsigned long maximum, unsigned long *value)
@@ -260,8 +268,8 @@ static int lock_directory(const char *directory)
 
 static int run(demo_options_t *options)
 {
-    rtcp_receiver_config_t config = {0};
-    demo_identity_t identity = {0};
+    rtcp_receiver_config_t config = { 0 };
+    demo_identity_t identity = { 0 };
     rtcp_receiver_t *receiver = NULL;
     mdns_responder_t *mdns = NULL;
     int result = demo_identity_open(&identity, options->directory, &config.platform.pairing);
@@ -299,9 +307,15 @@ static int run(demo_options_t *options)
         demo_audio_open(options, &config.media, &playback, &capture);
 #endif
     airplay_info_plist_config_t info = {
-        .device_id = identity.device_id, .name = demo_name, .model = "ArtInChip",
-        .width_pixels = options->width, .height_pixels = options->height, .max_fps = options->fps,
-        .audio_output = playback, .audio_input = capture, .audio_compressed = playback,
+        .device_id = identity.device_id,
+        .name = demo_name,
+        .model = "ArtInChip",
+        .width_pixels = options->width,
+        .height_pixels = options->height,
+        .max_fps = options->fps,
+        .audio_output = playback,
+        .audio_input = capture,
+        .audio_compressed = playback,
     };
 #ifdef CARPLAY_LVGL
     if (!options->headless)
@@ -329,11 +343,11 @@ static int run(demo_options_t *options)
     if (options->wired && (result = demo_wired_start(options, &identity)) != RTCP_OK)
         goto done;
 #endif
-    demo_endpoint_t active = {0};
+    demo_endpoint_t active = { 0 };
     uint64_t retry_after = 0, advertise_after = 0;
     while (!demo_stop)
     {
-        demo_endpoint_t endpoint = {0};
+        demo_endpoint_t endpoint = { 0 };
 #ifdef CARPLAY_USB
         if (options->wired)
             demo_wired_snapshot(&endpoint);
@@ -367,7 +381,7 @@ static int run(demo_options_t *options)
         {
             memcpy(active_interface, endpoint.interface, sizeof(active_interface));
             config.family = endpoint.generation ? RTCP_AF_INET6 : RTCP_AF_INET;
-            config.iap2 = (rtcp_iap2_backend_t){0};
+            config.iap2 = (rtcp_iap2_backend_t){ 0 };
 #ifdef CARPLAY_BLUEZ
             if (options->wireless && !endpoint.generation)
                 demo_wireless_backend(&config.iap2);
@@ -402,7 +416,7 @@ static int run(demo_options_t *options)
         if (options->wireless)
             demo_wireless_step(receiver, active.address, mdns != NULL);
 #endif
-        rtcp_receiver_state_t state = {0};
+        rtcp_receiver_state_t state = { 0 };
         if (receiver)
         {
             rtcp_receiver_poll(receiver, 5);
@@ -458,27 +472,57 @@ done:
 
 int main(int argc, char **argv)
 {
-    enum { OPTION_WIRED = 256, OPTION_LAN, OPTION_WIRELESS, OPTION_AP_CONFIG, OPTION_ADAPTER,
-           OPTION_HEADLESS, OPTION_STATE, OPTION_FB,
-           OPTION_TOUCH, OPTION_I2C, OPTION_PLAYBACK, OPTION_CAPTURE, OPTION_PORT, OPTION_FPS, OPTION_GNSS };
+    enum
+    {
+        OPTION_WIRED = 256,
+        OPTION_LAN,
+        OPTION_WIRELESS,
+        OPTION_AP_CONFIG,
+        OPTION_ADAPTER,
+        OPTION_HEADLESS,
+        OPTION_STATE,
+        OPTION_FB,
+        OPTION_TOUCH,
+        OPTION_I2C,
+        OPTION_PLAYBACK,
+        OPTION_CAPTURE,
+        OPTION_PORT,
+        OPTION_FPS,
+        OPTION_GNSS
+    };
     static const struct option arguments[] = {
-        { "wired", no_argument, NULL, OPTION_WIRED }, { "lan", required_argument, NULL, OPTION_LAN },
+        { "wired", no_argument, NULL, OPTION_WIRED },
+        { "lan", required_argument, NULL, OPTION_LAN },
         { "wireless", required_argument, NULL, OPTION_WIRELESS },
         { "ap-config", required_argument, NULL, OPTION_AP_CONFIG },
         { "bluetooth-adapter", required_argument, NULL, OPTION_ADAPTER },
-        { "headless", no_argument, NULL, OPTION_HEADLESS }, { "state-dir", required_argument, NULL, OPTION_STATE },
-        { "framebuffer", required_argument, NULL, OPTION_FB }, { "touch", required_argument, NULL, OPTION_TOUCH },
-        { "i2c", required_argument, NULL, OPTION_I2C }, { "playback", required_argument, NULL, OPTION_PLAYBACK },
-        { "capture", required_argument, NULL, OPTION_CAPTURE }, { "port", required_argument, NULL, OPTION_PORT },
+        { "headless", no_argument, NULL, OPTION_HEADLESS },
+        { "state-dir", required_argument, NULL, OPTION_STATE },
+        { "framebuffer", required_argument, NULL, OPTION_FB },
+        { "touch", required_argument, NULL, OPTION_TOUCH },
+        { "i2c", required_argument, NULL, OPTION_I2C },
+        { "playback", required_argument, NULL, OPTION_PLAYBACK },
+        { "capture", required_argument, NULL, OPTION_CAPTURE },
+        { "port", required_argument, NULL, OPTION_PORT },
         { "gnss", required_argument, NULL, OPTION_GNSS },
-        { "fps", required_argument, NULL, OPTION_FPS }, { "help", no_argument, NULL, 'h' },
-        { "version", no_argument, NULL, 'V' }, { NULL, 0, NULL, 0 },
+        { "fps", required_argument, NULL, OPTION_FPS },
+        { "help", no_argument, NULL, 'h' },
+        { "version", no_argument, NULL, 'V' },
+        { NULL, 0, NULL, 0 },
     };
     demo_options_t options = {
-        .directory = "/var/lib/carplay", .framebuffer = "/dev/fb0",
-        .ap_config = "/run/carplay/hostapd.conf", .adapter = "hci0",
-        .touch = "auto", .i2c = "/dev/i2c-0", .playback = "default", .capture = "default",
-        .width = 1024, .height = 600, .fps = 30, .wired = true,
+        .directory = "/var/lib/carplay",
+        .framebuffer = "/dev/fb0",
+        .ap_config = "/run/carplay/hostapd.conf",
+        .adapter = "hci0",
+        .touch = "auto",
+        .i2c = "/dev/i2c-0",
+        .playback = "default",
+        .capture = "default",
+        .width = 1024,
+        .height = 600,
+        .fps = 30,
+        .wired = true,
     };
     int option;
     unsigned long value;
@@ -486,19 +530,47 @@ int main(int argc, char **argv)
     {
         switch (option)
         {
-        case OPTION_WIRED: options.wired = true; break;
-        case OPTION_LAN: options.wired = false; options.interface = optarg; break;
-        case OPTION_WIRELESS: options.wireless = true; options.interface = optarg; break;
-        case OPTION_AP_CONFIG: options.ap_config = optarg; break;
-        case OPTION_ADAPTER: options.adapter = optarg; break;
-        case OPTION_HEADLESS: options.headless = true; break;
-        case OPTION_STATE: options.directory = optarg; break;
-        case OPTION_FB: options.framebuffer = optarg; break;
-        case OPTION_TOUCH: options.touch = optarg; break;
-        case OPTION_I2C: options.i2c = optarg; break;
-        case OPTION_GNSS: options.gnss = optarg; break;
-        case OPTION_PLAYBACK: options.playback = optarg; break;
-        case OPTION_CAPTURE: options.capture = optarg; break;
+        case OPTION_WIRED:
+            options.wired = true;
+            break;
+        case OPTION_LAN:
+            options.wired = false;
+            options.interface = optarg;
+            break;
+        case OPTION_WIRELESS:
+            options.wireless = true;
+            options.interface = optarg;
+            break;
+        case OPTION_AP_CONFIG:
+            options.ap_config = optarg;
+            break;
+        case OPTION_ADAPTER:
+            options.adapter = optarg;
+            break;
+        case OPTION_HEADLESS:
+            options.headless = true;
+            break;
+        case OPTION_STATE:
+            options.directory = optarg;
+            break;
+        case OPTION_FB:
+            options.framebuffer = optarg;
+            break;
+        case OPTION_TOUCH:
+            options.touch = optarg;
+            break;
+        case OPTION_I2C:
+            options.i2c = optarg;
+            break;
+        case OPTION_GNSS:
+            options.gnss = optarg;
+            break;
+        case OPTION_PLAYBACK:
+            options.playback = optarg;
+            break;
+        case OPTION_CAPTURE:
+            options.capture = optarg;
+            break;
         case OPTION_PORT:
             if (!number(optarg, UINT16_MAX, &value))
                 return 2;
@@ -509,13 +581,17 @@ int main(int argc, char **argv)
                 return 2;
             options.fps = (uint8_t)value;
             break;
-        case 'h': usage(stdout); return 0;
-        case 'V': printf("rt-carplay %s (%s)\n", rtcp_version_string(), rtcp_build_git_sha()); return 0;
-        default: return 2;
+        case 'h':
+            usage(stdout);
+            return 0;
+        case 'V':
+            printf("rt-carplay %s (%s)\n", rtcp_version_string(), rtcp_build_git_sha());
+            return 0;
+        default:
+            return 2;
         }
     }
-    if (optind != argc || ((!options.wired || options.wireless) &&
-        (!options.interface || !options.interface[0] || strlen(options.interface) >= IF_NAMESIZE)) ||
+    if (optind != argc || ((!options.wired || options.wireless) && (!options.interface || !options.interface[0] || strlen(options.interface) >= IF_NAMESIZE)) ||
         (options.wireless && !options.wired))
         return 2;
 #ifndef CARPLAY_BLUEZ

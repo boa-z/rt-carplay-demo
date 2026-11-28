@@ -32,7 +32,13 @@ LV_FONT_DECLARE(carplay_ui_21);
 LV_FONT_DECLARE(carplay_ui_34);
 LV_FONT_DECLARE(carplay_cjk_full_18);
 LV_FONT_DECLARE(carplay_display_58);
-enum { TOUCH_SLOTS = 16, TOUCH_LOCAL = 1, TOUCH_PHONE = 2, TOUCH_OUTSIDE = 3 };
+enum
+{
+    TOUCH_SLOTS = 16,
+    TOUCH_LOCAL = 1,
+    TOUCH_PHONE = 2,
+    TOUCH_OUTSIDE = 3
+};
 typedef struct
 {
     int x, y;
@@ -88,7 +94,7 @@ static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *source)
 {
     size_t line = (size_t)(area->x2 - area->x1 + 1) * ui.bytes_per_pixel;
     uint8_t *destination = ui.pixels + ui.origin + (size_t)area->y1 * ui.stride +
-        (size_t)area->x1 * ui.bytes_per_pixel;
+                           (size_t)area->x1 * ui.bytes_per_pixel;
     for (int row = area->y1; row <= area->y2; ++row)
     {
         memcpy(destination, source, line);
@@ -142,8 +148,8 @@ static void dispatch(rtcp_receiver_t *receiver)
 #ifdef CARPLAY_AIC_MPP
         local |= ui.fusion_active && x >= ui.width - layout.local_width;
         phone = ui.projected && layout.video_generation == layout.generation &&
-            rtcp_display_map_point(&layout.video_rect, layout.logical_width, layout.logical_height,
-                                   x, y, &mapped_x, &mapped_y);
+                rtcp_display_map_point(&layout.video_rect, layout.logical_width, layout.logical_height,
+                                       x, y, &mapped_x, &mapped_y);
 #endif
         if (!slot->owner)
         {
@@ -379,9 +385,9 @@ static void build_pages(void)
     ui.surface = carplay_launcher_surface(screen, ui.width, ui.height);
     carplay_system_shell_build(&ui.shell, ui.surface, select_page);
     ui.status = carplay_launcher_label(ui.shell.status, "", 24, 9, 820,
-                                        &carplay_ui_17, CARPLAY_STYLE_MUTED);
-    ui.clock = carplay_launcher_label(ui.shell.status, "--:--", 916, 9, 76,
                                        &carplay_ui_17, CARPLAY_STYLE_MUTED);
+    ui.clock = carplay_launcher_label(ui.shell.status, "--:--", 916, 9, 76,
+                                      &carplay_ui_17, CARPLAY_STYLE_MUTED);
     lv_obj_set_style_text_align(ui.clock, LV_TEXT_ALIGN_RIGHT, 0);
     for (unsigned index = 0; index < CARPLAY_SHELL_DESTINATIONS; ++index)
     {
@@ -471,8 +477,8 @@ static void refresh_phone(void)
     snprintf(guidance, sizeof(guidance), "%s%s%s", *direction ? direction : "No active route",
              *direction && route.distance[0] ? " · " : "", *direction ? route.distance : "");
     carplay_ui_set_text(ui.dashboard.route, guidance);
-    carplay_ui_set_text(ui.phone_hub.destination, route.destination[0] ? route.destination :
-                         route.road[0] ? "-" : "No active route");
+    carplay_ui_set_text(ui.phone_hub.destination, route.destination[0] ? route.destination : route.road[0] ? "-"
+                                                                                                           : "No active route");
     carplay_ui_set_text(ui.phone_hub.road, route.road);
     carplay_ui_set_text(ui.phone_hub.turn_distance, route.distance);
     char artist[sizeof(track.artist) + sizeof(track.album) + 3];
@@ -485,7 +491,7 @@ static void refresh_phone(void)
     if (ui.fusion_track)
         lv_label_set_text(ui.fusion_track, track.title[0] ? track.title : "No media playing");
 #endif
-    static const char *const charging[] = { "Not charging", "Charging", "Charged" };
+    static const char * const charging[] = { "Not charging", "Charging", "Charged" };
     const char *power = phone.has_charging && phone.charging < 3 ? charging[phone.charging] : "";
     if (phone.has_battery)
         lv_label_set_text_fmt(ui.power, "Battery %u%%%s%s", (unsigned)phone.battery, *power ? "  /  " : "", power);
@@ -498,11 +504,10 @@ static void refresh_phone(void)
         lv_label_set_text_fmt(ui.cellular, "%s  /  Signal %u", carrier, (unsigned)phone.signal);
     else
         lv_label_set_text(ui.cellular, phone.carrier[0] ? carrier : "Cellular unavailable");
-    static const char *const calls[] = {
+    static const char * const calls[] = {
         "No active call", "Dialing", "Ringing", "Connecting call", "Call active", "Call on hold", "Ending call"
     };
-    lv_label_set_text(ui.call, phone.has_call && phone.call < sizeof(calls) / sizeof(calls[0]) ?
-                      calls[phone.call] : "Call status unavailable");
+    lv_label_set_text(ui.call, phone.has_call && phone.call < sizeof(calls) / sizeof(calls[0]) ? calls[phone.call] : "Call status unavailable");
 }
 
 static bool set_projection(bool enabled, bool fusion)
@@ -591,15 +596,15 @@ int demo_launcher_open(demo_options_t *options)
     ui.alpha_ready = ioctl(ui.fb, AICFB_GET_ALPHA_CONFIG, &ui.original_alpha) == 0;
     ui.original_layer.layer_id = AICFB_LAYER_TYPE_UI;
     ui.fusion_ready = ui.alpha_ready && ui.width >= 512 && ui.width % 16 == 0 &&
-        ioctl(ui.fb, AICFB_GET_LAYER_CONFIG, &ui.original_layer) == 0 && ui.original_layer.enable &&
-        !ui.original_layer.buf.crop_en && !ui.original_layer.pos.x && !ui.original_layer.pos.y &&
-        ui.original_layer.buf.size.width == (int)ui.width && ui.original_layer.buf.size.height == (int)ui.height;
+                      ioctl(ui.fb, AICFB_GET_LAYER_CONFIG, &ui.original_layer) == 0 && ui.original_layer.enable &&
+                      !ui.original_layer.buf.crop_en && !ui.original_layer.pos.x && !ui.original_layer.pos.y &&
+                      ui.original_layer.buf.size.width == (int)ui.width && ui.original_layer.buf.size.height == (int)ui.height;
 #endif
     if (strcmp(options->touch, "auto"))
         ui.touch = open_touch(options->touch);
     else
     {
-        glob_t paths = {0};
+        glob_t paths = { 0 };
         if (glob("/dev/input/event*", 0, NULL, &paths) == 0)
         {
             for (size_t index = 0; index < paths.gl_pathc && ui.touch < 0; ++index)
@@ -701,7 +706,7 @@ void demo_launcher_step(rtcp_receiver_t *receiver, bool projection)
     uint64_t now = rtcp_os_linux.now_ms();
     if (now >= ui.update_after)
     {
-        rtcp_receiver_state_t state = {0};
+        rtcp_receiver_state_t state = { 0 };
         if (receiver)
             rtcp_receiver_get_state(receiver, &state);
         const char *name = ui.options->wireless ? "USB / Wi-Fi" : (ui.options->wired ? "USB" : "LAN");
@@ -709,7 +714,7 @@ void demo_launcher_step(rtcp_receiver_t *receiver, bool projection)
         lv_label_set_text_fmt(ui.status, "%s  ·  %s", name, status);
         carplay_ui_set_text(ui.connection, status);
         carplay_ui_set_text(ui.connection_transport, ui.options->wireless ? "Available over USB and Wi-Fi"
-                                                                         : "Available over USB");
+                                                                          : "Available over USB");
         carplay_ui_set_text(ui.dashboard.connection, status);
         time_t seconds = time(NULL);
         struct tm local;
@@ -729,10 +734,10 @@ void demo_launcher_step(rtcp_receiver_t *receiver, bool projection)
                 lv_obj_add_state(ui.fusion_button, LV_STATE_DISABLED);
         }
         carplay_instruments_update(&ui.dashboard.instruments, layout.vehicle.available,
-                                    layout.vehicle.speed_kph, layout.vehicle.battery_percent);
+                                   layout.vehicle.speed_kph, layout.vehicle.battery_percent);
         if (ui.fusion_panel)
             carplay_instruments_update(&ui.fusion_instruments, layout.vehicle.available,
-                                        layout.vehicle.speed_kph, layout.vehicle.battery_percent);
+                                       layout.vehicle.speed_kph, layout.vehicle.battery_percent);
 #endif
         refresh_phone();
 #ifdef CARPLAY_BLUEZ

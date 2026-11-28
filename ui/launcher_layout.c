@@ -71,16 +71,16 @@ void carplay_dashboard_build(carplay_dashboard_t *dashboard, lv_obj_t *parent,
     lv_obj_t *vehicle = carplay_launcher_panel(parent, 24, 16, 510, 444, 12, CARPLAY_STYLE_CARD);
     carplay_launcher_label(vehicle, "Dashboard", 24, 18, 310, &carplay_ui_34, CARPLAY_STYLE_TEXT);
     dashboard->note = carplay_launcher_label(vehicle, "Demo values", 327, 30, 160,
-                                              &carplay_ui_17, CARPLAY_STYLE_MUTED);
+                                             &carplay_ui_17, CARPLAY_STYLE_MUTED);
     carplay_launcher_label(vehicle, "Speed", 24, 77, 300, &carplay_ui_21, CARPLAY_STYLE_MUTED);
     dashboard->speed = carplay_launcher_label(vehicle, "--", 24, 110, 345,
-                                             &carplay_display_220, CARPLAY_STYLE_TEXT);
+                                              &carplay_display_220, CARPLAY_STYLE_TEXT);
     carplay_launcher_label(vehicle, "km/h", 388, 221, 96, &carplay_ui_34, CARPLAY_STYLE_MUTED);
     lv_obj_t *divider = carplay_launcher_panel(vehicle, 24, 342, 462, 1, 0, CARPLAY_STYLE_LINE_BORDER);
     lv_obj_remove_flag(divider, LV_OBJ_FLAG_CLICKABLE);
     carplay_launcher_label(vehicle, "Battery", 24, 358, 242, &carplay_ui_21, CARPLAY_STYLE_MUTED);
     dashboard->charge = carplay_launcher_label(vehicle, "--", 360, 352, 88,
-                                              &carplay_display_58, CARPLAY_STYLE_TEXT);
+                                               &carplay_display_58, CARPLAY_STYLE_TEXT);
     carplay_launcher_label(vehicle, "%", 450, 369, 35, &carplay_ui_21, CARPLAY_STYLE_MUTED);
     lv_obj_t *bar = lv_bar_create(vehicle);
     dashboard->charge_bar = bar;
@@ -97,7 +97,7 @@ void carplay_dashboard_build(carplay_dashboard_t *dashboard, lv_obj_t *parent,
     lv_obj_t *connection = carplay_launcher_panel(parent, 554, 16, 446, 140, 12, CARPLAY_STYLE_CARD);
     carplay_launcher_label(connection, "Apple CarPlay", 20, 16, 380, &carplay_ui_21, CARPLAY_STYLE_TEXT);
     dashboard->connection = carplay_launcher_label(connection, "", 20, 49, 402,
-                                                    &carplay_ui_18, CARPLAY_STYLE_MUTED);
+                                                   &carplay_ui_18, CARPLAY_STYLE_MUTED);
     lv_obj_t *button = carplay_launcher_panel(connection, 242, 83, 184, 44, 8, CARPLAY_STYLE_TILE);
     lv_obj_center(carplay_launcher_label(button, "Phone Hub", 0, 0, 0,
                                          &carplay_ui_18, CARPLAY_STYLE_ACCENT_TEXT));
@@ -120,7 +120,7 @@ void carplay_dashboard_build(carplay_dashboard_t *dashboard, lv_obj_t *parent,
     lv_obj_t *route = carplay_launcher_panel(parent, 554, 324, 446, 136, 12, CARPLAY_STYLE_CARD);
     carplay_launcher_label(route, "Route guidance", 20, 16, 400, &carplay_ui_21, CARPLAY_STYLE_TEXT);
     dashboard->route = carplay_launcher_label(route, "", 20, 53, 404,
-                                               &carplay_cjk_full_18, CARPLAY_STYLE_MUTED);
+                                              &carplay_cjk_full_18, CARPLAY_STYLE_MUTED);
     lv_label_set_long_mode(dashboard->route, LV_LABEL_LONG_WRAP);
 }
 
@@ -169,7 +169,7 @@ void carplay_phone_hub_build(carplay_phone_hub_t *hub, lv_obj_t *parent, lv_even
     for (unsigned row = 0; row < CARPLAY_HUB_MANEUVER_ROWS; ++row)
     {
         hub->maneuvers[row] = carplay_launcher_label(route, "", 20, 106 + 23 * (int)row, 438,
-                                                    &carplay_cjk_full_18, CARPLAY_STYLE_TEXT);
+                                                     &carplay_cjk_full_18, CARPLAY_STYLE_TEXT);
         lv_label_set_long_mode(hub->maneuvers[row], LV_LABEL_LONG_DOT);
     }
     hub->lane_strip = carplay_launcher_panel(route, 20, 182, 438, 32, 8, CARPLAY_STYLE_SEGMENT);
@@ -199,7 +199,10 @@ lv_obj_t *carplay_connection_card_build(lv_obj_t *parent, lv_obj_t **state, lv_o
 
 lv_obj_t *carplay_settings_frame_build(lv_obj_t *parent, lv_obj_t **heading, lv_event_cb_t go_back)
 {
-    enum { SIDEBAR_WIDTH = 228 };
+    enum
+    {
+        SIDEBAR_WIDTH = 228
+    };
     int height = CARPLAY_LOCAL_HEIGHT - CARPLAY_SHELL_STATUS_HEIGHT - CARPLAY_SHELL_NAV_HEIGHT;
     lv_obj_t *rail = carplay_launcher_panel(parent, 0, 0, SIDEBAR_WIDTH, height, 0, CARPLAY_STYLE_CARD);
     lv_obj_remove_flag(rail, LV_OBJ_FLAG_CLICKABLE);

@@ -14,7 +14,13 @@
 #include "audio_mixer.h"
 #include "rtcp_linux.h"
 
-enum { QUEUE_SIZE = 32, PAYLOAD_MAX = 4096, PERIOD_FRAMES = 480, PCM_SAMPLES = 11520 };
+enum
+{
+    QUEUE_SIZE = 32,
+    PAYLOAD_MAX = 4096,
+    PERIOD_FRAMES = 480,
+    PCM_SAMPLES = 11520
+};
 typedef struct
 {
     rtcp_audio_format_t format;
@@ -74,8 +80,7 @@ static int push(uint16_t type, const uint8_t *bytes, size_t size, const rtcp_aud
     (void)timestamp;
     (void)arrival;
     (void)context;
-    unsigned slot = format->stream_slot_valid ? format->stream_slot :
-        (type == RTCP_AUDIO_STREAM_ALT ? 1U : 0U);
+    unsigned slot = format->stream_slot_valid ? format->stream_slot : (type == RTCP_AUDIO_STREAM_ALT ? 1U : 0U);
     if (slot >= RTCP_AUDIO_MAX_STREAMS || !size || size > PAYLOAD_MAX)
         return RTCP_EINVAL;
     pthread_mutex_lock(&player.mutex);
@@ -154,7 +159,8 @@ static void decode(audio_lane_t *lane, const audio_packet_t *packet, int16_t *pc
     }
     size_t samples = 0;
     if (rtcp_audio_decoder_decode(lane->decoder, packet->bytes, packet->size, pcm,
-                                  PCM_SAMPLES, &samples) == RTCP_OK && samples)
+                                  PCM_SAMPLES, &samples) == RTCP_OK &&
+        samples)
     {
         rtcp_audio_mixer_push(player.mixer, packet->slot, pcm, samples / format->channels,
                               format->sample_rate, format->channels);
@@ -166,7 +172,7 @@ static void *play(void *context)
 {
     (void)context;
     int16_t decoded[PCM_SAMPLES], mixed[PERIOD_FRAMES * 2];
-    audio_lane_t lanes[RTCP_AUDIO_MAX_STREAMS] = {0};
+    audio_lane_t lanes[RTCP_AUDIO_MAX_STREAMS] = { 0 };
     size_t frames = 0, offset = 0;
     while (!atomic_load(&player.stopping))
     {
@@ -198,8 +204,7 @@ static void *play(void *context)
                 lanes[slot] = (audio_lane_t){ .generation = generations[slot] };
                 rtcp_audio_mixer_flush(player.mixer, slot);
             }
-            unsigned lane_gain = slot == 2 ? policy.media_gain :
-                (slot == 1 ? policy.alternate_gain : policy.main_gain);
+            unsigned lane_gain = slot == 2 ? policy.media_gain : (slot == 1 ? policy.alternate_gain : policy.main_gain);
             rtcp_audio_mixer_gain(player.mixer, slot, lane_gain, 0);
         }
         if (have_packet && packet.generation == generations[packet.slot])
@@ -255,7 +260,7 @@ static void *capture(void *context)
         if (offset == frames)
         {
             int encoded = airplay_audio_sender_encode(microphone.sender, samples, frames, false,
-                                                       datagram, sizeof(datagram));
+                                                      datagram, sizeof(datagram));
             if (encoded > 0)
                 microphone.config.net->udp_sendto(microphone.fd, &microphone.config.peer, datagram, (size_t)encoded);
             offset = 0;
@@ -294,7 +299,7 @@ static bool start_input(const rtcp_audio_input_config_t *config, void *context)
     size_t frames = airplay_audio_sender_frames(microphone.sender);
     if (frames && frames <= PCM_SAMPLES / channels)
         microphone.device = open_pcm(microphone.name, SND_PCM_STREAM_CAPTURE,
-                                      config->sender.format.sample_rate, channels);
+                                     config->sender.format.sample_rate, channels);
     if (microphone.device)
         microphone.fd = config->net->udp_open(config->peer.family, 0, false);
     atomic_store(&microphone.stopping, false);

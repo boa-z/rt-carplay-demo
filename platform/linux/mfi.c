@@ -95,7 +95,9 @@ int demo_mfi_open(const char *device)
     if (ioctl(bus_fd, I2C_SLAVE, RTCP_MFI2C_ADDR_DEFAULT) == 0 && info(&detected) == RTCP_OK)
     {
         airplay_mfi_sap_provider_t provider = {
-            .mfi = &demo_mfi, .protocol_major = chip.auth_major, .random = random_bytes,
+            .mfi = &demo_mfi,
+            .protocol_major = chip.auth_major,
+            .random = random_bytes,
         };
         if (airplay_mfi_sap_set_provider(&provider))
             return RTCP_OK;
