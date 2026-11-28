@@ -34,6 +34,12 @@ jobs:
           ref: ${{ steps.pins.outputs.LINUX_LVGL_REF }}
           path: .deps/lvgl
           persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: boa-z/rt-carplay
+          ref: ${{ steps.pins.outputs.LINUX_RT_CARPLAY_REF }}
+          path: .deps/linux-rt-carplay
+          persist-credentials: false
       - name: Validate pinned SDK and Demo
         env:
           ASAN_OPTIONS: detect_leaks=1
@@ -60,8 +66,9 @@ jobs:
       - name: Build and run the native Linux application
         run: |
           set -euo pipefail
-          rtcp="$PWD/.deps/luban-lite/packages/third-party/rt-carplay"
-          cmake -S . -B build/linux-native -DRTCP_ROOT="$rtcp" \
+          mbedtls="$PWD/.deps/luban-lite/packages/third-party/rt-carplay/third_party/mbedtls"
+          cmake -S . -B build/linux-native -DRTCP_ROOT="$PWD/.deps/linux-rt-carplay" \
+            -DRTCP_MBEDTLS_DIR="$mbedtls" \
             -DCARPLAY_LVGL=ON -DLVGL_ROOT="$PWD/.deps/lvgl"
           cmake --build build/linux-native -j8 2>&1 | tee build/reports/linux-native.log
           build/linux-native/rt-carplay-demo --version
