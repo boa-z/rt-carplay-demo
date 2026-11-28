@@ -116,6 +116,7 @@ void demo_video_session(bool live);
 typedef struct
 {
     int (*set_projection)(bool enabled, void *context);
+    void (*request_keyframe)(void *context);
     void (*send_touch)(const rtcp_touch_contact_t *contacts, void *context);
     void *context;
 } demo_launcher_commands_t;

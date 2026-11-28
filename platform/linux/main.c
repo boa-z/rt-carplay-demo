@@ -38,10 +38,13 @@ static const rtcp_oem_icon_t demo_oem_icon = {
 static int launcher_set_projection(bool enabled, void *context)
 {
     rtcp_receiver_t *receiver = *(rtcp_receiver_t **)context;
-    int result = rtcp_receiver_set_projection_enabled(receiver, enabled);
-    if (enabled && result == RTCP_OK)
-        rtcp_receiver_request_screen_keyframe(receiver);
-    return result;
+    return rtcp_receiver_set_projection_enabled(receiver, enabled);
+}
+
+static void launcher_request_keyframe(void *context)
+{
+    rtcp_receiver_t *receiver = *(rtcp_receiver_t **)context;
+    rtcp_receiver_request_screen_keyframe(receiver);
 }
 
 static void launcher_send_touch(const rtcp_touch_contact_t *contacts, void *context)
@@ -371,6 +374,7 @@ static int run(demo_options_t *options)
 #ifdef CARPLAY_LVGL
     const demo_launcher_commands_t launcher = {
         .set_projection = launcher_set_projection,
+        .request_keyframe = launcher_request_keyframe,
         .send_touch = launcher_send_touch,
         .context = &receiver,
     };

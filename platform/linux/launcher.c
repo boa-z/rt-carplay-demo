@@ -699,6 +699,7 @@ void demo_launcher_step(const demo_launcher_commands_t *commands,
             carplay_fusion_set_mode(ui.fusion_selected ? CARPLAY_FUSION : CARPLAY_FULLSCREEN);
             carplay_fusion_resume_projection_on_frame();
             ui.resume_until = now + 5000;
+            commands->request_keyframe(commands->context);
         }
 #endif
     }
